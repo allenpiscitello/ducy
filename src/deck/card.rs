@@ -1,33 +1,22 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Rank {
-    Ace,
-    Two,
-    Three,
-    Four,
-    Five,
-    Six,
-    Seven,
-    Eight,
-    Nine,
-    Ten,
-    Jack,
-    Queen,
-    King,
-}
+use std::fmt::Display;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Suit {
-    Hearts,
-    Diamonds,
-    Clubs,
-    Spades,
-}
+use crate::deck::rank::Rank;
+use crate::deck::suit::Suit;
 
 pub trait Cardlike {
     fn rank(&self) -> Rank;
     fn suit(&self) -> Suit;
 }
 
+pub struct Card<T: Cardlike>(pub T);
+
+impl<T: Cardlike> Display for Card<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.0.rank(), self.0.suit())
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct SimpleCard {
     rank: Rank,
     suit: Suit,
@@ -37,15 +26,28 @@ impl SimpleCard {
     pub fn new(rank: Rank, suit: Suit) -> SimpleCard {
         return SimpleCard { rank, suit };
     }
+
+    pub fn try_from_usize(val: usize) -> Result<Self, String> {
+        Ok(Self {
+            rank: Rank::try_from_usize(val % 13)?,
+            suit: Suit::try_from_usize(val / 13)?,
+        })
+    }
+}
+
+impl Display for dyn Cardlike + '_ {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.rank(), self.suit())
+    }
 }
 
 impl Cardlike for SimpleCard {
     fn rank(&self) -> Rank {
-        self.rank.clone()
+        self.rank
     }
 
     fn suit(&self) -> Suit {
-        self.suit.clone()
+        self.suit
     }
 }
 
@@ -58,5 +60,19 @@ pub mod test {
         let card = SimpleCard::new(Rank::Ace, Suit::Spades);
         assert_eq!(Rank::Ace, card.rank);
         assert_eq!(Suit::Spades, card.suit);
+    }
+
+    #[test]
+    pub fn test_card_try_from_usize_works() {
+        for i in 0..52 {
+            let card = SimpleCard::try_from_usize(i);
+            assert!(card.is_ok())
+        }
+    }
+
+    #[test]
+    pub fn test_display_for_card() {
+        let card = Card(SimpleCard::new(Rank::Ace, Suit::Spades));
+        assert_eq!(format!("{card}"), "As");
     }
 }
