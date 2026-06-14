@@ -5,6 +5,7 @@ use crate::deck::rank::Rank;
 use crate::deck::suit::Suit;
 
 pub mod card;
+pub mod hand_ranker;
 pub mod rank;
 pub mod suit;
 
@@ -64,9 +65,9 @@ mod test {
         deck.seed_deck(1);
         assert_eq!(52, deck.cards_remaining());
 
-        test_card(&mut deck, Suit::Clubs, Rank::Ace);
         test_card(&mut deck, Suit::Clubs, Rank::Two);
         test_card(&mut deck, Suit::Clubs, Rank::Three);
+        test_card(&mut deck, Suit::Clubs, Rank::Four);
 
         Ok(())
     }

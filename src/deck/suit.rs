@@ -9,17 +9,6 @@ pub enum Suit {
     Spades,
 }
 
-impl Display for Suit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Suit::Hearts => write!(f, "h"),
-            Suit::Diamonds => write!(f, "d"),
-            Suit::Clubs => write!(f, "c"),
-            Suit::Spades => write!(f, "s"),
-        }
-    }
-}
-
 impl Suit {
     pub fn try_from_usize(val: usize) -> Result<Self, String> {
         match val {
@@ -28,6 +17,27 @@ impl Suit {
             2 => Ok(Suit::Hearts),
             3 => Ok(Suit::Spades),
             _ => Err("Invalid value".to_owned()),
+        }
+    }
+
+    pub fn try_from_str(val: &char) -> Result<Self, String> {
+        match val {
+            'c' => Ok(Suit::Clubs),
+            'd' => Ok(Suit::Diamonds),
+            'h' => Ok(Suit::Hearts),
+            's' => Ok(Suit::Spades),
+            _ => Err("Invalid value".to_owned()),
+        }
+    }
+}
+
+impl Display for Suit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Suit::Hearts => write!(f, "h"),
+            Suit::Diamonds => write!(f, "d"),
+            Suit::Clubs => write!(f, "c"),
+            Suit::Spades => write!(f, "s"),
         }
     }
 }
