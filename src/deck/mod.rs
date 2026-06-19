@@ -231,7 +231,9 @@ impl DeckBitfield {
         if let Some(sf) = self.get_straight_flush() {
             HandRank::StraightFlush { sf }
         } else {
-            if let Some(quad_index) = Self::find_highest_with_n(&rank_counts, &vec![], 4) {
+            let best_quads = Self::find_highest_with_n(&rank_counts, &vec![], 4);
+
+            if let Some(quad_index) = best_quads {
                 if let Some(kicker_index) =
                     Self::find_highest_with_n(&rank_counts, &vec![quad_index], 1)
                 {
@@ -241,7 +243,9 @@ impl DeckBitfield {
                     };
                 }
             }
-            if let Some(trip_index) = Self::find_highest_with_n(&rank_counts, &vec![], 3) {
+            let best_trips = Self::find_highest_with_n(&rank_counts, &vec![], 3);
+
+            if let Some(trip_index) = best_trips {
                 if let Some(pair_index) =
                     Self::find_highest_with_n(&rank_counts, &vec![trip_index], 2)
                 {
@@ -262,7 +266,7 @@ impl DeckBitfield {
             } else if let Some(s) = self.get_straight() {
                 HandRank::Straight { s }
             } else {
-                if let Some(trip_index) = Self::find_highest_with_n(&rank_counts, &vec![], 3) {
+                if let Some(trip_index) = best_trips {
                     if let Some(c1_index) =
                         Self::find_highest_with_n(&rank_counts, &vec![trip_index], 1)
                     {
@@ -277,7 +281,8 @@ impl DeckBitfield {
                         }
                     }
                 }
-                if let Some(pair1_index) = Self::find_highest_with_n(&rank_counts, &vec![], 2) {
+                let best_pair = Self::find_highest_with_n(&rank_counts, &vec![], 2);
+                if let Some(pair1_index) = best_pair {
                     if let Some(pair2_index) =
                         Self::find_highest_with_n(&rank_counts, &vec![pair1_index], 2)
                     {
@@ -294,7 +299,7 @@ impl DeckBitfield {
                         }
                     }
                 }
-                if let Some(pair_index) = Self::find_highest_with_n(&rank_counts, &vec![], 2) {
+                if let Some(pair_index) = best_pair {
                     if let Some(c1_index) =
                         Self::find_highest_with_n(&rank_counts, &vec![pair_index], 1)
                     {
