@@ -59,7 +59,11 @@ pub struct DeckBitfield {
 
 const SINGLE_SUIT_BITFIELD: u64 = 0b11111111111111;
 const SINGLE_SUIT_HIGH_ACE_BITFIELD: u64 = 0b11111111111110;
-
+const SINGLE_RANK_BITFIELD: u64 = 0b00010000000000000;
+const SINGLE_RANK_FILTER: u64 = SINGLE_RANK_BITFIELD
+    | SINGLE_RANK_BITFIELD << 16
+    | SINGLE_RANK_BITFIELD << 32
+    | SINGLE_RANK_BITFIELD << 48;
 impl DeckBitfield {
     pub fn new() -> Self {
         Self { cards: 0 }
@@ -196,28 +200,131 @@ impl DeckBitfield {
         }
     }
 
+    fn get_rank_counts(&self) -> Vec<u32> {
+        let mut counts = vec![];
+        for i in 0..13 {
+            let filtered = self.cards & (SINGLE_RANK_FILTER >> i);
+            counts.push(filtered.count_ones());
+        }
+        counts
+    }
+
+    fn find_highest_with_n(
+        ranks: &Vec<u32>,
+        indexes_to_exclude: &Vec<usize>,
+        target_count: u32,
+    ) -> Option<usize> {
+        for (index, val) in ranks.iter().enumerate() {
+            if indexes_to_exclude.contains(&index) {
+                continue;
+            } else {
+                if *val >= target_count {
+                    return Some(index);
+                }
+            }
+        }
+        return None;
+    }
+
     pub fn get_rank(&self) -> HandRank {
+        let rank_counts = self.get_rank_counts();
         if let Some(sf) = self.get_straight_flush() {
             HandRank::StraightFlush { sf }
-        } else if let Some(flush_ranks) = self.get_flush() {
-            HandRank::Flush {
-                c1: flush_ranks[0],
-                c2: flush_ranks[1],
-                c3: flush_ranks[2],
-                c4: flush_ranks[3],
-                c5: flush_ranks[4],
-            }
-        } else if let Some(s) = self.get_straight() {
-            HandRank::Straight { s }
         } else {
-            let combined_ranks = self.get_combined_ranks();
-            let ranks = Self::get_highest_five(combined_ranks).unwrap();
-            HandRank::HighCard {
-                c1: ranks[0],
-                c2: ranks[1],
-                c3: ranks[2],
-                c4: ranks[3],
-                c5: ranks[4],
+            if let Some(quad_index) = Self::find_highest_with_n(&rank_counts, &vec![], 4) {
+                if let Some(kicker_index) =
+                    Self::find_highest_with_n(&rank_counts, &vec![quad_index], 1)
+                {
+                    return HandRank::FourOfAKind {
+                        q: Rank::try_from_usize(13 - quad_index - 1).unwrap(),
+                        c: Rank::try_from_usize(13 - kicker_index - 1).unwrap(),
+                    };
+                }
+            }
+            if let Some(trip_index) = Self::find_highest_with_n(&rank_counts, &vec![], 3) {
+                if let Some(pair_index) =
+                    Self::find_highest_with_n(&rank_counts, &vec![trip_index], 2)
+                {
+                    return HandRank::FullHouse {
+                        t: Rank::try_from_usize(13 - trip_index - 1).unwrap(),
+                        p: Rank::try_from_usize(13 - pair_index - 1).unwrap(),
+                    };
+                }
+            }
+            if let Some(flush_ranks) = self.get_flush() {
+                HandRank::Flush {
+                    c1: flush_ranks[0],
+                    c2: flush_ranks[1],
+                    c3: flush_ranks[2],
+                    c4: flush_ranks[3],
+                    c5: flush_ranks[4],
+                }
+            } else if let Some(s) = self.get_straight() {
+                HandRank::Straight { s }
+            } else {
+                if let Some(trip_index) = Self::find_highest_with_n(&rank_counts, &vec![], 3) {
+                    if let Some(c1_index) =
+                        Self::find_highest_with_n(&rank_counts, &vec![trip_index], 1)
+                    {
+                        if let Some(c2_index) =
+                            Self::find_highest_with_n(&rank_counts, &vec![trip_index, c1_index], 1)
+                        {
+                            return HandRank::ThreeOfAKind {
+                                t: Rank::try_from_usize(13 - trip_index - 1).unwrap(),
+                                c1: Rank::try_from_usize(13 - c1_index - 1).unwrap(),
+                                c2: Rank::try_from_usize(13 - c2_index - 1).unwrap(),
+                            };
+                        }
+                    }
+                }
+                if let Some(pair1_index) = Self::find_highest_with_n(&rank_counts, &vec![], 2) {
+                    if let Some(pair2_index) =
+                        Self::find_highest_with_n(&rank_counts, &vec![pair1_index], 2)
+                    {
+                        if let Some(c1_index) = Self::find_highest_with_n(
+                            &rank_counts,
+                            &vec![pair1_index, pair2_index],
+                            2,
+                        ) {
+                            return HandRank::TwoPair {
+                                p1: Rank::try_from_usize(13 - pair1_index - 1).unwrap(),
+                                p2: Rank::try_from_usize(13 - pair2_index - 1).unwrap(),
+                                c1: Rank::try_from_usize(13 - c1_index - 1).unwrap(),
+                            };
+                        }
+                    }
+                }
+                if let Some(pair_index) = Self::find_highest_with_n(&rank_counts, &vec![], 2) {
+                    if let Some(c1_index) =
+                        Self::find_highest_with_n(&rank_counts, &vec![pair_index], 1)
+                    {
+                        if let Some(c2_index) =
+                            Self::find_highest_with_n(&rank_counts, &vec![pair_index, c1_index], 1)
+                        {
+                            if let Some(c3_index) = Self::find_highest_with_n(
+                                &rank_counts,
+                                &vec![pair_index, c1_index, c2_index],
+                                1,
+                            ) {
+                                return HandRank::OnePair {
+                                    p: Rank::try_from_usize(13 - pair_index - 1).unwrap(),
+                                    c1: Rank::try_from_usize(13 - c1_index - 1).unwrap(),
+                                    c2: Rank::try_from_usize(13 - c2_index - 1).unwrap(),
+                                    c3: Rank::try_from_usize(13 - c3_index - 1).unwrap(),
+                                };
+                            }
+                        }
+                    }
+                }
+                let combined_ranks = self.get_combined_ranks();
+                let ranks = Self::get_highest_five(combined_ranks).unwrap();
+                HandRank::HighCard {
+                    c1: ranks[0],
+                    c2: ranks[1],
+                    c3: ranks[2],
+                    c4: ranks[3],
+                    c5: ranks[4],
+                }
             }
         }
     }
@@ -324,15 +431,21 @@ mod test {
         assert_rank!("As 2s 3h 4c 5d", HandRank::Straight { s: Rank::Five });
         assert_rank!("As 2s 3h 4c 5d 6d", HandRank::Straight { s: Rank::Six });
         assert_rank!("6s 2s 3s 4s 5s", HandRank::StraightFlush { sf: Rank::Six });
-
-        // assert_rank!(
-        //     "6s 2s 2h 4s 5s",
-        //     HandRank::OnePair {
-        //         p: Rank::Two,
-        //         c1: Rank::Six,
-        //         c2: Rank::Five,
-        //         c3: Rank::Four
-        //     }
-        // );
+        assert_rank!(
+            "6d 6c 6h 6s 5s",
+            HandRank::FourOfAKind {
+                q: Rank::Six,
+                c: Rank::Five
+            }
+        );
+        assert_rank!(
+            "6s 2s 2h 4s 5s",
+            HandRank::OnePair {
+                p: Rank::Two,
+                c1: Rank::Six,
+                c2: Rank::Five,
+                c3: Rank::Four
+            }
+        );
     }
 }

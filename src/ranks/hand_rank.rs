@@ -41,6 +41,7 @@ pub enum HandRank {
     },
     FourOfAKind {
         q: Rank,
+        c: Rank,
     },
     StraightFlush {
         sf: Rank,
