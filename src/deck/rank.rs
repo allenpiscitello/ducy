@@ -98,7 +98,7 @@ impl Display for Rank {
 
 #[derive(Eq, PartialEq, Debug)]
 pub struct RankBitfield {
-    pub ranks: u32,
+    pub ranks: u16,
 }
 
 impl RankBitfield {
@@ -140,15 +140,15 @@ impl RankBitfield {
     pub fn get_highest_five(&self) -> Option<[Rank; 5]> {
         // we get rid of the low aces since aces are always high
         let ranks_to_check = self.ranks & 0b11111111111110;
-        let count = u32::count_ones(ranks_to_check);
+        let count = u16::count_ones(ranks_to_check);
         if count < 5 {
             None
         } else {
             let mut return_val = vec![];
-            for i in 1..13 {
-                let target = 0b1 << 15 - i;
+            for i in 1..14 {
+                let target = 0b1 << (14 - i);
                 if target & self.ranks == target {
-                    return_val.push(Rank::try_from_usize(15 - i - 1).unwrap());
+                    return_val.push(Rank::try_from_usize(13 - i).unwrap());
                     if return_val.len() == 5 {
                         break;
                     }
@@ -159,7 +159,7 @@ impl RankBitfield {
         }
     }
 
-    fn matches_pattern(&self, required_on_bits: u32, field_length: usize) -> Option<usize> {
+    fn matches_pattern(&self, required_on_bits: u16, field_length: usize) -> Option<usize> {
         for i in 0..(15 - field_length) {
             let must_match = required_on_bits << (14 - field_length - i);
             if must_match & self.ranks == must_match {
