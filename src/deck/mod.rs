@@ -107,6 +107,12 @@ impl DeckBitfield {
         }
     }
 
+    pub fn remove_cards(&mut self, cards: &[Card]) {
+        for card in cards {
+            self.cards ^= Self::get_bits_for_card(card);
+        }
+    }
+
     fn get_single_suit_card_ranks(&self, i: usize) -> u64 {
         self.cards >> (16 * i) & SINGLE_SUIT_BITFIELD
     }
@@ -350,6 +356,7 @@ mod test {
     use crate::deck::DeckBitfield;
     use crate::deck::card::Card;
     use crate::deck::rank::Rank;
+    use crate::deck::suit::Suit;
     use crate::ranks::hand_rank::HandRank;
 
     macro_rules! assert_straight_and_straight_flush {
@@ -455,12 +462,22 @@ mod test {
 
     #[test]
     pub fn has_card() {
-        let empty = DeckBitfield::empty();
-        let full = DeckBitfield::all_cards();
+        let mut empty = DeckBitfield::empty();
+        let mut full = DeckBitfield::all_cards();
 
         for card in Card::all_cards() {
             assert!(!empty.has_card(card));
             assert!(full.has_card(card))
         }
+
+        let two_clubs = Card::new(Rank::Two, Suit::Clubs);
+        let three_clubs = Card::new(Rank::Three, Suit::Clubs);
+
+        empty.insert_cards(&[two_clubs.clone()]);
+        full.remove_cards(&[three_clubs.clone()]);
+        assert!(empty.has_card(two_clubs));
+        assert!(!empty.has_card(three_clubs));
+        assert!(!full.has_card(three_clubs));
+        assert!(full.has_card(two_clubs));
     }
 }
