@@ -1,6 +1,8 @@
+use std::fmt::Display;
+
 use strum::IntoEnumIterator;
 
-use crate::deck::card::{Cardlike, SimpleCard};
+use crate::deck::card::{Card, Cardlike, SimpleCard};
 use crate::deck::rank::Rank;
 use crate::deck::suit::Suit;
 use crate::ranks::hand_rank::HandRank;
@@ -53,8 +55,26 @@ impl Decklike for StandardDeck {
     }
 }
 
+#[derive(Debug)]
 pub struct DeckBitfield {
     cards: u64,
+}
+
+impl Display for DeckBitfield {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut cards = vec![];
+        for i in 0..4 {
+            for j in 0..16 {
+                if self.cards & 0b1 << (16 * i + j) > 0 {
+                    let card = SimpleCard::try_from_usize(i * 16 + j).unwrap();
+                    cards.push(card);
+                }
+            }
+        }
+        let cards_str: Vec<String> = cards.iter().map(|x| format!("{}", Card(*x))).collect();
+        let cards_as_str = cards_str.join(" ");
+        write!(f, "{}", cards_as_str)
+    }
 }
 
 const SINGLE_SUIT_BITFIELD: u64 = 0b11111111111111;
@@ -289,7 +309,7 @@ impl DeckBitfield {
                         if let Some(c1_index) = Self::find_highest_with_n(
                             &rank_counts,
                             &vec![pair1_index, pair2_index],
-                            2,
+                            1,
                         ) {
                             return HandRank::TwoPair {
                                 p1: Rank::try_from_usize(13 - pair1_index - 1).unwrap(),
@@ -414,6 +434,14 @@ mod test {
     #[test]
     pub fn get_hand_ranks() {
         assert_rank!(
+            "3c 4c 5c 3d 4d",
+            HandRank::TwoPair {
+                p1: Rank::Four,
+                p2: Rank::Three,
+                c1: Rank::Five
+            }
+        );
+        assert_rank!(
             "As 2s 3h 4c 6d",
             HandRank::HighCard {
                 c1: Rank::Ace,
@@ -452,5 +480,9 @@ mod test {
                 c3: Rank::Four
             }
         );
+
+        let test_deck = DeckBitfield { cards: 393230 };
+        println!("{}", test_deck.to_string());
+        test_deck.get_rank();
     }
 }

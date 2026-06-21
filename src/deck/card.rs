@@ -62,6 +62,12 @@ impl SimpleCard {
         Ok(Self { val: val as u8 })
     }
 
+    pub fn try_from_iterator(val: usize) -> Result<Self, String> {
+        let suit = val / 13;
+        let rank = val % 13;
+        Ok(Self::try_from_usize(suit * 16 + rank)?)
+    }
+
     pub fn try_from_str(val: &str) -> Result<Self, String> {
         let trimmed = val.trim();
         if trimmed.len() < 2 {
