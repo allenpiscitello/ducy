@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use strum::IntoEnumIterator;
 
-use crate::deck::card::{Card, Cardlike, SimpleCard};
+use crate::deck::card::Card;
 use crate::deck::rank::Rank;
 use crate::deck::suit::Suit;
 use crate::ranks::hand_rank::HandRank;
@@ -11,24 +11,16 @@ pub mod card;
 pub mod rank;
 pub mod suit;
 
-pub trait Decklike {
-    type Card: Cardlike + Copy + Clone;
-
-    fn get_next_card(&mut self) -> Option<Self::Card>;
-
-    fn cards_remaining(&self) -> u8;
+pub struct Deck {
+    cards: Vec<Card>,
 }
 
-pub struct StandardDeck {
-    cards: Vec<SimpleCard>,
-}
-
-impl StandardDeck {
+impl Deck {
     pub fn new() -> Self {
         let mut cards = vec![];
         for suit in Suit::iter() {
             for rank in Rank::iter() {
-                cards.push(SimpleCard::new(rank, suit));
+                cards.push(Card::new(rank, suit));
             }
         }
         Self { cards }
@@ -38,10 +30,8 @@ impl StandardDeck {
     fn seed_deck(&mut self, _seed: i64) {}
 }
 
-impl Decklike for StandardDeck {
-    type Card = SimpleCard;
-
-    fn get_next_card(&mut self) -> Option<Self::Card> {
+impl Deck {
+    fn get_next_card(&mut self) -> Option<Card> {
         // TODO: Make this random in the future
         if self.cards.len() > 0 {
             Some(self.cards.remove(0))
@@ -66,12 +56,12 @@ impl Display for DeckBitfield {
         for i in 0..4 {
             for j in 0..16 {
                 if self.cards & 0b1 << (16 * i + j) > 0 {
-                    let card = SimpleCard::try_from_usize(i * 16 + j).unwrap();
+                    let card = Card::try_from_usize(i * 16 + j).unwrap();
                     cards.push(card);
                 }
             }
         }
-        let cards_str: Vec<String> = cards.iter().map(|x| format!("{}", Card(*x))).collect();
+        let cards_str: Vec<String> = cards.iter().map(|x| format!("{}", *x)).collect();
         let cards_as_str = cards_str.join(" ");
         write!(f, "{}", cards_as_str)
     }
@@ -89,7 +79,7 @@ impl DeckBitfield {
         Self { cards: 0 }
     }
 
-    pub fn insert_cards(&mut self, cards: &[SimpleCard]) {
+    pub fn insert_cards(&mut self, cards: &[Card]) {
         for card in cards {
             let rank_bits: u64 = match card.rank() {
                 Rank::Ace => 1 << 13 | 1,
@@ -357,11 +347,11 @@ impl DeckBitfield {
 
 #[cfg(test)]
 mod test {
+    use crate::deck::Deck;
     use crate::deck::DeckBitfield;
-    use crate::deck::card::SimpleCard;
+    use crate::deck::card::Card;
     use crate::deck::rank::Rank;
     use crate::deck::suit::Suit;
-    use crate::deck::{Decklike, StandardDeck, card::Cardlike};
     use crate::ranks::hand_rank::HandRank;
 
     macro_rules! assert_straight_and_straight_flush {
@@ -381,7 +371,7 @@ mod test {
 
     #[test]
     pub fn deal_a_flop() -> Result<(), String> {
-        let mut deck = StandardDeck::new();
+        let mut deck = Deck::new();
         deck.seed_deck(1);
         assert_eq!(52, deck.cards_remaining());
 
@@ -392,7 +382,7 @@ mod test {
         Ok(())
     }
 
-    pub fn test_card(deck: &mut StandardDeck, suit: Suit, rank: Rank) {
+    pub fn test_card(deck: &mut Deck, suit: Suit, rank: Rank) {
         let card = deck.get_next_card().unwrap();
         assert_eq!(suit, card.suit());
         assert_eq!(rank, card.rank());
@@ -423,9 +413,7 @@ mod test {
 
     pub fn hand_ranker_from_cards(val: &str) -> DeckBitfield {
         let card_strs = val.split(" ");
-        let cards: Vec<SimpleCard> = card_strs
-            .map(|x| SimpleCard::try_from_str(x).unwrap())
-            .collect();
+        let cards: Vec<Card> = card_strs.map(|x| Card::try_from_str(x).unwrap()).collect();
         let mut hand_ranker = DeckBitfield::new();
         hand_ranker.insert_cards(&cards);
         hand_ranker
