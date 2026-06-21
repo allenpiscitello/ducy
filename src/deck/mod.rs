@@ -10,11 +10,11 @@ pub mod rank;
 pub mod suit;
 
 #[derive(Debug)]
-pub struct DeckBitfield {
+pub struct Deck {
     cards: u64,
 }
 
-impl Display for DeckBitfield {
+impl Display for Deck {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut cards = vec![];
         for i in 0..4 {
@@ -33,6 +33,14 @@ impl Display for DeckBitfield {
 
 const SINGLE_SUIT_BITFIELD: u64 = 0b11111111111111;
 const SINGLE_SUIT_HIGH_ACE_BITFIELD: u64 = 0b11111111111110;
+const ALL_CARDS_BITFIELD: u64 = SINGLE_SUIT_BITFIELD
+    | SINGLE_SUIT_BITFIELD << 16
+    | SINGLE_SUIT_BITFIELD << 32
+    | SINGLE_SUIT_BITFIELD << 48;
+const ALL_CARDS_NO_LOW_ACES_BITFIELD: u64 = SINGLE_SUIT_HIGH_ACE_BITFIELD
+    | SINGLE_SUIT_HIGH_ACE_BITFIELD
+    | 16 + SINGLE_SUIT_HIGH_ACE_BITFIELD << 32
+    | SINGLE_SUIT_HIGH_ACE_BITFIELD << 48;
 const SINGLE_RANK_BITFIELD: u64 = 0b00010000000000000;
 const SINGLE_RANK_FILTER: u64 = SINGLE_RANK_BITFIELD
     | SINGLE_RANK_BITFIELD << 16
@@ -57,16 +65,13 @@ const RANKS: [Rank; 13] = [
 
 const SUITS: [Suit; 4] = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
 
-impl DeckBitfield {
+impl Deck {
     pub fn empty() -> Self {
         Self { cards: 0 }
     }
     pub fn all_cards() -> Self {
         Self {
-            cards: SINGLE_SUIT_BITFIELD
-                + (SINGLE_SUIT_BITFIELD << 16)
-                + (SINGLE_SUIT_BITFIELD << 32)
-                + (SINGLE_SUIT_BITFIELD << 48),
+            cards: ALL_CARDS_BITFIELD,
         }
     }
 
@@ -113,6 +118,12 @@ impl DeckBitfield {
         }
     }
 
+    pub fn num_cards(&self) -> u32 {
+        let all_ranks = Self::get_without_low_aces(self.cards);
+
+        u64::count_ones(all_ranks)
+    }
+
     fn get_single_suit_card_ranks(&self, i: usize) -> u64 {
         self.cards >> (16 * i) & SINGLE_SUIT_BITFIELD
     }
@@ -131,11 +142,11 @@ impl DeckBitfield {
         ranks_combined
     }
 
-    pub fn get_straight(&self) -> Option<Rank> {
+    fn get_straight(&self) -> Option<Rank> {
         Self::get_straight_internal(self.get_combined_ranks())
     }
 
-    pub fn get_flush(&self) -> Option<[Rank; 5]> {
+    fn get_flush(&self) -> Option<[Rank; 5]> {
         let mut best: Option<[Rank; 5]> = None;
         for i in 0..4 {
             let bits = self.get_single_suit_card_ranks(i);
@@ -173,7 +184,7 @@ impl DeckBitfield {
         return None;
     }
 
-    pub fn get_straight_flush(&self) -> Option<Rank> {
+    fn get_straight_flush(&self) -> Option<Rank> {
         let mut found: Option<Rank> = None;
         for i in 0..4 {
             let value_to_check = self.get_single_suit_card_ranks(i);
@@ -190,12 +201,8 @@ impl DeckBitfield {
         found
     }
 
-    pub fn get_highest_five(cards: u64) -> Option<[Rank; 5]> {
-        // we get rid of the low aces since aces are always high
-        let mut all_ranks = 0;
-        for i in 0..4 {
-            all_ranks |= (cards >> 16 * i) & SINGLE_SUIT_HIGH_ACE_BITFIELD;
-        }
+    fn get_highest_five(cards: u64) -> Option<[Rank; 5]> {
+        let all_ranks = Self::get_without_low_aces(cards);
 
         let count = u64::count_ones(all_ranks);
         if count < 5 {
@@ -349,11 +356,15 @@ impl DeckBitfield {
             }
         }
     }
+
+    fn get_without_low_aces(cards: u64) -> u64 {
+        cards & ALL_CARDS_NO_LOW_ACES_BITFIELD
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::deck::DeckBitfield;
+    use crate::deck::Deck;
     use crate::deck::card::Card;
     use crate::deck::rank::Rank;
     use crate::deck::suit::Suit;
@@ -397,10 +408,10 @@ mod test {
         );
     }
 
-    pub fn hand_ranker_from_cards(val: &str) -> DeckBitfield {
+    pub fn hand_ranker_from_cards(val: &str) -> Deck {
         let card_strs = val.split(" ");
         let cards: Vec<Card> = card_strs.map(|x| Card::try_from_str(x).unwrap()).collect();
-        let mut hand_ranker = DeckBitfield::empty();
+        let mut hand_ranker = Deck::empty();
         hand_ranker.insert_cards(&cards);
         hand_ranker
     }
@@ -455,15 +466,15 @@ mod test {
             }
         );
 
-        let test_deck = DeckBitfield { cards: 393230 };
+        let test_deck = Deck { cards: 393230 };
         println!("{}", test_deck.to_string());
         test_deck.get_rank();
     }
 
     #[test]
     pub fn has_card() {
-        let mut empty = DeckBitfield::empty();
-        let mut full = DeckBitfield::all_cards();
+        let mut empty = Deck::empty();
+        let mut full = Deck::all_cards();
 
         for card in Card::all_cards() {
             assert!(!empty.has_card(card));
