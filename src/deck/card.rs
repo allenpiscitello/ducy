@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use crate::deck::rank::Rank;
 use crate::deck::suit::Suit;
+use crate::deck::{RANKS, SUITS};
 
 impl Display for Card {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -11,11 +12,11 @@ impl Display for Card {
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub struct Card {
-    val: u8,
+    val: u32,
 }
 
 impl Card {
-    fn get_rank_index(rank: Rank) -> u8 {
+    fn get_rank_index(rank: Rank) -> u32 {
         match rank {
             Rank::Two => 0,
             Rank::Three => 1,
@@ -33,7 +34,7 @@ impl Card {
         }
     }
 
-    fn get_suit_index(suit: Suit) -> u8 {
+    fn get_suit_index(suit: Suit) -> u32 {
         match suit {
             Suit::Clubs => 0,
             Suit::Diamonds => 1,
@@ -49,10 +50,10 @@ impl Card {
     }
 
     pub fn try_from_usize(val: usize) -> Result<Self, String> {
-        if val % 16 >= 13 {
+        if val % 16 >= 13 || val >= 16 * 4 {
             return Err("Invalid value".to_owned());
         }
-        Ok(Self { val: val as u8 })
+        Ok(Self { val: val as u32 })
     }
 
     pub fn try_from_iterator(val: usize) -> Result<Self, String> {
@@ -67,23 +68,50 @@ impl Card {
             return Err("Invalid Value".to_owned());
         }
         let mut chars = val.chars();
-        let rank = chars.next().ok_or("Invalid value".to_owned())?;
+        let rank: char = chars.next().ok_or("Invalid value".to_owned())?;
         let suit = chars.next().ok_or("Invalid value".to_owned())?;
         Ok(Self::new(
             Rank::try_from_str(&rank)?,
             Suit::try_from_str(&suit)?,
         ))
     }
+
+    pub fn all_cards() -> impl Iterator<Item = Card> {
+        CardIterator::new()
+    }
+}
+
+struct CardIterator {
+    last_index: usize,
+}
+
+impl CardIterator {
+    fn new() -> Self {
+        Self { last_index: 0 }
+    }
+}
+
+impl Iterator for CardIterator {
+    type Item = Card;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Ok(card) = Card::try_from_iterator(self.last_index) {
+            self.last_index += 1;
+            Some(card)
+        } else {
+            return None;
+        }
+    }
 }
 
 impl Card {
     pub fn rank(&self) -> Rank {
-        Rank::try_from_usize((self.val % 16) as usize).unwrap()
+        RANKS[(self.val % 16) as usize].clone()
     }
 
     pub fn suit(&self) -> Suit {
-        let suit_val = self.val / 16;
-        Suit::try_from_usize(suit_val as usize).unwrap()
+        let suit_val = (self.val / 16) as usize;
+        SUITS[suit_val]
     }
 }
 
@@ -126,12 +154,14 @@ pub mod test {
 
     #[test]
     pub fn test_from_str() -> Result<(), String> {
-        for i in 0..64 {
-            let result = Card::try_from_usize(i);
+        for i in 0..52 {
+            let result = Card::try_from_iterator(i);
             if let Ok(card) = result {
                 let display: String = format!("{}", card);
                 let other_card = Card::try_from_str(&display)?;
                 assert_eq!(other_card, card);
+            } else {
+                assert!(false);
             }
         }
 

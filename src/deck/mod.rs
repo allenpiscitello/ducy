@@ -1,7 +1,5 @@
 use std::fmt::Display;
 
-use strum::IntoEnumIterator;
-
 use crate::deck::card::Card;
 use crate::deck::rank::Rank;
 use crate::deck::suit::Suit;
@@ -10,40 +8,6 @@ use crate::ranks::hand_rank::HandRank;
 pub mod card;
 pub mod rank;
 pub mod suit;
-
-pub struct Deck {
-    cards: Vec<Card>,
-}
-
-impl Deck {
-    pub fn new() -> Self {
-        let mut cards = vec![];
-        for suit in Suit::iter() {
-            for rank in Rank::iter() {
-                cards.push(Card::new(rank, suit));
-            }
-        }
-        Self { cards }
-    }
-
-    #[cfg(test)]
-    fn seed_deck(&mut self, _seed: i64) {}
-}
-
-impl Deck {
-    fn get_next_card(&mut self) -> Option<Card> {
-        // TODO: Make this random in the future
-        if self.cards.len() > 0 {
-            Some(self.cards.remove(0))
-        } else {
-            None
-        }
-    }
-
-    fn cards_remaining(&self) -> u8 {
-        self.cards.len() as u8
-    }
-}
 
 #[derive(Debug)]
 pub struct DeckBitfield {
@@ -74,36 +38,72 @@ const SINGLE_RANK_FILTER: u64 = SINGLE_RANK_BITFIELD
     | SINGLE_RANK_BITFIELD << 16
     | SINGLE_RANK_BITFIELD << 32
     | SINGLE_RANK_BITFIELD << 48;
+
+const RANKS: [Rank; 13] = [
+    Rank::Two,
+    Rank::Three,
+    Rank::Four,
+    Rank::Five,
+    Rank::Six,
+    Rank::Seven,
+    Rank::Eight,
+    Rank::Nine,
+    Rank::Ten,
+    Rank::Jack,
+    Rank::Queen,
+    Rank::King,
+    Rank::Ace,
+];
+
+const SUITS: [Suit; 4] = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
+
 impl DeckBitfield {
-    pub fn new() -> Self {
+    pub fn empty() -> Self {
         Self { cards: 0 }
+    }
+    pub fn all_cards() -> Self {
+        Self {
+            cards: SINGLE_SUIT_BITFIELD
+                + (SINGLE_SUIT_BITFIELD << 16)
+                + (SINGLE_SUIT_BITFIELD << 32)
+                + (SINGLE_SUIT_BITFIELD << 48),
+        }
+    }
+
+    fn get_bits_for_card(card: &Card) -> u64 {
+        let rank_bits: u64 = match card.rank() {
+            Rank::Ace => 1 << 13 | 1,
+            Rank::Two => 1 << 1,
+            Rank::Three => 1 << 2,
+            Rank::Four => 1 << 3,
+            Rank::Five => 1 << 4,
+            Rank::Six => 1 << 5,
+            Rank::Seven => 1 << 6,
+            Rank::Eight => 1 << 7,
+            Rank::Nine => 1 << 8,
+            Rank::Ten => 1 << 9,
+            Rank::Jack => 1 << 10,
+            Rank::Queen => 1 << 11,
+            Rank::King => 1 << 12,
+        };
+        let suit_shift = match card.suit() {
+            Suit::Clubs => 0,
+            Suit::Diamonds => 16,
+            Suit::Hearts => 32,
+            Suit::Spades => 48,
+        };
+        let bits = rank_bits << suit_shift;
+        bits
+    }
+
+    pub fn has_card(&self, card: Card) -> bool {
+        let target = Self::get_bits_for_card(&card);
+        target == target & self.cards
     }
 
     pub fn insert_cards(&mut self, cards: &[Card]) {
         for card in cards {
-            let rank_bits: u64 = match card.rank() {
-                Rank::Ace => 1 << 13 | 1,
-                Rank::Two => 1 << 1,
-                Rank::Three => 1 << 2,
-                Rank::Four => 1 << 3,
-                Rank::Five => 1 << 4,
-                Rank::Six => 1 << 5,
-                Rank::Seven => 1 << 6,
-                Rank::Eight => 1 << 7,
-                Rank::Nine => 1 << 8,
-                Rank::Ten => 1 << 9,
-                Rank::Jack => 1 << 10,
-                Rank::Queen => 1 << 11,
-                Rank::King => 1 << 12,
-            };
-            let suit_shift = match card.suit() {
-                Suit::Clubs => 0,
-                Suit::Diamonds => 16,
-                Suit::Hearts => 32,
-                Suit::Spades => 48,
-            };
-            let bits = rank_bits << suit_shift;
-            self.cards |= bits;
+            self.cards |= Self::get_bits_for_card(card);
         }
     }
 
@@ -113,7 +113,7 @@ impl DeckBitfield {
 
     fn get_straight_internal(ranks: u64) -> Option<Rank> {
         let result = Self::matches_pattern(ranks, 0b11111, 5);
-        result.map(|x| Rank::try_from_usize(x + 2).unwrap())
+        result.map(|x| RANKS[x + 2])
     }
 
     fn get_combined_ranks(&self) -> u64 {
@@ -199,7 +199,7 @@ impl DeckBitfield {
             for i in 1..14 {
                 let target = 0b1 << (14 - i);
                 if target & cards == target {
-                    return_val.push(Rank::try_from_usize(13 - i).unwrap());
+                    return_val.push(RANKS[13 - i]);
                     if return_val.len() == 5 {
                         break;
                     }
@@ -248,8 +248,8 @@ impl DeckBitfield {
                     Self::find_highest_with_n(&rank_counts, &vec![quad_index], 1)
                 {
                     return HandRank::FourOfAKind {
-                        q: Rank::try_from_usize(13 - quad_index - 1).unwrap(),
-                        c: Rank::try_from_usize(13 - kicker_index - 1).unwrap(),
+                        q: RANKS[13 - quad_index - 1],
+                        c: RANKS[13 - kicker_index - 1],
                     };
                 }
             }
@@ -260,8 +260,8 @@ impl DeckBitfield {
                     Self::find_highest_with_n(&rank_counts, &vec![trip_index], 2)
                 {
                     return HandRank::FullHouse {
-                        t: Rank::try_from_usize(13 - trip_index - 1).unwrap(),
-                        p: Rank::try_from_usize(13 - pair_index - 1).unwrap(),
+                        t: RANKS[13 - trip_index - 1],
+                        p: RANKS[13 - pair_index - 1],
                     };
                 }
             }
@@ -284,9 +284,9 @@ impl DeckBitfield {
                             Self::find_highest_with_n(&rank_counts, &vec![trip_index, c1_index], 1)
                         {
                             return HandRank::ThreeOfAKind {
-                                t: Rank::try_from_usize(13 - trip_index - 1).unwrap(),
-                                c1: Rank::try_from_usize(13 - c1_index - 1).unwrap(),
-                                c2: Rank::try_from_usize(13 - c2_index - 1).unwrap(),
+                                t: RANKS[13 - trip_index - 1],
+                                c1: RANKS[13 - c1_index - 1],
+                                c2: RANKS[13 - c2_index - 1],
                             };
                         }
                     }
@@ -302,9 +302,9 @@ impl DeckBitfield {
                             1,
                         ) {
                             return HandRank::TwoPair {
-                                p1: Rank::try_from_usize(13 - pair1_index - 1).unwrap(),
-                                p2: Rank::try_from_usize(13 - pair2_index - 1).unwrap(),
-                                c1: Rank::try_from_usize(13 - c1_index - 1).unwrap(),
+                                p1: RANKS[13 - pair1_index - 1],
+                                p2: RANKS[13 - pair2_index - 1],
+                                c1: RANKS[13 - c1_index - 1],
                             };
                         }
                     }
@@ -322,10 +322,10 @@ impl DeckBitfield {
                                 1,
                             ) {
                                 return HandRank::OnePair {
-                                    p: Rank::try_from_usize(13 - pair_index - 1).unwrap(),
-                                    c1: Rank::try_from_usize(13 - c1_index - 1).unwrap(),
-                                    c2: Rank::try_from_usize(13 - c2_index - 1).unwrap(),
-                                    c3: Rank::try_from_usize(13 - c3_index - 1).unwrap(),
+                                    p: RANKS[13 - pair_index - 1],
+                                    c1: RANKS[13 - c1_index - 1],
+                                    c2: RANKS[13 - c2_index - 1],
+                                    c3: RANKS[13 - c3_index - 1],
                                 };
                             }
                         }
@@ -347,11 +347,9 @@ impl DeckBitfield {
 
 #[cfg(test)]
 mod test {
-    use crate::deck::Deck;
     use crate::deck::DeckBitfield;
     use crate::deck::card::Card;
     use crate::deck::rank::Rank;
-    use crate::deck::suit::Suit;
     use crate::ranks::hand_rank::HandRank;
 
     macro_rules! assert_straight_and_straight_flush {
@@ -367,25 +365,6 @@ mod test {
             let hand = hand_ranker_from_cards($hand);
             assert_eq!(hand.get_rank(), $rank);
         };
-    }
-
-    #[test]
-    pub fn deal_a_flop() -> Result<(), String> {
-        let mut deck = Deck::new();
-        deck.seed_deck(1);
-        assert_eq!(52, deck.cards_remaining());
-
-        test_card(&mut deck, Suit::Clubs, Rank::Two);
-        test_card(&mut deck, Suit::Clubs, Rank::Three);
-        test_card(&mut deck, Suit::Clubs, Rank::Four);
-
-        Ok(())
-    }
-
-    pub fn test_card(deck: &mut Deck, suit: Suit, rank: Rank) {
-        let card = deck.get_next_card().unwrap();
-        assert_eq!(suit, card.suit());
-        assert_eq!(rank, card.rank());
     }
 
     #[test]
@@ -414,7 +393,7 @@ mod test {
     pub fn hand_ranker_from_cards(val: &str) -> DeckBitfield {
         let card_strs = val.split(" ");
         let cards: Vec<Card> = card_strs.map(|x| Card::try_from_str(x).unwrap()).collect();
-        let mut hand_ranker = DeckBitfield::new();
+        let mut hand_ranker = DeckBitfield::empty();
         hand_ranker.insert_cards(&cards);
         hand_ranker
     }
@@ -472,5 +451,16 @@ mod test {
         let test_deck = DeckBitfield { cards: 393230 };
         println!("{}", test_deck.to_string());
         test_deck.get_rank();
+    }
+
+    #[test]
+    pub fn has_card() {
+        let empty = DeckBitfield::empty();
+        let full = DeckBitfield::all_cards();
+
+        for card in Card::all_cards() {
+            assert!(!empty.has_card(card));
+            assert!(full.has_card(card))
+        }
     }
 }

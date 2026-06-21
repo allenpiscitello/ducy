@@ -10,16 +10,6 @@ pub enum Suit {
 }
 
 impl Suit {
-    pub fn try_from_usize(val: usize) -> Result<Self, String> {
-        match val {
-            0 => Ok(Suit::Clubs),
-            1 => Ok(Suit::Diamonds),
-            2 => Ok(Suit::Hearts),
-            3 => Ok(Suit::Spades),
-            _ => Err("Invalid value".to_owned()),
-        }
-    }
-
     pub fn try_from_str(val: &char) -> Result<Self, String> {
         match val {
             'c' => Ok(Suit::Clubs),
@@ -38,19 +28,6 @@ impl Display for Suit {
             Suit::Diamonds => write!(f, "d"),
             Suit::Clubs => write!(f, "c"),
             Suit::Spades => write!(f, "s"),
-        }
-    }
-}
-
-#[cfg(test)]
-pub mod test {
-    use super::*;
-
-    #[test]
-    pub fn test_suit_try_from_usize_works() {
-        for i in 0..4 {
-            let suit = Suit::try_from_usize(i);
-            assert!(suit.is_ok())
         }
     }
 }
