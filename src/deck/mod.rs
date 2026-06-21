@@ -39,7 +39,8 @@ const ALL_CARDS_BITFIELD: u64 = SINGLE_SUIT_BITFIELD
     | SINGLE_SUIT_BITFIELD << 48;
 const ALL_CARDS_NO_LOW_ACES_BITFIELD: u64 = SINGLE_SUIT_HIGH_ACE_BITFIELD
     | SINGLE_SUIT_HIGH_ACE_BITFIELD
-    | 16 + SINGLE_SUIT_HIGH_ACE_BITFIELD << 32
+    | SINGLE_SUIT_HIGH_ACE_BITFIELD << 16
+    | SINGLE_SUIT_HIGH_ACE_BITFIELD << 32
     | SINGLE_SUIT_HIGH_ACE_BITFIELD << 48;
 const SINGLE_RANK_BITFIELD: u64 = 0b00010000000000000;
 const SINGLE_RANK_FILTER: u64 = SINGLE_RANK_BITFIELD
@@ -118,9 +119,27 @@ impl Deck {
         }
     }
 
+    pub fn remove_nth_card(&mut self, index: usize) -> Result<Card, String> {
+        let num_cards = self.num_cards();
+        if index >= num_cards as usize {
+            return Err("Too many cards".to_owned());
+        }
+        let mut count = index;
+        for i in Card::all_cards() {
+            if self.has_card(i) {
+                if count == 0 {
+                    self.remove_cards(&[i]);
+                    return Ok(i);
+                } else {
+                    count -= 1;
+                }
+            }
+        }
+        Err("Didn't find a card at that index".to_string())
+    }
+
     pub fn num_cards(&self) -> u32 {
         let all_ranks = Self::get_without_low_aces(self.cards);
-
         u64::count_ones(all_ranks)
     }
 
@@ -490,5 +509,16 @@ mod test {
         assert!(!empty.has_card(three_clubs));
         assert!(!full.has_card(three_clubs));
         assert!(full.has_card(two_clubs));
+
+        let card = empty.remove_nth_card(0).unwrap();
+        assert_eq!(card, two_clubs);
+        assert!(!empty.has_card(two_clubs));
+
+        let card = full.remove_nth_card(50).unwrap();
+        assert_eq!(card, Card::try_from_str("As").unwrap());
+        assert_eq!(full.num_cards(), 50);
+        let card = full.remove_nth_card(48).unwrap();
+        assert_eq!(card, Card::try_from_str("Qs").unwrap());
+        assert_eq!(full.num_cards(), 49);
     }
 }
