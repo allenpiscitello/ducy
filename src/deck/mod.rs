@@ -119,23 +119,40 @@ impl Deck {
         }
     }
 
-    pub fn remove_nth_card(&mut self, index: usize) -> Result<Card, String> {
-        let num_cards = self.num_cards();
-        if index >= num_cards as usize {
-            return Err("Too many cards".to_owned());
-        }
+    fn remove_nth_card_unchecked(&mut self, index: u32) -> Card {
         let mut count = index;
         for i in Card::all_cards() {
             if self.has_card(i) {
                 if count == 0 {
                     self.remove_cards(&[i]);
-                    return Ok(i);
+                    return i;
                 } else {
                     count -= 1;
                 }
             }
         }
-        Err("Didn't find a card at that index".to_string())
+        panic!();
+    }
+    pub fn try_remove_nth_card(&mut self, index: u32) -> Result<Card, String> {
+        let num_cards = self.num_cards();
+        if index >= num_cards {
+            return Err("Too many cards".to_owned());
+        }
+        Ok(self.remove_nth_card_unchecked(index))
+    }
+
+    pub fn try_remove_random_cards(&mut self, number_to_remove: u32) -> Result<Vec<Card>, String> {
+        let mut num_cards = self.num_cards();
+        let mut cards = vec![];
+        if number_to_remove > num_cards {
+            return Err("Too many cards to remove".to_owned());
+        }
+        for _ in 0..number_to_remove {
+            let index = rand::random_range(0..num_cards);
+            cards.push(self.try_remove_nth_card(index)?);
+            num_cards -= 1;
+        }
+        Ok(cards)
     }
 
     pub fn num_cards(&self) -> u32 {
@@ -491,7 +508,7 @@ mod test {
     }
 
     #[test]
-    pub fn has_card() {
+    pub fn test_has_card() {
         let mut empty = Deck::empty();
         let mut full = Deck::all_cards();
 
@@ -510,14 +527,14 @@ mod test {
         assert!(!full.has_card(three_clubs));
         assert!(full.has_card(two_clubs));
 
-        let card = empty.remove_nth_card(0).unwrap();
+        let card = empty.try_remove_nth_card(0).unwrap();
         assert_eq!(card, two_clubs);
         assert!(!empty.has_card(two_clubs));
 
-        let card = full.remove_nth_card(50).unwrap();
+        let card = full.try_remove_nth_card(50).unwrap();
         assert_eq!(card, Card::try_from_str("As").unwrap());
         assert_eq!(full.num_cards(), 50);
-        let card = full.remove_nth_card(48).unwrap();
+        let card = full.try_remove_nth_card(48).unwrap();
         assert_eq!(card, Card::try_from_str("Qs").unwrap());
         assert_eq!(full.num_cards(), 49);
     }
