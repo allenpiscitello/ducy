@@ -9,7 +9,7 @@ pub mod card;
 pub mod rank;
 pub mod suit;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Deck {
     cards: u64,
 }
@@ -18,7 +18,7 @@ impl Display for Deck {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut cards = vec![];
         for i in 0..4 {
-            for j in 0..16 {
+            for j in 0..13 {
                 if self.cards & 0b1 << (16 * i + j) > 0 {
                     let card = Card::try_from_usize(i * 16 + j).unwrap();
                     cards.push(card);
@@ -537,5 +537,11 @@ mod test {
         let card = full.try_remove_nth_card(48).unwrap();
         assert_eq!(card, Card::try_from_str("Qs").unwrap());
         assert_eq!(full.num_cards(), 49);
+    }
+
+    #[test]
+    pub fn test_deck_display() {
+        let deck = Deck::all_cards();
+        println!("{}", deck);
     }
 }
