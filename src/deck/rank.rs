@@ -20,9 +20,9 @@ pub enum Rank {
 }
 
 impl Rank {
-    pub fn try_from_str(val: &char) -> Result<Self, String> {
-        match val {
-            'A' => Ok(Rank::Ace),
+    pub fn try_from_char(val: &char) -> Result<Self, String> {
+        match val.to_ascii_lowercase() {
+            'a' => Ok(Rank::Ace),
             '2' => Ok(Rank::Two),
             '3' => Ok(Rank::Three),
             '4' => Ok(Rank::Four),
@@ -31,10 +31,10 @@ impl Rank {
             '7' => Ok(Rank::Seven),
             '8' => Ok(Rank::Eight),
             '9' => Ok(Rank::Nine),
-            'T' => Ok(Rank::Ten),
-            'J' => Ok(Rank::Jack),
-            'Q' => Ok(Rank::Queen),
-            'K' => Ok(Rank::King),
+            't' => Ok(Rank::Ten),
+            'j' => Ok(Rank::Jack),
+            'q' => Ok(Rank::Queen),
+            'k' => Ok(Rank::King),
             _ => Err("Invalid value".to_owned()),
         }
     }

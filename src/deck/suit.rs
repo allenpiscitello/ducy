@@ -10,8 +10,8 @@ pub enum Suit {
 }
 
 impl Suit {
-    pub fn try_from_str(val: &char) -> Result<Self, String> {
-        match val {
+    pub fn try_from_char(val: &char) -> Result<Self, String> {
+        match val.to_ascii_lowercase() {
             'c' => Ok(Suit::Clubs),
             'd' => Ok(Suit::Diamonds),
             'h' => Ok(Suit::Hearts),

@@ -18,9 +18,9 @@ impl Display for Deck {
         let mut cards = vec![];
         for j in 0..13 {
             for i in 0..4 {
-                let bit_to_check = 16 * i + 13 - j;
-                if self.cards & 0b1 << bit_to_check > 0 {
-                    let card = Card::try_from_usize(i * 16 + 12 - j).unwrap();
+                let bits_to_check = RANK_BITS[j] << (16 * i);
+                if self.cards & bits_to_check == bits_to_check {
+                    let card = Card::from_index_unchecked(i, j);
                     cards.push(card);
                 }
             }
@@ -62,6 +62,22 @@ pub(crate) const RANKS: [Rank; 13] = [
     Rank::Queen,
     Rank::King,
     Rank::Ace,
+];
+
+pub(crate) const RANK_BITS: [u64; 13] = [
+    0b1 << 1,
+    0b1 << 2,
+    0b1 << 3,
+    0b1 << 4,
+    0b1 << 5,
+    0b1 << 6,
+    0b1 << 7,
+    0b1 << 8,
+    0b1 << 9,
+    0b1 << 10,
+    0b1 << 11,
+    0b1 << 12,
+    0b1 << 13 | 0b1,
 ];
 
 pub(crate) const SUITS: [Suit; 4] = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
@@ -134,7 +150,7 @@ impl Deck {
 
     pub fn get_nth_card_unchecked(&self, index: u32) -> Card {
         let mut count = index;
-        for i in Card::all_cards() {
+        for i in Card::values() {
             if self.has_card(i) {
                 if count == 0 {
                     return i;
@@ -571,7 +587,7 @@ mod test {
         let mut empty = Deck::empty();
         let mut full = Deck::all_cards();
 
-        for card in Card::all_cards() {
+        for card in Card::values() {
             assert!(!empty.has_card(card));
             assert!(full.has_card(card))
         }

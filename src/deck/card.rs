@@ -4,18 +4,36 @@ use crate::deck::deck::{RANKS, SUITS};
 use crate::deck::rank::Rank;
 use crate::deck::suit::Suit;
 
-impl Display for Card {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", self.rank(), self.suit())
-    }
-}
-
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub struct Card {
     val: u32,
 }
 
 impl Card {
+    pub fn new(rank: Rank, suit: Suit) -> Card {
+        return Card {
+            val: Card::get_suit_index(suit) * 16 + Card::get_rank_index(rank),
+        };
+    }
+
+    pub fn try_from_str(val: &str) -> Result<Self, String> {
+        let trimmed = val.trim();
+        if trimmed.len() < 2 {
+            return Err("Invalid Value".to_owned());
+        }
+        let mut chars = val.chars();
+        let rank: char = chars.next().ok_or("Invalid value".to_owned())?;
+        let suit = chars.next().ok_or("Invalid value".to_owned())?;
+        Ok(Self::new(
+            Rank::try_from_char(&rank)?,
+            Suit::try_from_char(&suit)?,
+        ))
+    }
+
+    pub fn values() -> impl Iterator<Item = Card> {
+        CardIterator::new()
+    }
+
     fn get_rank_index(rank: Rank) -> u32 {
         match rank {
             Rank::Two => 0,
@@ -43,41 +61,18 @@ impl Card {
         }
     }
 
-    pub fn new(rank: Rank, suit: Suit) -> Card {
-        return Card {
-            val: Card::get_suit_index(suit) * 16 + Card::get_rank_index(rank),
-        };
+    fn from_usize_unchecked(val: usize) -> Self {
+        Self { val: val as u32 }
     }
 
-    pub fn try_from_usize(val: usize) -> Result<Self, String> {
-        if val % 16 >= 13 || val >= 16 * 4 {
-            return Err("Invalid value".to_owned());
-        }
-        Ok(Self { val: val as u32 })
+    pub(crate) fn from_index_unchecked(suit_index: usize, rank_index: usize) -> Self {
+        Self::from_usize_unchecked(suit_index * 16 + rank_index)
     }
+}
 
-    pub fn try_from_iterator(val: usize) -> Result<Self, String> {
-        let suit = val / 13;
-        let rank = val % 13;
-        Ok(Self::try_from_usize(suit * 16 + rank)?)
-    }
-
-    pub fn try_from_str(val: &str) -> Result<Self, String> {
-        let trimmed = val.trim();
-        if trimmed.len() < 2 {
-            return Err("Invalid Value".to_owned());
-        }
-        let mut chars = val.chars();
-        let rank: char = chars.next().ok_or("Invalid value".to_owned())?;
-        let suit = chars.next().ok_or("Invalid value".to_owned())?;
-        Ok(Self::new(
-            Rank::try_from_str(&rank)?,
-            Suit::try_from_str(&suit)?,
-        ))
-    }
-
-    pub fn all_cards() -> impl Iterator<Item = Card> {
-        CardIterator::new()
+impl Display for Card {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.rank(), self.suit())
     }
 }
 
@@ -95,12 +90,17 @@ impl Iterator for CardIterator {
     type Item = Card;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Ok(card) = Card::try_from_iterator(self.last_index) {
-            self.last_index += 1;
-            Some(card)
-        } else {
+        if self.last_index >= 52 {
             return None;
         }
+
+        let card = Some(Card::from_index_unchecked(
+            self.last_index / 13,
+            self.last_index % 13,
+        ));
+
+        self.last_index += 1;
+        card
     }
 }
 
@@ -129,20 +129,16 @@ pub mod test {
     #[test]
     pub fn test_card_try_from_usize_works() {
         for i in 0..13 {
-            let card = Card::try_from_usize(i);
-            assert!(card.is_ok())
+            Card::from_usize_unchecked(i);
         }
         for i in 16..29 {
-            let card = Card::try_from_usize(i);
-            assert!(card.is_ok())
+            Card::from_usize_unchecked(i);
         }
         for i in 32..45 {
-            let card = Card::try_from_usize(i);
-            assert!(card.is_ok())
+            Card::from_usize_unchecked(i);
         }
         for i in 48..61 {
-            let card = Card::try_from_usize(i);
-            assert!(card.is_ok())
+            Card::from_usize_unchecked(i);
         }
     }
 
@@ -154,14 +150,12 @@ pub mod test {
 
     #[test]
     pub fn test_from_str() -> Result<(), String> {
-        for i in 0..52 {
-            let result = Card::try_from_iterator(i);
-            if let Ok(card) = result {
+        for i in 0..4 {
+            for j in 0..13 {
+                let card = Card::from_index_unchecked(i, j);
                 let display: String = format!("{}", card);
                 let other_card = Card::try_from_str(&display)?;
                 assert_eq!(other_card, card);
-            } else {
-                assert!(false);
             }
         }
 
