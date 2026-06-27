@@ -1,19 +1,26 @@
 use std::fmt::Display;
 
-use crate::deck::deck::{RANKS, SUITS};
+use crate::deck::deck::Deck;
 use crate::deck::rank::Rank;
 use crate::deck::suit::Suit;
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub struct Card {
-    val: u32,
+    val: Deck,
+    suit: Suit,
+    rank: Rank,
 }
 
 impl Card {
     pub fn new(rank: Rank, suit: Suit) -> Card {
-        return Card {
-            val: Card::get_suit_index(suit) * 16 + Card::get_rank_index(rank),
-        };
+        Card {
+            val: Deck::get_card(&rank, &suit),
+            rank,
+            suit,
+        }
+    }
+    pub(crate) fn from_deck(val: Deck, rank: Rank, suit: Suit) -> Self {
+        Self { val, rank, suit }
     }
 
     pub fn try_from_str(val: &str) -> Result<Self, String> {
@@ -32,41 +39,6 @@ impl Card {
 
     pub fn values() -> impl Iterator<Item = Card> {
         CardIterator::new()
-    }
-
-    fn get_rank_index(rank: Rank) -> u32 {
-        match rank {
-            Rank::Two => 0,
-            Rank::Three => 1,
-            Rank::Four => 2,
-            Rank::Five => 3,
-            Rank::Six => 4,
-            Rank::Seven => 5,
-            Rank::Eight => 6,
-            Rank::Nine => 7,
-            Rank::Ten => 8,
-            Rank::Jack => 9,
-            Rank::Queen => 10,
-            Rank::King => 11,
-            Rank::Ace => 12,
-        }
-    }
-
-    fn get_suit_index(suit: Suit) -> u32 {
-        match suit {
-            Suit::Clubs => 0,
-            Suit::Diamonds => 1,
-            Suit::Hearts => 2,
-            Suit::Spades => 3,
-        }
-    }
-
-    fn from_usize_unchecked(val: usize) -> Self {
-        Self { val: val as u32 }
-    }
-
-    pub(crate) fn from_index_unchecked(suit_index: usize, rank_index: usize) -> Self {
-        Self::from_usize_unchecked(suit_index * 16 + rank_index)
     }
 }
 
@@ -94,10 +66,7 @@ impl Iterator for CardIterator {
             return None;
         }
 
-        let card = Some(Card::from_index_unchecked(
-            self.last_index / 13,
-            self.last_index % 13,
-        ));
+        let card = Some(Deck::all_cards().get_nth_card_unchecked(self.last_index));
 
         self.last_index += 1;
         card
@@ -106,12 +75,11 @@ impl Iterator for CardIterator {
 
 impl Card {
     pub fn rank(&self) -> Rank {
-        RANKS[(self.val % 16) as usize].clone()
+        self.rank
     }
 
     pub fn suit(&self) -> Suit {
-        let suit_val = (self.val / 16) as usize;
-        SUITS[suit_val]
+        self.suit
     }
 }
 
@@ -127,22 +95,6 @@ pub mod test {
     }
 
     #[test]
-    pub fn test_card_try_from_usize_works() {
-        for i in 0..13 {
-            Card::from_usize_unchecked(i);
-        }
-        for i in 16..29 {
-            Card::from_usize_unchecked(i);
-        }
-        for i in 32..45 {
-            Card::from_usize_unchecked(i);
-        }
-        for i in 48..61 {
-            Card::from_usize_unchecked(i);
-        }
-    }
-
-    #[test]
     pub fn test_display_for_card() {
         let card = Card::new(Rank::Ace, Suit::Spades);
         assert_eq!(format!("{card}"), "As");
@@ -150,13 +102,11 @@ pub mod test {
 
     #[test]
     pub fn test_from_str() -> Result<(), String> {
-        for i in 0..4 {
-            for j in 0..13 {
-                let card = Card::from_index_unchecked(i, j);
-                let display: String = format!("{}", card);
-                let other_card = Card::try_from_str(&display)?;
-                assert_eq!(other_card, card);
-            }
+        for i in 0..52 {
+            let card = Deck::all_cards().get_nth_card_unchecked(i);
+            let display: String = format!("{}", card);
+            let other_card = Card::try_from_str(&display)?;
+            assert_eq!(other_card, card);
         }
 
         assert_eq!(

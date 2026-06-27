@@ -20,7 +20,13 @@ impl Display for Deck {
             for i in 0..4 {
                 let bits_to_check = RANK_BITS[j] << (16 * i);
                 if self.cards & bits_to_check == bits_to_check {
-                    let card = Card::from_index_unchecked(i, j);
+                    let card = Card::from_deck(
+                        Self {
+                            cards: bits_to_check,
+                        },
+                        RANKS[j],
+                        SUITS[i],
+                    );
                     cards.push(card);
                 }
             }
@@ -92,70 +98,87 @@ impl Deck {
         }
     }
 
-    fn get_bits_for_card(card: &Card) -> u64 {
-        let rank_bits: u64 = match card.rank() {
-            Rank::Ace => 1 << 13 | 1,
-            Rank::Two => 1 << 1,
-            Rank::Three => 1 << 2,
-            Rank::Four => 1 << 3,
-            Rank::Five => 1 << 4,
-            Rank::Six => 1 << 5,
-            Rank::Seven => 1 << 6,
-            Rank::Eight => 1 << 7,
-            Rank::Nine => 1 << 8,
-            Rank::Ten => 1 << 9,
-            Rank::Jack => 1 << 10,
-            Rank::Queen => 1 << 11,
-            Rank::King => 1 << 12,
+    pub fn get_card(rank: &Rank, suit: &Suit) -> Self {
+        Self {
+            cards: Self::get_bits_for_card(rank, suit),
+        }
+    }
+
+    fn get_bits_for_card(rank: &Rank, suit: &Suit) -> u64 {
+        let rank_bits: u64 = match rank {
+            &Rank::Ace => 1 << 13 | 1,
+            &Rank::Two => 1 << 1,
+            &Rank::Three => 1 << 2,
+            &Rank::Four => 1 << 3,
+            &Rank::Five => 1 << 4,
+            &Rank::Six => 1 << 5,
+            &Rank::Seven => 1 << 6,
+            &Rank::Eight => 1 << 7,
+            &Rank::Nine => 1 << 8,
+            &Rank::Ten => 1 << 9,
+            &Rank::Jack => 1 << 10,
+            &Rank::Queen => 1 << 11,
+            &Rank::King => 1 << 12,
         };
-        let suit_shift = match card.suit() {
-            Suit::Clubs => 0,
-            Suit::Diamonds => 16,
-            Suit::Hearts => 32,
-            Suit::Spades => 48,
+        let suit_shift = match suit {
+            &Suit::Clubs => 0,
+            &Suit::Diamonds => 16,
+            &Suit::Hearts => 32,
+            &Suit::Spades => 48,
         };
         let bits = rank_bits << suit_shift;
         bits
     }
 
+    //TODO: Should eventually get rid of this
     pub fn has_card(&self, card: Card) -> bool {
-        let target = Self::get_bits_for_card(&card);
+        let target = Self::get_bits_for_card(&card.rank(), &card.suit());
         target == target & self.cards
     }
 
+    //TODO: Consider removing this
     pub fn insert_cards(&mut self, cards: &[Card]) {
         for card in cards {
-            self.cards |= Self::get_bits_for_card(card);
+            self.cards |= Self::get_bits_for_card(&card.rank(), &card.suit());
         }
     }
 
     pub fn remove_cards(&mut self, cards: &[Card]) {
         for card in cards {
-            self.cards ^= Self::get_bits_for_card(card);
+            self.cards ^= Self::get_bits_for_card(&card.rank(), &card.suit());
         }
     }
 
-    fn remove_nth_card_unchecked(&mut self, index: u32) -> Card {
+    fn remove_nth_card_unchecked(&mut self, index: usize) -> Card {
         let card = self.get_nth_card_unchecked(index);
         self.remove_cards(&[card]);
         card
     }
-    pub fn try_remove_nth_card(&mut self, index: u32) -> Result<Card, String> {
+    pub fn try_remove_nth_card(&mut self, index: usize) -> Result<Card, String> {
         let num_cards = self.num_cards();
-        if index >= num_cards {
+        if index >= num_cards as usize {
             return Err("Too many cards".to_owned());
         }
         Ok(self.remove_nth_card_unchecked(index))
     }
 
-    pub fn get_nth_card_unchecked(&self, index: u32) -> Card {
-        let mut count = index;
-        for i in Card::values() {
-            if self.has_card(i) {
-                if count == 0 {
-                    return i;
-                } else {
-                    count -= 1;
+    pub fn get_nth_card_unchecked(&self, index: usize) -> Card {
+        let mut count: usize = index;
+        for suit in 0..4 {
+            for rank in 0..13 {
+                let bits_for_card = Self::get_bits_for_card(&RANKS[rank], &SUITS[suit]);
+                if self.cards & bits_for_card == bits_for_card {
+                    if count == 0 {
+                        return Card::from_deck(
+                            Deck {
+                                cards: bits_for_card,
+                            },
+                            RANKS[rank].clone(),
+                            SUITS[suit].clone(),
+                        );
+                    } else {
+                        count -= 1;
+                    }
                 }
             }
         }
@@ -171,7 +194,7 @@ impl Deck {
         }
         for _ in 0..number_to_remove {
             let index = rand::random_range(0..num_cards);
-            cards.push(self.try_remove_nth_card(index)?);
+            cards.push(self.try_remove_nth_card(index as usize)?);
             num_cards -= 1;
         }
         Ok(cards)
@@ -462,7 +485,7 @@ impl Iterator for DeckIterator {
             let mut deck = Deck::empty();
             let cards = vals
                 .iter()
-                .map(|i| self.deck.get_nth_card_unchecked(*i as u32))
+                .map(|i| self.deck.get_nth_card_unchecked(*i))
                 .collect::<Vec<Card>>();
             deck.insert_cards(&cards);
             Some(deck)
