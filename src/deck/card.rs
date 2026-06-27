@@ -19,8 +19,13 @@ impl Card {
             suit,
         }
     }
+
     pub(crate) fn from_deck(val: Deck, rank: Rank, suit: Suit) -> Self {
         Self { val, rank, suit }
+    }
+
+    pub fn get_deck(&self) -> Deck {
+        self.val.clone()
     }
 
     pub fn try_from_str(val: &str) -> Result<Self, String> {

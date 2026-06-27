@@ -130,22 +130,19 @@ impl Deck {
         bits
     }
 
-    //TODO: Should eventually get rid of this
     pub fn has_card(&self, card: Card) -> bool {
-        let target = Self::get_bits_for_card(&card.rank(), &card.suit());
-        target == target & self.cards
+        card.get_deck().cards & self.cards > 0
     }
 
-    //TODO: Consider removing this
     pub fn insert_cards(&mut self, cards: &[Card]) {
         for card in cards {
-            self.cards |= Self::get_bits_for_card(&card.rank(), &card.suit());
+            self.cards |= card.get_deck().cards
         }
     }
 
     pub fn remove_cards(&mut self, cards: &[Card]) {
         for card in cards {
-            self.cards ^= Self::get_bits_for_card(&card.rank(), &card.suit());
+            self.cards ^= card.get_deck().cards
         }
     }
 
