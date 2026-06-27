@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::deck::rank::Rank;
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
@@ -57,6 +59,24 @@ impl Ord for HandRank {
 impl PartialOrd for HandRank {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl Display for HandRank {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HandRank::HighCard { c1, c2, c3, c4, c5 } => {
+                write!(f, "High Card {} {} {} {} {}", c1, c2, c3, c4, c5)
+            }
+            HandRank::OnePair { p, c1, c2, c3 } => write!(f, "Pair of {p}, {c1} {c2} {c3}"),
+            HandRank::TwoPair { p1, p2, c1 } => write!(f, "Two Pair {p1} over {p2}, {c1}"),
+            HandRank::ThreeOfAKind { t, c1, c2 } => write!(f, "Three of a Kind {t}, {c1} {c2}"),
+            HandRank::Straight { s } => write!(f, "Straight {s} high"),
+            HandRank::Flush { c1, c2, c3, c4, c5 } => write!(f, "Flush {c1} {c2} {c3} {c4} {c5}"),
+            HandRank::FullHouse { t, p } => write!(f, "Full House {t} full of {p}"),
+            HandRank::FourOfAKind { q, c } => write!(f, "Four of a Kind {q}, {c}"),
+            HandRank::StraightFlush { sf } => write!(f, "Straight Flush {sf} high"),
+        }
     }
 }
 

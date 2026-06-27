@@ -1,8 +1,8 @@
 use std::fmt::Display;
 
+use crate::deck::deck::{RANKS, SUITS};
 use crate::deck::rank::Rank;
 use crate::deck::suit::Suit;
-use crate::deck::{RANKS, SUITS};
 
 impl Display for Card {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
