@@ -6,7 +6,6 @@ use numerica::combinatorics::CombinationIterator;
 use crate::deck::card::Card;
 use crate::deck::rank::Rank;
 use crate::deck::suit::Suit;
-use crate::ranks::hand_rank::HandRank;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Deck {
@@ -151,6 +150,7 @@ impl Deck {
         self.remove_cards(&[card]);
         card
     }
+
     pub fn try_remove_nth_card(&mut self, index: usize) -> Result<Card, String> {
         let num_cards = self.num_cards();
         if index >= num_cards as usize {
@@ -206,13 +206,21 @@ impl Deck {
         u64::count_ones(all_ranks)
     }
 
+    pub fn get_single_suit_ranks(&self) -> impl Iterator<Item = RankBitfield> {
+        SingleSuitRankIterator {
+            deck: self.clone(),
+            suit_index: 0,
+        }
+    }
+
     fn get_single_suit_card_ranks(&self, i: usize) -> u64 {
         self.cards >> (16 * i) & SINGLE_SUIT_BITFIELD
     }
 
-    fn get_straight_internal(ranks: u64) -> Option<Rank> {
-        let result = Self::matches_pattern(ranks, 0b11111, 5);
-        result.map(|x| RANKS[x + 2])
+    pub fn get_combined_rank_bitfield(&self) -> RankBitfield {
+        RankBitfield {
+            ranks: self.get_combined_ranks(),
+        }
     }
 
     fn get_combined_ranks(&self) -> u64 {
@@ -224,32 +232,83 @@ impl Deck {
         ranks_combined
     }
 
-    fn get_straight(&self) -> Option<Rank> {
-        Self::get_straight_internal(self.get_combined_ranks())
+    pub fn get_rank_count(&self) -> RankCount {
+        RankCount {
+            rank_counts: self.get_rank_counts(),
+        }
     }
 
-    fn get_flush(&self) -> Option<[Rank; 5]> {
-        let mut best: Option<[Rank; 5]> = None;
-        for i in 0..4 {
-            let bits = self.get_single_suit_card_ranks(i);
-            if bits.count_ones() >= 5 {
-                match (best, Self::get_highest_five(bits)) {
-                    (Some(existing), Some(newest)) => {
-                        for i in 0..5 {
-                            if newest[i] > existing[i] {
-                                best = Some(existing)
-                            }
-                            if newest[i] < existing[i] {
-                                continue;
-                            }
-                        }
+    fn get_rank_counts(&self) -> [u32; 13] {
+        let mut counts = [0; 13];
+        for i in 0..13 {
+            let filtered = self.cards & (SINGLE_RANK_FILTER >> i);
+            counts[i] = filtered.count_ones();
+        }
+        counts
+    }
+
+    fn get_without_low_aces(cards: u64) -> u64 {
+        cards & ALL_CARDS_NO_LOW_ACES_BITFIELD
+    }
+
+    pub fn enumerate_combinations(self, num_cards: usize) -> impl Iterator<Item = Deck> {
+        DeckIterator::new(self, num_cards)
+    }
+}
+
+struct SingleSuitRankIterator {
+    deck: Deck,
+    suit_index: usize,
+}
+
+impl Iterator for SingleSuitRankIterator {
+    type Item = RankBitfield;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.suit_index == 4 {
+            None
+        } else {
+            let ranks = self.deck.get_single_suit_card_ranks(self.suit_index);
+            self.suit_index += 1;
+            Some(RankBitfield { ranks })
+        }
+    }
+}
+
+pub struct RankBitfield {
+    ranks: u64,
+}
+
+impl RankBitfield {
+    pub fn get_straight(&self) -> Option<Rank> {
+        let result = Self::matches_pattern(self.ranks, 0b11111, 5);
+        result.map(|x| RANKS[x + 2])
+    }
+
+    pub fn count_ones(&self) -> u32 {
+        self.ranks.count_ones()
+    }
+
+    pub fn get_highest_five(&self) -> Option<[Rank; 5]> {
+        let all_ranks = self.ranks & SINGLE_SUIT_HIGH_ACE_BITFIELD;
+
+        let count = u64::count_ones(all_ranks);
+        if count < 5 {
+            None
+        } else {
+            let mut return_val = vec![];
+            for i in 1..14 {
+                let target = 0b1 << (14 - i);
+                if target & all_ranks == target {
+                    return_val.push(RANKS[13 - i]);
+                    if return_val.len() == 5 {
+                        break;
                     }
-                    (None, Some(existing)) => best = Some(existing),
-                    (_, None) => {}
                 }
             }
+            let slice = return_val.try_into().unwrap();
+            Some(slice)
         }
-        best
     }
 
     fn matches_pattern(
@@ -265,186 +324,28 @@ impl Deck {
         }
         return None;
     }
+}
 
-    fn get_straight_flush(&self) -> Option<Rank> {
-        let mut found: Option<Rank> = None;
-        for i in 0..4 {
-            let value_to_check = self.get_single_suit_card_ranks(i);
-            match (Self::get_straight_internal(value_to_check), found) {
-                (Some(straight), Some(found_val)) => {
-                    if straight > found_val {
-                        found = Some(straight)
-                    }
-                }
-                (Some(straight), None) => found = Some(straight),
-                (None, _) => {}
-            }
-        }
-        found
-    }
+pub struct RankCount {
+    rank_counts: [u32; 13],
+}
 
-    fn get_highest_five(cards: u64) -> Option<[Rank; 5]> {
-        let all_ranks = Self::get_without_low_aces(cards);
-
-        let count = u64::count_ones(all_ranks);
-        if count < 5 {
-            None
-        } else {
-            let mut return_val = vec![];
-            for i in 1..14 {
-                let target = 0b1 << (14 - i);
-                if target & cards == target {
-                    return_val.push(RANKS[13 - i]);
-                    if return_val.len() == 5 {
-                        break;
-                    }
-                }
-            }
-            let slice = return_val.try_into().unwrap();
-            Some(slice)
-        }
-    }
-
-    fn get_rank_counts(&self) -> Vec<u32> {
-        let mut counts = vec![];
-        for i in 0..13 {
-            let filtered = self.cards & (SINGLE_RANK_FILTER >> i);
-            counts.push(filtered.count_ones());
-        }
-        counts
-    }
-
-    fn find_highest_with_n(
-        ranks: &Vec<u32>,
-        indexes_to_exclude: &Vec<usize>,
+impl RankCount {
+    pub fn find_highest_with_n(
+        &self,
+        ranks_to_exclude: &Vec<Rank>,
         target_count: u32,
-    ) -> Option<usize> {
-        for (index, val) in ranks.iter().enumerate() {
-            if indexes_to_exclude.contains(&index) {
+    ) -> Option<Rank> {
+        for (index, val) in self.rank_counts.iter().enumerate() {
+            if ranks_to_exclude.contains(&RANKS[12 - index]) {
                 continue;
             } else {
                 if *val >= target_count {
-                    return Some(index);
+                    return Some(RANKS[12 - index]);
                 }
             }
         }
         return None;
-    }
-
-    pub fn get_rank(&self) -> HandRank {
-        let rank_counts = self.get_rank_counts();
-        if let Some(sf) = self.get_straight_flush() {
-            HandRank::StraightFlush { sf }
-        } else {
-            let best_quads = Self::find_highest_with_n(&rank_counts, &vec![], 4);
-
-            if let Some(quad_index) = best_quads {
-                if let Some(kicker_index) =
-                    Self::find_highest_with_n(&rank_counts, &vec![quad_index], 1)
-                {
-                    return HandRank::FourOfAKind {
-                        q: RANKS[12 - quad_index],
-                        c: RANKS[12 - kicker_index],
-                    };
-                }
-            }
-            let best_trips = Self::find_highest_with_n(&rank_counts, &vec![], 3);
-
-            if let Some(trip_index) = best_trips {
-                if let Some(pair_index) =
-                    Self::find_highest_with_n(&rank_counts, &vec![trip_index], 2)
-                {
-                    return HandRank::FullHouse {
-                        t: RANKS[12 - trip_index],
-                        p: RANKS[12 - pair_index],
-                    };
-                }
-            }
-            if let Some(flush_ranks) = self.get_flush() {
-                HandRank::Flush {
-                    c1: flush_ranks[0],
-                    c2: flush_ranks[1],
-                    c3: flush_ranks[2],
-                    c4: flush_ranks[3],
-                    c5: flush_ranks[4],
-                }
-            } else if let Some(s) = self.get_straight() {
-                HandRank::Straight { s }
-            } else {
-                if let Some(trip_index) = best_trips {
-                    if let Some(c1_index) =
-                        Self::find_highest_with_n(&rank_counts, &vec![trip_index], 1)
-                    {
-                        if let Some(c2_index) =
-                            Self::find_highest_with_n(&rank_counts, &vec![trip_index, c1_index], 1)
-                        {
-                            return HandRank::ThreeOfAKind {
-                                t: RANKS[12 - trip_index],
-                                c1: RANKS[12 - c1_index],
-                                c2: RANKS[12 - c2_index],
-                            };
-                        }
-                    }
-                }
-                let best_pair = Self::find_highest_with_n(&rank_counts, &vec![], 2);
-                if let Some(pair1_index) = best_pair {
-                    if let Some(pair2_index) =
-                        Self::find_highest_with_n(&rank_counts, &vec![pair1_index], 2)
-                    {
-                        if let Some(c1_index) = Self::find_highest_with_n(
-                            &rank_counts,
-                            &vec![pair1_index, pair2_index],
-                            1,
-                        ) {
-                            return HandRank::TwoPair {
-                                p1: RANKS[12 - pair1_index],
-                                p2: RANKS[12 - pair2_index],
-                                c1: RANKS[12 - c1_index],
-                            };
-                        }
-                    }
-                }
-                if let Some(pair_index) = best_pair {
-                    if let Some(c1_index) =
-                        Self::find_highest_with_n(&rank_counts, &vec![pair_index], 1)
-                    {
-                        if let Some(c2_index) =
-                            Self::find_highest_with_n(&rank_counts, &vec![pair_index, c1_index], 1)
-                        {
-                            if let Some(c3_index) = Self::find_highest_with_n(
-                                &rank_counts,
-                                &vec![pair_index, c1_index, c2_index],
-                                1,
-                            ) {
-                                return HandRank::OnePair {
-                                    p: RANKS[12 - pair_index],
-                                    c1: RANKS[12 - c1_index],
-                                    c2: RANKS[12 - c2_index],
-                                    c3: RANKS[12 - c3_index],
-                                };
-                            }
-                        }
-                    }
-                }
-                let combined_ranks = self.get_combined_ranks();
-                let ranks = Self::get_highest_five(combined_ranks).unwrap();
-                HandRank::HighCard {
-                    c1: ranks[0],
-                    c2: ranks[1],
-                    c3: ranks[2],
-                    c4: ranks[3],
-                    c5: ranks[4],
-                }
-            }
-        }
-    }
-
-    fn get_without_low_aces(cards: u64) -> u64 {
-        cards & ALL_CARDS_NO_LOW_ACES_BITFIELD
-    }
-
-    pub fn enumerate_combinations(self, num_cards: usize) -> impl Iterator<Item = Deck> {
-        DeckIterator::new(self, num_cards)
     }
 }
 
@@ -480,7 +381,7 @@ impl Iterator for DeckIterator {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(vals) = self.iterator.next() {
             let mut deck = Deck::empty();
-            let cards = vals
+            let cards: Vec<Card> = vals
                 .iter()
                 .map(|i| self.deck.get_nth_card_unchecked(*i))
                 .collect::<Vec<Card>>();
@@ -498,46 +399,6 @@ mod test {
     use crate::deck::deck::Deck;
     use crate::deck::rank::Rank;
     use crate::deck::suit::Suit;
-    use crate::ranks::hand_rank::HandRank;
-
-    macro_rules! assert_straight_and_straight_flush {
-        ($hand:expr, $straight:expr, $straight_flush:expr) => {
-            let hand = deck_from_cards($hand);
-            assert_eq!(hand.get_straight(), $straight);
-            assert_eq!(hand.get_straight_flush(), $straight_flush);
-        };
-    }
-
-    macro_rules! assert_rank {
-        ($hand:expr, $rank:expr) => {
-            let hand = deck_from_cards($hand);
-            println!("{}", hand);
-            assert_eq!(hand.get_rank(), $rank);
-        };
-    }
-
-    #[test]
-    pub fn test_straight_and_straight_flush() {
-        assert_straight_and_straight_flush!("As 2s 3s 4s", None, None);
-        assert_straight_and_straight_flush!("As 2s 3s 4s 5s", Some(Rank::Five), Some(Rank::Five));
-        assert_straight_and_straight_flush!("6s 2s 3s 4s 5s", Some(Rank::Six), Some(Rank::Six));
-        assert_straight_and_straight_flush!("As 6h 2s 3s 4s 5s", Some(Rank::Six), Some(Rank::Five));
-        assert_straight_and_straight_flush!("As 6h 2s 3s 4s 5s", Some(Rank::Six), Some(Rank::Five));
-        assert_straight_and_straight_flush!("6s 7s 3s 4s 5s", Some(Rank::Seven), Some(Rank::Seven));
-        assert_straight_and_straight_flush!("6s 7s 8h 4s 5s", Some(Rank::Eight), None);
-        assert_straight_and_straight_flush!("Js Qs Kh As Ts", Some(Rank::Ace), None);
-        assert_straight_and_straight_flush!("9s Js Qs Ks Ah Ts", Some(Rank::Ace), Some(Rank::King));
-    }
-
-    #[test]
-    pub fn test_get_flush() {
-        let hand = deck_from_cards("As Ks Qs Ts 9s 7h 4s");
-        let flush_ranks = hand.get_flush();
-        assert_eq!(
-            flush_ranks,
-            Some([Rank::Ace, Rank::King, Rank::Queen, Rank::Ten, Rank::Nine])
-        );
-    }
 
     pub fn deck_from_cards(val: &str) -> Deck {
         let card_strs = val.split(" ");
@@ -545,61 +406,6 @@ mod test {
         let mut deck = Deck::empty();
         deck.insert_cards(&cards);
         deck
-    }
-
-    #[test]
-    pub fn get_hand_ranks() {
-        assert_rank!(
-            "3c 4c 5c 3d 4d",
-            HandRank::TwoPair {
-                p1: Rank::Four,
-                p2: Rank::Three,
-                c1: Rank::Five
-            }
-        );
-        assert_rank!(
-            "As 2s 3h 4c 6d",
-            HandRank::HighCard {
-                c1: Rank::Ace,
-                c2: Rank::Six,
-                c3: Rank::Four,
-                c4: Rank::Three,
-                c5: Rank::Two,
-            }
-        );
-        assert_rank!(
-            "As 2s 3s 4s 6s",
-            HandRank::Flush {
-                c1: Rank::Ace,
-                c2: Rank::Six,
-                c3: Rank::Four,
-                c4: Rank::Three,
-                c5: Rank::Two,
-            }
-        );
-        assert_rank!("As 2s 3h 4c 5d", HandRank::Straight { s: Rank::Five });
-        assert_rank!("As 2s 3h 4c 5d 6d", HandRank::Straight { s: Rank::Six });
-        assert_rank!("6s 2s 3s 4s 5s", HandRank::StraightFlush { sf: Rank::Six });
-        assert_rank!(
-            "6d 6c 6h 6s 5s",
-            HandRank::FourOfAKind {
-                q: Rank::Six,
-                c: Rank::Five
-            }
-        );
-        assert_rank!(
-            "6s 2s 2h 4s 5s",
-            HandRank::OnePair {
-                p: Rank::Two,
-                c1: Rank::Six,
-                c2: Rank::Five,
-                c3: Rank::Four
-            }
-        );
-
-        let test_deck = Deck { cards: 393230 };
-        println!("{}", test_deck.to_string());
-        test_deck.get_rank();
     }
 
     #[test]
