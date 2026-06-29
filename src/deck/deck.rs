@@ -14,23 +14,8 @@ pub struct Deck {
 
 impl Display for Deck {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut cards = vec![];
-        for j in 0..13 {
-            for i in 0..4 {
-                let bits_to_check = RANK_BITS[j] << (16 * i);
-                if self.cards & bits_to_check == bits_to_check {
-                    let card = Card::from_deck(
-                        Self {
-                            cards: bits_to_check,
-                        },
-                        RANKS[j],
-                        SUITS[i],
-                    );
-                    cards.push(card);
-                }
-            }
-        }
-        let cards_str: Vec<String> = cards.iter().map(|x| format!("{}", *x)).collect();
+        let card_iterator = DeckCardIterator::new(self.clone(), true);
+        let cards_str: Vec<String> = card_iterator.map(|x| format!("{}", x)).collect();
         let cards_as_str = cards_str.join(" ");
         write!(f, "{}", cards_as_str)
     }
@@ -53,7 +38,7 @@ const SINGLE_RANK_FILTER: u64 = SINGLE_RANK_BITFIELD
     | SINGLE_RANK_BITFIELD << 32
     | SINGLE_RANK_BITFIELD << 48;
 
-pub(crate) const RANKS: [Rank; 13] = [
+const RANKS: [Rank; 13] = [
     Rank::Two,
     Rank::Three,
     Rank::Four,
@@ -69,7 +54,7 @@ pub(crate) const RANKS: [Rank; 13] = [
     Rank::Ace,
 ];
 
-pub(crate) const RANK_BITS: [u64; 13] = [
+const RANK_BITS: [u64; 13] = [
     0b1 << 1,
     0b1 << 2,
     0b1 << 3,
@@ -85,7 +70,7 @@ pub(crate) const RANK_BITS: [u64; 13] = [
     0b1 << 13 | 0b1,
 ];
 
-pub(crate) const SUITS: [Suit; 4] = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
+const SUITS: [Suit; 4] = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
 
 impl Deck {
     pub fn empty() -> Self {
@@ -159,27 +144,20 @@ impl Deck {
         Ok(self.remove_nth_card_unchecked(index))
     }
 
+    pub fn iterate(&self, rank_first: bool) -> impl Iterator<Item = Card> {
+        DeckCardIterator::new(self.clone(), rank_first)
+    }
+
     pub fn get_nth_card_unchecked(&self, index: usize) -> Card {
-        let mut count: usize = index;
-        for suit in 0..4 {
-            for rank in 0..13 {
-                let bits_for_card = Self::get_bits_for_card(&RANKS[rank], &SUITS[suit]);
-                if self.cards & bits_for_card == bits_for_card {
-                    if count == 0 {
-                        return Card::from_deck(
-                            Deck {
-                                cards: bits_for_card,
-                            },
-                            RANKS[rank].clone(),
-                            SUITS[suit].clone(),
-                        );
-                    } else {
-                        count -= 1;
-                    }
-                }
+        let mut iterator = self.iterate(true);
+        for i in 0..index + 1 {
+            let card = iterator.next();
+            if i == index {
+                return card.unwrap();
             }
         }
-        panic!()
+        //should never get here
+        panic!();
     }
 
     pub fn try_remove_random_cards(&mut self, number_to_remove: u32) -> Result<Vec<Card>, String> {
@@ -253,6 +231,65 @@ impl Deck {
 
     pub fn enumerate_combinations(self, num_cards: usize) -> impl Iterator<Item = Deck> {
         DeckIterator::new(self, num_cards)
+    }
+}
+
+struct DeckCardIterator {
+    suit_index: usize,
+    rank_index: usize,
+    rank_first: bool,
+    deck: Deck,
+}
+
+impl DeckCardIterator {
+    fn new(deck: Deck, rank_first: bool) -> Self {
+        Self {
+            suit_index: 0,
+            rank_index: 0,
+            rank_first,
+            deck,
+        }
+    }
+}
+
+impl Iterator for DeckCardIterator {
+    type Item = Card;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.suit_index >= 4 || self.rank_index >= 13 {
+            return None;
+        } else {
+            let bit_to_check = RANK_BITS[12 - self.rank_index] << (16 * self.suit_index);
+            let card = if self.deck.cards & bit_to_check == bit_to_check {
+                Some(Card::from_deck(
+                    Deck {
+                        cards: bit_to_check,
+                    },
+                    RANKS[12 - self.rank_index],
+                    SUITS[self.suit_index],
+                ))
+            } else {
+                None
+            };
+
+            if self.rank_first {
+                self.suit_index = (self.suit_index + 1) % 4;
+                if self.suit_index == 0 {
+                    self.rank_index += 1;
+                }
+            } else {
+                self.rank_index = (self.rank_index + 1) % 13;
+                if self.rank_index == 0 {
+                    self.suit_index += 1;
+                }
+            }
+
+            if card.is_some() {
+                return card;
+            } else {
+                self.next()
+            }
+        }
     }
 }
 
@@ -432,10 +469,11 @@ mod test {
         assert_eq!(card, two_clubs);
         assert!(!empty.has_card(two_clubs));
 
-        let card = full.try_remove_nth_card(50).unwrap();
+        println!("{}", full);
+        let card = full.try_remove_nth_card(3).unwrap();
         assert_eq!(card, Card::try_from_str("As").unwrap());
         assert_eq!(full.num_cards(), 50);
-        let card = full.try_remove_nth_card(48).unwrap();
+        let card = full.try_remove_nth_card(10).unwrap();
         assert_eq!(card, Card::try_from_str("Qs").unwrap());
         assert_eq!(full.num_cards(), 49);
     }
