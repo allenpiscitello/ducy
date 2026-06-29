@@ -146,9 +146,9 @@ mod test {
 
     pub fn deck_from_cards(val: &str) -> Deck {
         let card_strs = val.split(" ");
-        let cards: Vec<Card> = card_strs.map(|x| Card::try_from_str(x).unwrap()).collect();
+        let cards: Vec<Card> = card_strs.map(|x| Card::parse(x).unwrap()).collect();
         let mut deck = Deck::empty();
-        deck.insert_cards(&cards);
+        deck.insert_cards(cards.iter());
         deck
     }
 

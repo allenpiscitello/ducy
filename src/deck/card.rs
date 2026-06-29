@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::deck::deck::Deck;
+use crate::deck::deck::{CardIterator, Deck};
 use crate::deck::rank::Rank;
 use crate::deck::suit::Suit;
 
@@ -28,7 +28,7 @@ impl Card {
         self.val.clone()
     }
 
-    pub fn try_from_str(val: &str) -> Result<Self, String> {
+    pub fn parse(val: &str) -> Result<Self, String> {
         let trimmed = val.trim();
         if trimmed.len() < 2 {
             return Err("Invalid Value".to_owned());
@@ -50,31 +50,6 @@ impl Card {
 impl Display for Card {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}{}", self.rank(), self.suit())
-    }
-}
-
-struct CardIterator {
-    last_index: usize,
-}
-
-impl CardIterator {
-    fn new() -> Self {
-        Self { last_index: 0 }
-    }
-}
-
-impl Iterator for CardIterator {
-    type Item = Card;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.last_index >= 52 {
-            return None;
-        }
-
-        let card = Some(Deck::all_cards().get_nth_card_unchecked(self.last_index));
-
-        self.last_index += 1;
-        card
     }
 }
 
@@ -108,14 +83,14 @@ pub mod test {
     #[test]
     pub fn test_from_str() -> Result<(), String> {
         for i in 0..52 {
-            let card = Deck::all_cards().get_nth_card_unchecked(i);
+            let card = Deck::all_cards().try_get_nth_card(i).unwrap();
             let display: String = format!("{}", card);
-            let other_card = Card::try_from_str(&display)?;
+            let other_card = Card::parse(&display)?;
             assert_eq!(other_card, card);
         }
 
         assert_eq!(
-            Card::try_from_str("As")?,
+            Card::parse("As")?,
             Card::new(Rank::Ace, Suit::Spades)
         );
 

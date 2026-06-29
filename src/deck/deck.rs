@@ -82,6 +82,17 @@ impl Deck {
         }
     }
 
+    pub fn parse(val: &str) -> Result<Self, String> {
+        let owned_cards: Vec<Card> = val
+            .split(' ')
+            .map(|x| Card::parse(x).map_err(|_| "Invalid value for card".to_owned()))
+            .collect::<Result<Vec<Card>, String>>()?; // ? unwraps the Result
+
+        let mut empty = Self::empty();
+        empty.insert_cards(owned_cards.iter());
+        Ok(empty)
+    }
+
     pub fn get_card(rank: &Rank, suit: &Suit) -> Self {
         Self {
             cards: Self::get_bits_for_card(rank, suit),
@@ -118,13 +129,13 @@ impl Deck {
         card.get_deck().cards & self.cards > 0
     }
 
-    pub fn insert_cards(&mut self, cards: &[Card]) {
+    pub fn insert_cards<'a>(&mut self, cards: impl Iterator<Item = &'a Card>) {
         for card in cards {
             self.cards |= card.get_deck().cards
         }
     }
 
-    pub fn remove_cards(&mut self, cards: &[Card]) {
+    pub fn remove_cards<'a>(&mut self, cards: impl Iterator<Item = &'a Card>) {
         for card in cards {
             self.cards ^= card.get_deck().cards
         }
@@ -132,7 +143,7 @@ impl Deck {
 
     fn remove_nth_card_unchecked(&mut self, index: usize) -> Card {
         let card = self.get_nth_card_unchecked(index);
-        self.remove_cards(&[card]);
+        self.remove_cards([card].iter());
         card
     }
 
@@ -148,7 +159,16 @@ impl Deck {
         DeckCardIterator::new(self.clone(), rank_first)
     }
 
-    pub fn get_nth_card_unchecked(&self, index: usize) -> Card {
+    pub fn try_get_nth_card(&self, index: usize) -> Option<Card> {
+        let num_cards = self.num_cards();
+        if index > num_cards as usize {
+            return None;
+        } else {
+            return Some(self.get_nth_card_unchecked(index));
+        }
+    }
+
+    fn get_nth_card_unchecked(&self, index: usize) -> Card {
         let mut iterator = self.iterate(true);
         for i in 0..index + 1 {
             let card = iterator.next();
@@ -396,6 +416,31 @@ impl BitOr for Deck {
     }
 }
 
+pub struct CardIterator {
+    last_index: usize,
+}
+
+impl CardIterator {
+    pub fn new() -> Self {
+        Self { last_index: 0 }
+    }
+}
+
+impl Iterator for CardIterator {
+    type Item = Card;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.last_index >= 52 {
+            return None;
+        }
+
+        let card = Some(Deck::all_cards().get_nth_card_unchecked(self.last_index));
+
+        self.last_index += 1;
+        card
+    }
+}
+
 struct DeckIterator {
     deck: Deck,
     iterator: CombinationIterator,
@@ -422,7 +467,7 @@ impl Iterator for DeckIterator {
                 .iter()
                 .map(|i| self.deck.get_nth_card_unchecked(*i))
                 .collect::<Vec<Card>>();
-            deck.insert_cards(&cards);
+            deck.insert_cards(cards.iter());
             Some(deck)
         } else {
             None
@@ -439,9 +484,9 @@ mod test {
 
     pub fn deck_from_cards(val: &str) -> Deck {
         let card_strs = val.split(" ");
-        let cards: Vec<Card> = card_strs.map(|x| Card::try_from_str(x).unwrap()).collect();
+        let cards: Vec<Card> = card_strs.map(|x| Card::parse(x).unwrap()).collect();
         let mut deck = Deck::empty();
-        deck.insert_cards(&cards);
+        deck.insert_cards(cards.iter());
         deck
     }
 
@@ -458,8 +503,8 @@ mod test {
         let two_clubs = Card::new(Rank::Two, Suit::Clubs);
         let three_clubs = Card::new(Rank::Three, Suit::Clubs);
 
-        empty.insert_cards(&[two_clubs.clone()]);
-        full.remove_cards(&[three_clubs.clone()]);
+        empty.insert_cards([two_clubs.clone()].iter());
+        full.remove_cards([three_clubs.clone()].iter());
         assert!(empty.has_card(two_clubs));
         assert!(!empty.has_card(three_clubs));
         assert!(!full.has_card(three_clubs));
@@ -471,10 +516,10 @@ mod test {
 
         println!("{}", full);
         let card = full.try_remove_nth_card(3).unwrap();
-        assert_eq!(card, Card::try_from_str("As").unwrap());
+        assert_eq!(card, Card::parse("As").unwrap());
         assert_eq!(full.num_cards(), 50);
         let card = full.try_remove_nth_card(10).unwrap();
-        assert_eq!(card, Card::try_from_str("Qs").unwrap());
+        assert_eq!(card, Card::parse("Qs").unwrap());
         assert_eq!(full.num_cards(), 49);
     }
 
