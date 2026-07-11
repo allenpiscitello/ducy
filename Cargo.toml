@@ -2,6 +2,10 @@
 name = "ducy"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+readme = "README.md"
+description = "A performant analysis library for poker."
+
 
 [dependencies]
 strum = "0.26"
