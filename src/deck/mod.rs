@@ -565,7 +565,7 @@ impl BitOr for Deck {
     }
 }
 
-pub struct CardIterator {
+struct CardIterator {
     last_index: usize,
 }
 
