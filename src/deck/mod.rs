@@ -366,10 +366,25 @@ impl Deck {
         Ok(self.remove_nth_card_unchecked(index))
     }
 
+    /// Returns an iterator over the cards in the deck.
+    ///
+    /// # Arguments
+    ///
+    /// * `rank_first` - If true, the iterator will prioritize ranks over suits.
     pub fn iterate(&self, rank_first: bool) -> impl Iterator<Item = Card> {
         DeckCardIterator::new(self.clone(), rank_first)
     }
 
+    /// Returns the nth card from the deck if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - The index of the card to retrieve.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing the `Card` if it exists, or `None` if the index is out of bounds.
+    ///
     pub fn try_get_nth_card(&self, index: usize) -> Option<Card> {
         let num_cards = self.num_cards();
         if index > num_cards as usize {
@@ -379,18 +394,15 @@ impl Deck {
         }
     }
 
-    fn get_nth_card_unchecked(&self, index: usize) -> Card {
-        let mut iterator = self.iterate(true);
-        for i in 0..index + 1 {
-            let card = iterator.next();
-            if i == index {
-                return card.unwrap();
-            }
-        }
-        //should never get here
-        panic!();
-    }
-
+    /// Attempts to remove a specified number of random cards from the deck.
+    ///
+    /// # Arguments
+    ///
+    /// * `number_to_remove` - The number of random cards to remove from the deck.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a vector of the removed `Card`s if successful, or an error message if there are not enough cards in the deck. 
     pub fn try_remove_random_cards(&mut self, number_to_remove: u32) -> Result<Vec<Card>, String> {
         let mut num_cards = self.num_cards();
         let mut cards = vec![];
@@ -406,16 +418,19 @@ impl Deck {
         Ok(cards)
     }
 
+    /// Returns `true` if the deck is empty, `false` otherwise.
     pub fn is_empty(&self) -> bool {
         self.cards == 0
     }
 
+    /// Returns the number of cards currently in the deck.
     pub fn num_cards(&self) -> u32 {
         let all_ranks = Self::get_without_low_aces(self.cards);
         u64::count_ones(all_ranks)
     }
 
-    pub fn get_single_suit_ranks(&self) -> impl Iterator<Item = RankBitfield> {
+    /// Returns an iterator over the rank bitfields for each suit in the deck.  
+    pub fn get_single_suit_ranks(&self) -> impl Iterator<Item = (RankBitfield, Suit)> {
         SingleSuitRankIterator {
             deck: self.clone(),
             suit_index: 0,
@@ -426,6 +441,8 @@ impl Deck {
         self.cards >> (16 * i) & SINGLE_SUIT_BITFIELD
     }
 
+    /// Returns the rank bitfield for the specified suit index.
+    /// Used to obtain a combined view of all the ranks in the deck, regardless of suit.
     pub fn get_combined_rank_bitfield(&self) -> RankBitfield {
         RankBitfield {
             ranks: self.get_combined_ranks(),
@@ -445,6 +462,18 @@ impl Deck {
         RankCount {
             rank_counts: self.get_rank_counts(),
         }
+    }
+
+    fn get_nth_card_unchecked(&self, index: usize) -> Card {
+        let mut iterator = self.iterate(true);
+        for i in 0..index + 1 {
+            let card = iterator.next();
+            if i == index {
+                return card.unwrap();
+            }
+        }
+        //should never get here
+        panic!();
     }
 
     fn get_rank_counts(&self) -> [u32; 13] {
@@ -563,15 +592,16 @@ struct SingleSuitRankIterator {
 }
 
 impl Iterator for SingleSuitRankIterator {
-    type Item = RankBitfield;
+    type Item = (RankBitfield, Suit);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.suit_index == 4 {
             None
         } else {
             let ranks = self.deck.get_single_suit_card_ranks(self.suit_index);
+            let suit = SUITS[self.suit_index];
             self.suit_index += 1;
-            Some(RankBitfield { ranks })
+            Some((RankBitfield { ranks }, suit))
         }
     }
 }
@@ -581,11 +611,7 @@ pub struct RankBitfield {
 }
 
 impl RankBitfield {
-    pub fn get_straight(&self) -> Option<Rank> {
-        let result = Self::matches_pattern(self.ranks, 0b11111, 5);
-        result.map(|x| RANKS[x + 2])
-    }
-
+    
     pub fn num_unique_ranks(&self) -> u32 {
         self.ranks.count_ones()
     }
@@ -612,15 +638,15 @@ impl RankBitfield {
         }
     }
 
-    fn matches_pattern(
-        bits_to_check: u64,
+    pub fn matches_pattern(
+        &self,
         required_on_bits: u64,
-        field_length: usize,
-    ) -> Option<usize> {
+        field_length: usize
+    ) -> Option<Rank> {
         for i in 0..(15 - field_length) {
             let must_match = required_on_bits << (14 - field_length - i);
-            if must_match & bits_to_check == must_match {
-                return Some(15 - field_length - i);
+            if must_match & self.ranks == must_match {
+                return Some(RANKS[15 - field_length - i + 2]);
             }
         }
         return None;

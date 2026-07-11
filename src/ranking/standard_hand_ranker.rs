@@ -1,6 +1,5 @@
 use crate::{
-    deck::{Deck, Rank},
-    ranking::hand_rank::StandardHandRanks,
+    deck::{Deck, Rank, RankBitfield}, ranking::hand_rank::StandardHandRanks,
 };
 
 pub enum RankOrder {
@@ -123,13 +122,18 @@ impl StandardHandRanker {
     }
 
     fn get_straight(deck: &Deck) -> Option<Rank> {
-        deck.get_combined_rank_bitfield().get_straight()  
+        let combined_ranks = deck.get_combined_rank_bitfield();
+        Self::get_straight_from_rank_bitfield(&combined_ranks)
      }
+
+    fn get_straight_from_rank_bitfield(rank_bitfield: &RankBitfield) -> Option<Rank> {
+        rank_bitfield.matches_pattern(0b11111, 5)
+    }
 
 
     fn get_flush(deck: &Deck) -> Option<[Rank; 5]> {
         let mut best: Option<[Rank; 5]> = None;
-        for bits in deck.get_single_suit_ranks() {
+        for (bits, _) in deck.get_single_suit_ranks() {
             if bits.num_unique_ranks() >= 5 {
                 match (best, bits.get_highest_five()) {
                     (Some(existing), Some(newest)) => {
@@ -152,8 +156,8 @@ impl StandardHandRanker {
 
     fn get_best_straight_flush(deck: &Deck) -> Option<Rank> {
         let mut found: Option<Rank> = None;
-        for single_suit_rank in deck.get_single_suit_ranks() {
-            match (single_suit_rank.get_straight(), found) {
+        for (single_suit_rank, _) in deck.get_single_suit_ranks() {
+            match (Self::get_straight_from_rank_bitfield(&single_suit_rank), found) {
                 (Some(straight), Some(found_val)) => {
                     match RankOrder::AceIsHigh.cmp(straight, found_val) {
                         std::cmp::Ordering::Greater => found = Some(straight),
