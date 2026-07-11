@@ -1,9 +1,9 @@
 use std::fmt::Display;
 
-use crate::deck::rank::Rank;
+use crate::{deck::Rank, ranks::standard_hand_ranker::RankOrder};
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
-pub enum HandRank {
+pub enum StandardHandRanks {
     HighCard {
         c1: Rank,
         c2: Rank,
@@ -50,32 +50,32 @@ pub enum HandRank {
     },
 }
 
-impl Ord for HandRank {
+impl Ord for StandardHandRanks {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.get_score().cmp(&other.get_score())
     }
 }
 
-impl PartialOrd for HandRank {
+impl PartialOrd for StandardHandRanks {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Display for HandRank {
+impl Display for StandardHandRanks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HandRank::HighCard { c1, c2, c3, c4, c5 } => {
+            StandardHandRanks::HighCard { c1, c2, c3, c4, c5 } => {
                 write!(f, "High Card {} {} {} {} {}", c1, c2, c3, c4, c5)
             }
-            HandRank::OnePair { p, c1, c2, c3 } => write!(f, "Pair of {p}, {c1} {c2} {c3}"),
-            HandRank::TwoPair { p1, p2, c1 } => write!(f, "Two Pair {p1} over {p2}, {c1}"),
-            HandRank::ThreeOfAKind { t, c1, c2 } => write!(f, "Three of a Kind {t}, {c1} {c2}"),
-            HandRank::Straight { s } => write!(f, "Straight {s} high"),
-            HandRank::Flush { c1, c2, c3, c4, c5 } => write!(f, "Flush {c1} {c2} {c3} {c4} {c5}"),
-            HandRank::FullHouse { t, p } => write!(f, "Full House {t} full of {p}"),
-            HandRank::FourOfAKind { q, c } => write!(f, "Four of a Kind {q}, {c}"),
-            HandRank::StraightFlush { sf } => write!(f, "Straight Flush {sf} high"),
+            StandardHandRanks::OnePair { p, c1, c2, c3 } => write!(f, "Pair of {p}, {c1} {c2} {c3}"),
+            StandardHandRanks::TwoPair { p1, p2, c1 } => write!(f, "Two Pair {p1} over {p2}, {c1}"),
+            StandardHandRanks::ThreeOfAKind { t, c1, c2 } => write!(f, "Three of a Kind {t}, {c1} {c2}"),
+            StandardHandRanks::Straight { s } => write!(f, "Straight {s} high"),
+            StandardHandRanks::Flush { c1, c2, c3, c4, c5 } => write!(f, "Flush {c1} {c2} {c3} {c4} {c5}"),
+            StandardHandRanks::FullHouse { t, p } => write!(f, "Full House {t} full of {p}"),
+            StandardHandRanks::FourOfAKind { q, c } => write!(f, "Four of a Kind {q}, {c}"),
+            StandardHandRanks::StraightFlush { sf } => write!(f, "Straight Flush {sf} high"),
         }
     }
 }
@@ -95,38 +95,38 @@ const FULL_HOUSE_BASE: u32 = FLUSH_BASE + FIVE_OPTIONS;
 const FOUR_OF_KIND_BASE: u32 = FULL_HOUSE_BASE + TWO_OPTIONS;
 const STRAIGHT_FLUSH_BASE: u32 = FOUR_OF_KIND_BASE + TWO_OPTIONS;
 
-impl HandRank {
+impl StandardHandRanks {
     fn get_score(&self) -> u32 {
         match self {
-            HandRank::HighCard { c1, c2, c3, c4, c5 } => {
+            StandardHandRanks::HighCard { c1, c2, c3, c4, c5 } => {
                 Self::get_score_from_ranks(&[c1, c2, c3, c4, c5])
             }
-            HandRank::OnePair { p, c1, c2, c3 } => {
+            StandardHandRanks::OnePair { p, c1, c2, c3 } => {
                 Self::get_score_from_ranks(&[p, c1, c2, c3]) + ONE_PAIR_BASE
             }
-            HandRank::TwoPair { p1, p2, c1 } => {
+            StandardHandRanks::TwoPair { p1, p2, c1 } => {
                 Self::get_score_from_ranks(&[p1, p2, c1]) + TWO_PAIR_BASE
             }
 
-            HandRank::ThreeOfAKind { t, c1, c2 } => {
+            StandardHandRanks::ThreeOfAKind { t, c1, c2 } => {
                 Self::get_score_from_ranks(&[t, c1, c2]) + TRIP_BASE
             }
-            HandRank::Straight { s } => s.get_score() + STRAIGHT_BASE,
-            HandRank::Flush { c1, c2, c3, c4, c5 } => {
+            StandardHandRanks::Straight { s } => RankOrder::AceIsHigh.get_score(s) + STRAIGHT_BASE,
+            StandardHandRanks::Flush { c1, c2, c3, c4, c5 } => {
                 Self::get_score_from_ranks(&[c1, c2, c3, c4, c5]) + FLUSH_BASE
             }
-            HandRank::FullHouse { t, p } => Self::get_score_from_ranks(&[t, p]) + FULL_HOUSE_BASE,
-            HandRank::FourOfAKind { q, c } => {
+            StandardHandRanks::FullHouse { t, p } => Self::get_score_from_ranks(&[t, p]) + FULL_HOUSE_BASE,
+            StandardHandRanks::FourOfAKind { q, c } => {
                 Self::get_score_from_ranks(&[q, c]) + FOUR_OF_KIND_BASE
             }
-            HandRank::StraightFlush { sf } => sf.get_score() + STRAIGHT_FLUSH_BASE,
+            StandardHandRanks::StraightFlush { sf } => RankOrder::AceIsHigh.get_score(&sf) + STRAIGHT_FLUSH_BASE,
         }
     }
 
     fn get_score_from_ranks(values: &[&Rank]) -> u32 {
         let mut val = 0;
         for rank in values {
-            val = val * 13 + rank.get_score() - 1
+            val = val * 13 + RankOrder::AceIsHigh.get_score(rank) - 1
         }
         val
     }
@@ -135,18 +135,18 @@ impl HandRank {
 #[cfg(test)]
 mod test {
 
-    use crate::{deck::rank::Rank, ranks::hand_rank::HandRank};
+    use crate::{deck::Rank, ranks::hand_rank::StandardHandRanks};
 
     #[test]
     pub fn test_rank() {
-        let high_card_lowest = HandRank::HighCard {
+        let high_card_lowest = StandardHandRanks::HighCard {
             c1: Rank::Seven,
             c2: Rank::Five,
             c3: Rank::Four,
             c4: Rank::Three,
             c5: Rank::Two,
         };
-        let high_card_highest = HandRank::HighCard {
+        let high_card_highest = StandardHandRanks::HighCard {
             c1: Rank::Ace,
             c2: Rank::King,
             c3: Rank::Queen,
@@ -154,49 +154,49 @@ mod test {
             c5: Rank::Nine,
         };
 
-        let one_pair_lowest = HandRank::OnePair {
+        let one_pair_lowest = StandardHandRanks::OnePair {
             p: Rank::Two,
             c1: Rank::Five,
             c2: Rank::Four,
             c3: Rank::Three,
         };
 
-        let one_pair_highest = HandRank::OnePair {
+        let one_pair_highest = StandardHandRanks::OnePair {
             p: Rank::Ace,
             c1: Rank::King,
             c2: Rank::Queen,
             c3: Rank::Jack,
         };
 
-        let two_pair_lowest = HandRank::TwoPair {
+        let two_pair_lowest = StandardHandRanks::TwoPair {
             p1: Rank::Three,
             p2: Rank::Two,
             c1: Rank::Four,
         };
 
-        let two_pair_highest = HandRank::TwoPair {
+        let two_pair_highest = StandardHandRanks::TwoPair {
             p1: Rank::Ace,
             p2: Rank::King,
             c1: Rank::Queen,
         };
 
-        let trip_lowest = HandRank::ThreeOfAKind {
+        let trip_lowest = StandardHandRanks::ThreeOfAKind {
             t: Rank::Two,
             c1: Rank::Four,
             c2: Rank::Three,
         };
 
-        let trip_highest = HandRank::ThreeOfAKind {
+        let trip_highest = StandardHandRanks::ThreeOfAKind {
             t: Rank::Ace,
             c1: Rank::King,
             c2: Rank::Queen,
         };
 
-        let straight_lowest = HandRank::Straight { s: Rank::Five };
+        let straight_lowest = StandardHandRanks::Straight { s: Rank::Five };
 
-        let straight_highest = HandRank::Straight { s: Rank::Ace };
+        let straight_highest = StandardHandRanks::Straight { s: Rank::Ace };
 
-        let flush_lowest = HandRank::Flush {
+        let flush_lowest = StandardHandRanks::Flush {
             c1: Rank::Seven,
             c2: Rank::Six,
             c3: Rank::Five,
@@ -204,7 +204,7 @@ mod test {
             c5: Rank::Three,
         };
 
-        let flush_highest = HandRank::Flush {
+        let flush_highest = StandardHandRanks::Flush {
             c1: Rank::Ace,
             c2: Rank::King,
             c3: Rank::Queen,
@@ -212,28 +212,28 @@ mod test {
             c5: Rank::Nine,
         };
 
-        let full_house_lowest = HandRank::FullHouse {
+        let full_house_lowest = StandardHandRanks::FullHouse {
             t: Rank::Two,
             p: Rank::Three,
         };
 
-        let full_house_highest = HandRank::FullHouse {
+        let full_house_highest = StandardHandRanks::FullHouse {
             t: Rank::Ace,
             p: Rank::King,
         };
 
-        let quads_lowest = HandRank::FourOfAKind {
+        let quads_lowest = StandardHandRanks::FourOfAKind {
             q: Rank::Two,
             c: Rank::Three,
         };
 
-        let quads_highest = HandRank::FourOfAKind {
+        let quads_highest = StandardHandRanks::FourOfAKind {
             q: Rank::Ace,
             c: Rank::King,
         };
 
-        let sf_lowest = HandRank::StraightFlush { sf: Rank::Five };
-        let sf_highest = HandRank::StraightFlush { sf: Rank::Ace };
+        let sf_lowest = StandardHandRanks::StraightFlush { sf: Rank::Five };
+        let sf_highest = StandardHandRanks::StraightFlush { sf: Rank::Ace };
 
         let mut all_hands = vec![
             one_pair_highest.clone(),
