@@ -2,6 +2,9 @@ use std::fmt::Display;
 
 use crate::{deck::Rank, ranking::standard_hand_ranker::RankOrder};
 
+
+pub trait HandRanking {}
+
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum StandardHandRanks {
     HighCard {
@@ -49,6 +52,8 @@ pub enum StandardHandRanks {
         sf: Rank,
     },
 }
+
+impl HandRanking for StandardHandRanks {}
 
 impl Ord for StandardHandRanks {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
