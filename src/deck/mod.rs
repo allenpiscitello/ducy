@@ -6,6 +6,8 @@ use numerica::combinatorics::CombinationIterator;
 
 use strum_macros::EnumIter;
 
+use crate::ranking::standard_hand_ranker::RankOrder;
+
 
 /// Represents the rank of a playing card (Two through Ace).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Hash)]
@@ -221,6 +223,7 @@ impl Display for Deck {
 
 const SINGLE_SUIT_BITFIELD: u64 = 0b11111111111111;
 const SINGLE_SUIT_HIGH_ACE_BITFIELD: u64 = 0b11111111111110;
+const SINGLE_SUIT_LOW_ACE_BITFIELD: u64 = 0b11111111111101;
 const ALL_CARDS_BITFIELD: u64 = SINGLE_SUIT_BITFIELD
     | SINGLE_SUIT_BITFIELD << 16
     | SINGLE_SUIT_BITFIELD << 32
@@ -429,39 +432,53 @@ impl Deck {
         u64::count_ones(all_ranks)
     }
 
-    /// Returns an iterator over the rank bitfields for each suit in the deck.  
-    pub fn get_single_suit_ranks(&self) -> impl Iterator<Item = (RankBitfield, Suit)> {
+    /// Returns an iterator over for each suit in the deck that returns a set of which ranks are present in each suit.  
+    pub fn get_single_suit_ranks(&self) -> impl Iterator<Item = (RankSet, Suit)> {
         SingleSuitRankIterator {
             deck: self.clone(),
             suit_index: 0,
         }
     }
 
+    /// Returns which ranks are present for the specified suit index.
+    /// Used to obtain a combined view of all the ranks in the deck, regardless of suit.
+    pub fn get_combined_ranks(&self) -> RankSet {
+        RankSet {
+            ranks: self.get_combined_ranks_bits(),
+        }
+    }
+
+    /// Returns the count of each rank in the deck as a `RankCount` object.
+    pub fn get_rank_count(&self) -> RankCount {
+        RankCount {
+            rank_counts: self.get_rank_counts(),
+        }
+    }
+
+    /// Returns an iterator over all possible combinations of the specified number of cards from the deck.
+    /// # Arguments
+    ///
+    /// * `num_cards` - The number of cards to include in each combination.
+    ///
+    /// # Returns
+    ///
+    /// An iterator over all possible combinations of the specified number of cards from the deck.
+    pub fn enumerate_combinations(self, num_cards: usize) -> impl Iterator<Item = Deck> {
+        DeckIterator::new(self, num_cards)
+    }
+
+
     fn get_single_suit_card_ranks(&self, i: usize) -> u64 {
         self.cards >> (16 * i) & SINGLE_SUIT_BITFIELD
     }
 
-    /// Returns the rank bitfield for the specified suit index.
-    /// Used to obtain a combined view of all the ranks in the deck, regardless of suit.
-    pub fn get_combined_rank_bitfield(&self) -> RankBitfield {
-        RankBitfield {
-            ranks: self.get_combined_ranks(),
-        }
-    }
-
-    fn get_combined_ranks(&self) -> u64 {
+    fn get_combined_ranks_bits(&self) -> u64 {
         // combine the deck for all suits
         let mut ranks_combined = 0;
         for i in 0..4 {
             ranks_combined |= self.get_single_suit_card_ranks(i);
         }
         ranks_combined
-    }
-
-    pub fn get_rank_count(&self) -> RankCount {
-        RankCount {
-            rank_counts: self.get_rank_counts(),
-        }
     }
 
     fn get_nth_card_unchecked(&self, index: usize) -> Card {
@@ -493,10 +510,6 @@ impl Deck {
         let card = self.get_nth_card_unchecked(index);
         self.remove_cards([card].iter());
         card
-    }
-
-    pub fn enumerate_combinations(self, num_cards: usize) -> impl Iterator<Item = Deck> {
-        DeckIterator::new(self, num_cards)
     }
 
     fn get_bits_for_card(rank: &Rank, suit: &Suit) -> u64 {
@@ -592,7 +605,7 @@ struct SingleSuitRankIterator {
 }
 
 impl Iterator for SingleSuitRankIterator {
-    type Item = (RankBitfield, Suit);
+    type Item = (RankSet, Suit);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.suit_index == 4 {
@@ -601,23 +614,29 @@ impl Iterator for SingleSuitRankIterator {
             let ranks = self.deck.get_single_suit_card_ranks(self.suit_index);
             let suit = SUITS[self.suit_index];
             self.suit_index += 1;
-            Some((RankBitfield { ranks }, suit))
+            Some((RankSet { ranks }, suit))
         }
     }
 }
 
-pub struct RankBitfield {
+pub struct RankSet {
     ranks: u64,
 }
 
-impl RankBitfield {
+impl RankSet {
     
+    /// Returns the number of unique ranks present.
     pub fn num_unique_ranks(&self) -> u32 {
         self.ranks.count_ones()
     }
-
-    pub fn get_highest_five(&self) -> Option<[Rank; 5]> {
-        let all_ranks = self.ranks & SINGLE_SUIT_HIGH_ACE_BITFIELD;
+    
+    /// Returns the highest five ranks present, if there are at least five unique ranks.
+    pub fn get_highest_five(&self, rank_order: &RankOrder) -> Option<[Rank; 5]> {
+    
+        let all_ranks = self.ranks & match rank_order {
+            RankOrder::AceIsHigh => SINGLE_SUIT_HIGH_ACE_BITFIELD,
+            RankOrder::AceIsLow => SINGLE_SUIT_LOW_ACE_BITFIELD,
+        };
 
         let count = u64::count_ones(all_ranks);
         if count < 5 {
@@ -638,6 +657,11 @@ impl RankBitfield {
         }
     }
 
+    /// Checks if the rank set matches a specific bit pattern.
+    /// 
+    /// `required_on_bits` specifies which bits must be set.
+    /// `field_length` specifies the length of the bit field to check.
+    /// Returns the highest rank that matches the pattern, if any.
     pub fn matches_pattern(
         &self,
         required_on_bits: u64,

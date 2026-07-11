@@ -1,5 +1,5 @@
 use crate::{
-    deck::{Deck, Rank, RankBitfield}, ranking::hand_rank::StandardHandRanks,
+    deck::{Deck, Rank, RankSet}, ranking::hand_rank::StandardHandRanks,
 };
 
 pub enum RankOrder {
@@ -108,7 +108,7 @@ impl StandardHandRanker {
                 }
             }
 
-            if let Some(highest_cards) = deck.get_combined_rank_bitfield().get_highest_five() {
+            if let Some(highest_cards) = deck.get_combined_ranks().get_highest_five(&RankOrder::AceIsHigh) {
                 return StandardHandRanks::HighCard {
                     c1: highest_cards[0],
                     c2: highest_cards[1],
@@ -122,11 +122,11 @@ impl StandardHandRanker {
     }
 
     fn get_straight(deck: &Deck) -> Option<Rank> {
-        let combined_ranks = deck.get_combined_rank_bitfield();
+        let combined_ranks = deck.get_combined_ranks();
         Self::get_straight_from_rank_bitfield(&combined_ranks)
      }
 
-    fn get_straight_from_rank_bitfield(rank_bitfield: &RankBitfield) -> Option<Rank> {
+    fn get_straight_from_rank_bitfield(rank_bitfield: &RankSet) -> Option<Rank> {
         rank_bitfield.matches_pattern(0b11111, 5)
     }
 
@@ -135,7 +135,7 @@ impl StandardHandRanker {
         let mut best: Option<[Rank; 5]> = None;
         for (bits, _) in deck.get_single_suit_ranks() {
             if bits.num_unique_ranks() >= 5 {
-                match (best, bits.get_highest_five()) {
+                match (best, bits.get_highest_five(&RankOrder::AceIsHigh)) {
                     (Some(existing), Some(newest)) => {
                         for i in 0..5 {
                             match
