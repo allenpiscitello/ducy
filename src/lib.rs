@@ -1,2 +1,2 @@
 pub mod deck;
-pub mod ranks;
+pub mod ranking;

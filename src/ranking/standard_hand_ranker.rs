@@ -1,6 +1,6 @@
 use crate::{
     deck::{Deck, Rank},
-    ranks::hand_rank::StandardHandRanks,
+    ranking::hand_rank::StandardHandRanks,
 };
 
 pub enum RankOrder {
@@ -123,13 +123,14 @@ impl StandardHandRanker {
     }
 
     fn get_straight(deck: &Deck) -> Option<Rank> {
-        deck.get_combined_rank_bitfield().get_straight()
-    }
+        deck.get_combined_rank_bitfield().get_straight()  
+     }
+
 
     fn get_flush(deck: &Deck) -> Option<[Rank; 5]> {
         let mut best: Option<[Rank; 5]> = None;
         for bits in deck.get_single_suit_ranks() {
-            if bits.count_ones() >= 5 {
+            if bits.num_unique_ranks() >= 5 {
                 match (best, bits.get_highest_five()) {
                     (Some(existing), Some(newest)) => {
                         for i in 0..5 {
@@ -171,8 +172,8 @@ impl StandardHandRanker {
 mod test {
     use crate::{
         deck::*,
-        ranks::hand_rank::StandardHandRanks,
-        ranks::standard_hand_ranker::StandardHandRanker,
+        ranking::hand_rank::StandardHandRanks,
+        ranking::standard_hand_ranker::StandardHandRanker,
     };
 
     macro_rules! assert_rank {

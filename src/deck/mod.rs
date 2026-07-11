@@ -6,6 +6,8 @@ use numerica::combinatorics::CombinationIterator;
 
 use strum_macros::EnumIter;
 
+
+/// Represents the rank of a playing card (Two through Ace).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Hash)]
 pub enum Rank {
     Two,
@@ -24,6 +26,9 @@ pub enum Rank {
 }
 
 impl Rank {
+    /// Tries to create a `Rank` from a character representation.
+    /// Returns `Ok(Rank)` if successful, or `Err(String)` if the character is invalid.
+    /// Characters representing ranks are: '2'-'9', 'T' (Ten), 'J' (Jack), 'Q' (Queen), 'K' (King), 'A' (Ace).
     pub fn try_from_char(val: &char) -> Result<Self, String> {
         match val.to_ascii_lowercase() {
             'a' => Ok(Rank::Ace),
@@ -64,6 +69,7 @@ impl Display for Rank {
     }
 }
 
+/// Represents the suit of a playing card (Clubs, Diamonds, Hearts, Spades).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Hash)]
 pub enum Suit {
     Clubs,
@@ -73,6 +79,9 @@ pub enum Suit {
 }
 
 impl Suit {
+    /// Tries to create a `Suit` from a character representation.
+    /// Returns `Ok(Suit)` if successful, or `Err(String)` if the character is invalid.
+    /// Characters representing suits are: 'c' (Clubs), 'd' (Diamonds), 'h' (Hearts), 's' (Spades).
     pub fn try_from_char(val: &char) -> Result<Self, String> {
         match val.to_ascii_lowercase() {
             'c' => Ok(Suit::Clubs),
@@ -96,6 +105,8 @@ impl Display for Suit {
 }
 
 
+/// Represents a playing card with a rank and suit.
+/// Provides methods to create, parse, and display cards.
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub struct Card {
     val: Deck,
@@ -104,6 +115,16 @@ pub struct Card {
 }
 
 impl Card {
+    /// Creates a new `Card` with the specified rank and suit.
+    ///
+    /// # Arguments
+    ///
+    /// * `rank` - The rank of the card.
+    /// * `suit` - The suit of the card.
+    ///
+    /// # Returns
+    ///
+    /// A `Card` instance with the specified rank and suit.
     pub fn new(rank: Rank, suit: Suit) -> Card {
         Card {
             val: Deck::get_card(&rank, &suit),
@@ -112,14 +133,33 @@ impl Card {
         }
     }
 
+    /// Creates a `Card` instance from a `Deck` value, rank, and suit without performing any checks.
+    ///
+    /// # Arguments
+    ///
+    /// * `val` - The `Deck` value representing the card.
+    /// * `rank` - The rank of the card.
+    /// * `suit` - The suit of the card.
+    ///
+    /// # Returns
+    ///
+    /// A `Card` instance with the specified `Deck` value, rank, and suit.
     fn from_deck_unchecked(val: Deck, rank: Rank, suit: Suit) -> Self {
         Self { val, rank, suit }
     }
 
+    /// Returns the `Deck` value associated with this card.
+    ///
+    /// # Returns
+    ///
+    /// The `Deck` value representing this card.
     pub fn get_deck(&self) -> Deck {
         self.val.clone()
     }
 
+    /// Parses a string representation of a card and returns a `Card` instance if successful.
+    /// The string should have the format "<rank><suit>", e.g., "Ah" for Ace of Hearts.
+    /// Returns `Err(String)` if the string is invalid.
     pub fn parse(val: &str) -> Result<Self, String> {
         let trimmed = val.trim();
         if trimmed.len() < 2 {
@@ -133,7 +173,11 @@ impl Card {
             Suit::try_from_char(&suit)?,
         ))
     }
-
+    /// Returns an iterator over all possible `Card` instances.
+    ///
+    /// # Returns
+    ///
+    /// An iterator that yields every possible card in a standard deck.
     pub fn values() -> impl Iterator<Item = Card> {
         CardIterator::new()
     }
@@ -146,16 +190,21 @@ impl Display for Card {
 }
 
 impl Card {
+    /// Returns the rank of the card.
     pub fn rank(&self) -> Rank {
         self.rank
     }
 
+    /// Returns the suit of the card.
     pub fn suit(&self) -> Suit {
         self.suit
     }
 }
 
 
+/// Represents a deck of playing cards.
+/// Able to hold any subset of playing cards, up to one of each card.
+/// Provides methods to create, parse, and display decks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Deck {
     cards: u64,
@@ -222,15 +271,27 @@ const RANK_BITS: [u64; 13] = [
 const SUITS: [Suit; 4] = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
 
 impl Deck {
+    
+    /// Creates an empty deck with no cards.
     pub fn empty() -> Self {
         Self { cards: 0 }
     }
+
+    /// Creates a deck containing all possible cards.
     pub fn all_cards() -> Self {
         Self {
             cards: ALL_CARDS_BITFIELD,
         }
     }
 
+    /// Parses a string representation of a deck and returns a `Deck` instance if successful.
+    /// # Arguments
+    ///
+    /// * `val` - A string representation of the deck, with cards separated by spaces.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the `Deck` instance if parsing is successful, or an error message if parsing fails.
     pub fn parse(val: &str) -> Result<Self, String> {
         let owned_cards: Vec<Card> = val
             .split(' ')
@@ -242,61 +303,62 @@ impl Deck {
         Ok(empty)
     }
 
+    /// Creates a `Deck` containing a single specified card.
+    ///
+    /// # Arguments
+    ///
+    /// * `rank` - The rank of the card.
+    /// * `suit` - The suit of the card.
+    ///
+    /// # Returns
+    ///
+    /// A `Deck` instance containing only the specified card.
     pub fn get_card(rank: &Rank, suit: &Suit) -> Self {
         Self {
             cards: Self::get_bits_for_card(rank, suit),
         }
     }
 
-    fn get_bits_for_card(rank: &Rank, suit: &Suit) -> u64 {
-        let rank_bits: u64 = match rank {
-            &Rank::Ace => 1 << 13 | 1,
-            &Rank::Two => 1 << 1,
-            &Rank::Three => 1 << 2,
-            &Rank::Four => 1 << 3,
-            &Rank::Five => 1 << 4,
-            &Rank::Six => 1 << 5,
-            &Rank::Seven => 1 << 6,
-            &Rank::Eight => 1 << 7,
-            &Rank::Nine => 1 << 8,
-            &Rank::Ten => 1 << 9,
-            &Rank::Jack => 1 << 10,
-            &Rank::Queen => 1 << 11,
-            &Rank::King => 1 << 12,
-        };
-        let suit_shift = match suit {
-            &Suit::Clubs => 0,
-            &Suit::Diamonds => 16,
-            &Suit::Hearts => 32,
-            &Suit::Spades => 48,
-        };
-        let bits = rank_bits << suit_shift;
-        bits
-    }
-
+    /// Checks if the deck contains the specified card.
     pub fn has_card(&self, card: Card) -> bool {
         card.get_deck().cards & self.cards > 0
     }
 
+    /// Inserts multiple cards into the deck.
+    ///
+    /// # Arguments
+    ///
+    /// * `cards` - An iterator over the cards to be inserted into the deck.
     pub fn insert_cards<'a>(&mut self, cards: impl Iterator<Item = &'a Card>) {
         for card in cards {
             self.cards |= card.get_deck().cards
         }
     }
 
+    /// Removes multiple cards from the deck.
+    ///
+    /// # Arguments
+    ///
+    /// * `cards` - An iterator over the cards to be removed from the deck.
+    ///
+    /// # Returns
+    ///
+    /// None. The deck is modified in place.
     pub fn remove_cards<'a>(&mut self, cards: impl Iterator<Item = &'a Card>) {
         for card in cards {
             self.cards ^= card.get_deck().cards
         }
     }
 
-    fn remove_nth_card_unchecked(&mut self, index: usize) -> Card {
-        let card = self.get_nth_card_unchecked(index);
-        self.remove_cards([card].iter());
-        card
-    }
-
-    pub fn try_remove_nth_card(&mut self, index: usize) -> Result<Card, String> {
+    /// Removes the nth card from the deck with checking bounds.
+    /// # Arguments
+    ///
+    /// * `index` - The index of the card to be removed.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the removed `Card` if successful, or an error message if the index is out of bounds.
+    fn try_remove_nth_card(&mut self, index: usize) -> Result<Card, String> {
         let num_cards = self.num_cards();
         if index >= num_cards as usize {
             return Err("Too many cards".to_owned());
@@ -398,9 +460,42 @@ impl Deck {
         cards & ALL_CARDS_NO_LOW_ACES_BITFIELD
     }
 
+        fn remove_nth_card_unchecked(&mut self, index: usize) -> Card {
+        let card = self.get_nth_card_unchecked(index);
+        self.remove_cards([card].iter());
+        card
+    }
+
     pub fn enumerate_combinations(self, num_cards: usize) -> impl Iterator<Item = Deck> {
         DeckIterator::new(self, num_cards)
     }
+
+    fn get_bits_for_card(rank: &Rank, suit: &Suit) -> u64 {
+        let rank_bits: u64 = match rank {
+            &Rank::Ace => 1 << 13 | 1,
+            &Rank::Two => 1 << 1,
+            &Rank::Three => 1 << 2,
+            &Rank::Four => 1 << 3,
+            &Rank::Five => 1 << 4,
+            &Rank::Six => 1 << 5,
+            &Rank::Seven => 1 << 6,
+            &Rank::Eight => 1 << 7,
+            &Rank::Nine => 1 << 8,
+            &Rank::Ten => 1 << 9,
+            &Rank::Jack => 1 << 10,
+            &Rank::Queen => 1 << 11,
+            &Rank::King => 1 << 12,
+        };
+        let suit_shift = match suit {
+            &Suit::Clubs => 0,
+            &Suit::Diamonds => 16,
+            &Suit::Hearts => 32,
+            &Suit::Spades => 48,
+        };
+        let bits = rank_bits << suit_shift;
+        bits
+    }
+
 }
 
 struct DeckCardIterator {
@@ -491,7 +586,7 @@ impl RankBitfield {
         result.map(|x| RANKS[x + 2])
     }
 
-    pub fn count_ones(&self) -> u32 {
+    pub fn num_unique_ranks(&self) -> u32 {
         self.ranks.count_ones()
     }
 

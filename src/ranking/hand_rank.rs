@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{deck::Rank, ranks::standard_hand_ranker::RankOrder};
+use crate::{deck::Rank, ranking::standard_hand_ranker::RankOrder};
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum StandardHandRanks {
@@ -135,7 +135,7 @@ impl StandardHandRanks {
 #[cfg(test)]
 mod test {
 
-    use crate::{deck::Rank, ranks::hand_rank::StandardHandRanks};
+    use crate::{deck::Rank, ranking::hand_rank::StandardHandRanks};
 
     #[test]
     pub fn test_rank() {
