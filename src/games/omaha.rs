@@ -68,7 +68,7 @@ impl OmahaGameState {
     }
 
     pub fn get_community_cards(&self) -> Deck {
-        let mut cards = self.flop.clone();
+        let mut cards = self.flop;
         let mut other_cards = vec![];
         if let Some(turn) = self.turn {
             other_cards.push(turn);

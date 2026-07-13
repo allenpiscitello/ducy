@@ -71,7 +71,7 @@ impl HoldemGameState {
     }
 
     pub fn get_community_cards(&self) -> Deck {
-        let mut cards = self.flop.clone();
+        let mut cards = self.flop;
         let mut other_cards = vec![];
         if let Some(turn) = self.turn {
             other_cards.push(turn);
@@ -81,6 +81,12 @@ impl HoldemGameState {
         }
         cards.insert_cards(other_cards.iter());
         cards
+    }
+}
+
+impl Default for HoldemGameState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -124,7 +130,7 @@ impl GameEvaluation<HoldemGameState, StandardHandRanks> for HoldemGameEvaluation
         }
         let winner_count = winners.len();
         if let Some(best_hand) = best_hand && winner_count > 0 {
-            let pot_distribution = dec!(1.0) / Decimal::try_from(winner_count).unwrap();
+            let pot_distribution = dec!(1.0) / Decimal::from(winner_count);
             winners.iter().map(|x| GameWinner::new(*x, pot_distribution, best_hand)).collect()
         } else { 
             vec![]

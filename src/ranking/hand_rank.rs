@@ -124,7 +124,7 @@ impl StandardHandRanks {
             StandardHandRanks::FourOfAKind { q, c } => {
                 Self::get_score_from_ranks(&[q, c]) + FOUR_OF_KIND_BASE
             }
-            StandardHandRanks::StraightFlush { sf } => RankOrder::AceIsHigh.get_score(&sf) + STRAIGHT_FLUSH_BASE,
+            StandardHandRanks::StraightFlush { sf } => RankOrder::AceIsHigh.get_score(sf) + STRAIGHT_FLUSH_BASE,
         }
     }
 
@@ -241,24 +241,24 @@ mod test {
         let sf_highest = StandardHandRanks::StraightFlush { sf: Rank::Ace };
 
         let mut all_hands = vec![
-            one_pair_highest.clone(),
-            one_pair_lowest.clone(),
-            two_pair_highest.clone(),
-            two_pair_lowest.clone(),
-            high_card_highest.clone(),
-            high_card_lowest.clone(),
-            trip_lowest.clone(),
-            trip_highest.clone(),
-            straight_highest.clone(),
-            straight_lowest.clone(),
-            flush_highest.clone(),
-            flush_lowest.clone(),
-            full_house_highest.clone(),
-            full_house_lowest.clone(),
-            quads_highest.clone(),
-            quads_lowest.clone(),
-            sf_lowest.clone(),
-            sf_highest.clone(),
+            one_pair_highest,
+            one_pair_lowest,
+            two_pair_highest,
+            two_pair_lowest,
+            high_card_highest,
+            high_card_lowest,
+            trip_lowest,
+            trip_highest,
+            straight_highest,
+            straight_lowest,
+            flush_highest,
+            flush_lowest,
+            full_house_highest,
+            full_house_lowest,
+            quads_highest,
+            quads_lowest,
+            sf_lowest,
+            sf_highest,
         ];
 
         all_hands.sort();

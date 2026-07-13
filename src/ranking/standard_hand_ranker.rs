@@ -47,20 +47,18 @@ impl StandardHandRanker {
             StandardHandRanks::StraightFlush { sf }
         } else {
             let rank_count = deck.get_rank_count();
-            let best_quads = rank_count.find_highest_with_n(&vec![], 4);
+            let best_quads = rank_count.find_highest_with_n(&[], 4);
 
-            if let Some(quad) = best_quads {
-                if let Some(kicker) = rank_count.find_highest_with_n(&vec![quad], 1) {
+            if let Some(quad) = best_quads
+                && let Some(kicker) = rank_count.find_highest_with_n(&[quad], 1) {
                     return StandardHandRanks::FourOfAKind { q: quad, c: kicker };
                 }
-            }
-            let best_trips = rank_count.find_highest_with_n(&vec![], 3);
+            let best_trips = rank_count.find_highest_with_n(&[], 3);
 
-            if let Some(trip) = best_trips {
-                if let Some(pair) = rank_count.find_highest_with_n(&vec![trip], 2) {
+            if let Some(trip) = best_trips
+                && let Some(pair) = rank_count.find_highest_with_n(&[trip], 2) {
                     return StandardHandRanks::FullHouse { t: trip, p: pair };
                 }
-            }
             if let Some(flush_ranks) = Self::get_flush(deck) {
                 return StandardHandRanks::Flush {
                     c1: flush_ranks[0],
@@ -73,18 +71,16 @@ impl StandardHandRanker {
             if let Some(s) = Self::get_straight(deck) {
                 return StandardHandRanks::Straight { s };
             }
-            if let Some(trip) = best_trips {
-                if let Some(c1) = rank_count.find_highest_with_n(&vec![trip], 1) {
-                    if let Some(c2) = rank_count.find_highest_with_n(&vec![trip, c1], 1) {
+            if let Some(trip) = best_trips
+                && let Some(c1) = rank_count.find_highest_with_n(&[trip], 1)
+                    && let Some(c2) = rank_count.find_highest_with_n(&[trip, c1], 1) {
                         return StandardHandRanks::ThreeOfAKind { t: trip, c1, c2 };
                     }
-                }
-            }
-            if let Some(best_pair) = rank_count.find_highest_with_n(&vec![], 2) {
-                if let Some(second_best_pair) = rank_count.find_highest_with_n(&vec![best_pair], 2)
+            if let Some(best_pair) = rank_count.find_highest_with_n(&[], 2) {
+                if let Some(second_best_pair) = rank_count.find_highest_with_n(&[best_pair], 2)
                 {
                     if let Some(c) =
-                        rank_count.find_highest_with_n(&vec![best_pair, second_best_pair], 1)
+                        rank_count.find_highest_with_n(&[best_pair, second_best_pair], 1)
                     {
                         return StandardHandRanks::TwoPair {
                             p1: best_pair,
@@ -92,10 +88,10 @@ impl StandardHandRanker {
                             c1: c,
                         };
                     }
-                } else if let Some(c1) = rank_count.find_highest_with_n(&vec![best_pair], 1) {
-                    if let Some(c2) = rank_count.find_highest_with_n(&vec![best_pair, c1], 1) {
-                        if let Some(c3) =
-                            rank_count.find_highest_with_n(&vec![best_pair, c1, c2], 1)
+                } else if let Some(c1) = rank_count.find_highest_with_n(&[best_pair], 1)
+                    && let Some(c2) = rank_count.find_highest_with_n(&[best_pair, c1], 1)
+                        && let Some(c3) =
+                            rank_count.find_highest_with_n(&[best_pair, c1, c2], 1)
                         {
                             return StandardHandRanks::OnePair {
                                 p: best_pair,
@@ -104,8 +100,6 @@ impl StandardHandRanker {
                                 c3,
                             };
                         }
-                    }
-                }
             }
 
             if let Some(highest_cards) = deck.get_combined_ranks().get_highest_five(&RankOrder::AceIsHigh) {
@@ -159,10 +153,7 @@ impl StandardHandRanker {
         for (single_suit_rank, _) in deck.get_single_suit_ranks() {
             match (Self::get_straight_from_rank_bitfield(&single_suit_rank), found) {
                 (Some(straight), Some(found_val)) => {
-                    match RankOrder::AceIsHigh.cmp(straight, found_val) {
-                        std::cmp::Ordering::Greater => found = Some(straight),
-                        _ => {}
-                    }
+                    if RankOrder::AceIsHigh.cmp(straight, found_val) == std::cmp::Ordering::Greater { found = Some(straight) }
                 }
                 (Some(straight), None) => found = Some(straight),
                 (None, _) => {}

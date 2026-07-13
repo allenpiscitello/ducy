@@ -156,7 +156,7 @@ impl Card {
     ///
     /// The `Deck` value representing this card.
     pub fn get_deck(&self) -> Deck {
-        self.val.clone()
+        self.val
     }
 
     /// Parses a string representation of a card and returns a `Card` instance if successful.
@@ -214,7 +214,7 @@ pub struct Deck {
 
 impl Display for Deck {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let card_iterator = DeckCardIterator::new(self.clone(), true);
+        let card_iterator = DeckCardIterator::new(*self, true);
         let cards_str: Vec<String> = card_iterator.map(|x| format!("{}", x)).collect();
         let cards_as_str = cards_str.join(" ");
         write!(f, "{}", cards_as_str)
@@ -228,8 +228,8 @@ const ALL_CARDS_BITFIELD: u64 = SINGLE_SUIT_BITFIELD
     | SINGLE_SUIT_BITFIELD << 16
     | SINGLE_SUIT_BITFIELD << 32
     | SINGLE_SUIT_BITFIELD << 48;
-const ALL_CARDS_NO_LOW_ACES_BITFIELD: u64 = SINGLE_SUIT_HIGH_ACE_BITFIELD
-    | SINGLE_SUIT_HIGH_ACE_BITFIELD
+const ALL_CARDS_NO_LOW_ACES_BITFIELD: u64 =
+    SINGLE_SUIT_HIGH_ACE_BITFIELD
     | SINGLE_SUIT_HIGH_ACE_BITFIELD << 16
     | SINGLE_SUIT_HIGH_ACE_BITFIELD << 32
     | SINGLE_SUIT_HIGH_ACE_BITFIELD << 48;
@@ -380,7 +380,7 @@ impl Deck {
     ///
     /// * `rank_first` - If true, the iterator will prioritize ranks over suits.
     pub fn iter(&self, rank_first: bool) -> impl Iterator<Item = Card> {
-        DeckCardIterator::new(self.clone(), rank_first)
+        DeckCardIterator::new(*self, rank_first)
     }    
 
     /// Returns the nth card from the deck if it exists.
@@ -396,9 +396,9 @@ impl Deck {
     pub fn try_get_nth_card(&self, index: usize) -> Option<Card> {
         let num_cards = self.num_cards();
         if index > num_cards as usize {
-            return None;
+            None
         } else {
-            return Some(self.get_nth_card_unchecked(index));
+            Some(self.get_nth_card_unchecked(index))
         }
     }
 
@@ -440,7 +440,7 @@ impl Deck {
     /// Returns an iterator over for each suit in the deck that returns a set of which ranks are present in each suit.  
     pub fn get_single_suit_ranks(&self) -> impl Iterator<Item = (RankSet, Suit)> {
         SingleSuitRankIterator {
-            deck: self.clone(),
+            deck: *self,
             suit_index: 0,
         }
     }
@@ -500,10 +500,10 @@ impl Deck {
 
     fn get_rank_counts(&self) -> [u32; 13] {
         let mut counts = [0; 13];
-        for i in 0..13 {
+        (0..13).for_each(|i| {
             let filtered = self.cards & (SINGLE_RANK_FILTER >> i);
             counts[i] = filtered.count_ones();
-        }
+        });
         counts
     }
 
@@ -519,28 +519,27 @@ impl Deck {
 
     fn get_bits_for_card(rank: &Rank, suit: &Suit) -> u64 {
         let rank_bits: u64 = match rank {
-            &Rank::Ace => 1 << 13 | 1,
-            &Rank::Two => 1 << 1,
-            &Rank::Three => 1 << 2,
-            &Rank::Four => 1 << 3,
-            &Rank::Five => 1 << 4,
-            &Rank::Six => 1 << 5,
-            &Rank::Seven => 1 << 6,
-            &Rank::Eight => 1 << 7,
-            &Rank::Nine => 1 << 8,
-            &Rank::Ten => 1 << 9,
-            &Rank::Jack => 1 << 10,
-            &Rank::Queen => 1 << 11,
-            &Rank::King => 1 << 12,
+            Rank::Ace => 1 << 13 | 1,
+            Rank::Two => 1 << 1,
+            Rank::Three => 1 << 2,
+            Rank::Four => 1 << 3,
+            Rank::Five => 1 << 4,
+            Rank::Six => 1 << 5,
+            Rank::Seven => 1 << 6,
+            Rank::Eight => 1 << 7,
+            Rank::Nine => 1 << 8,
+            Rank::Ten => 1 << 9,
+            Rank::Jack => 1 << 10,
+            Rank::Queen => 1 << 11,
+            Rank::King => 1 << 12,
         };
         let suit_shift = match suit {
-            &Suit::Clubs => 0,
-            &Suit::Diamonds => 16,
-            &Suit::Hearts => 32,
-            &Suit::Spades => 48,
+            Suit::Clubs => 0,
+            Suit::Diamonds => 16,
+            Suit::Hearts => 32,
+            Suit::Spades => 48,
         };
-        let bits = rank_bits << suit_shift;
-        bits
+        rank_bits << suit_shift
     }
 
 }
@@ -568,7 +567,7 @@ impl Iterator for DeckCardIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.suit_index >= 4 || self.rank_index >= 13 {
-            return None;
+            None
         } else {
             let bit_to_check = RANK_BITS[12 - self.rank_index] << (16 * self.suit_index);
             let card = if self.deck.cards & bit_to_check == bit_to_check {
@@ -596,7 +595,7 @@ impl Iterator for DeckCardIterator {
             }
 
             if card.is_some() {
-                return card;
+                card
             } else {
                 self.next()
             }
@@ -678,7 +677,7 @@ impl RankSet {
                 return Some(RANKS[15 - field_length - i + 2]);
             }
         }
-        return None;
+        None
     }
 }
 
@@ -689,7 +688,7 @@ pub struct RankCount {
 impl RankCount {
     pub fn find_highest_with_n(
         &self,
-        ranks_to_exclude: &Vec<Rank>,
+        ranks_to_exclude: &[Rank],
         target_count: u32,
     ) -> Option<Rank> {
         for (index, val) in self.rank_counts.iter().enumerate() {
@@ -701,7 +700,7 @@ impl RankCount {
                 }
             }
         }
-        return None;
+        None
     }
 }
 
@@ -735,12 +734,12 @@ impl Sub for &Deck {
 
 impl SubAssign for Deck {
     fn sub_assign(&mut self, rhs: Self) {
-        *self = self.clone() - rhs;
+        *self = *self - rhs;
     }
 }
 impl<'a> SubAssign<&'a Deck> for Deck {
     fn sub_assign(&mut self, rhs: &'a Deck) {
-        self.cards = self.cards & !rhs.cards;
+        self.cards &= !rhs.cards;
     }
 }
 struct CardIterator {
@@ -778,7 +777,7 @@ impl DeckIterator {
         let num_cards = deck.num_cards();
         let iterator = numerica::combinatorics::CombinationIterator::new(num_cards as usize, size);
         Self {
-            deck: deck,
+            deck,
             iterator,
         }
     }
@@ -827,8 +826,8 @@ mod test {
         let two_clubs = Card::new(Rank::Two, Suit::Clubs);
         let three_clubs = Card::new(Rank::Three, Suit::Clubs);
 
-        empty.insert_cards([two_clubs.clone()].iter());
-        full.remove_cards([three_clubs.clone()].into_iter());
+        empty.insert_cards([two_clubs].iter());
+        full.remove_cards([three_clubs].into_iter());
         assert!(empty.has_card(&two_clubs));
         assert!(!empty.has_card(&three_clubs));
         assert!(!full.has_card(&three_clubs));
@@ -873,7 +872,7 @@ mod test {
                 subdeck_3.try_remove_nth_card(0).unwrap();
                 subdeck_3.try_remove_nth_card(0).unwrap();
             } else {
-                assert!(false)
+                unreachable!();
             }
         }
     }
