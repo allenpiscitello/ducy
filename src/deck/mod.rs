@@ -1,6 +1,6 @@
 
 use std::fmt::Display;
-use std::ops::BitOr;
+use std::ops::{BitOr, Sub, SubAssign};
 
 use numerica::combinatorics::CombinationIterator;
 
@@ -323,8 +323,13 @@ impl Deck {
     }
 
     /// Checks if the deck contains the specified card.
-    pub fn has_card(&self, card: Card) -> bool {
+    pub fn has_card(&self, card: &Card) -> bool {
         card.get_deck().cards & self.cards > 0
+    }
+
+    /// Checks if the deck contains the specified cards.
+    pub fn has_cards(&self, deck: &Deck) -> bool {
+        deck.cards & self.cards == deck.cards
     }
 
     /// Inserts multiple cards into the deck.
@@ -347,7 +352,7 @@ impl Deck {
     /// # Returns
     ///
     /// None. The deck is modified in place.
-    pub fn remove_cards<'a>(&mut self, cards: impl Iterator<Item = &'a Card>) {
+    pub fn remove_cards(&mut self, cards: impl Iterator<Item = Card>) {
         for card in cards {
             self.cards ^= card.get_deck().cards
         }
@@ -374,9 +379,9 @@ impl Deck {
     /// # Arguments
     ///
     /// * `rank_first` - If true, the iterator will prioritize ranks over suits.
-    pub fn iterate(&self, rank_first: bool) -> impl Iterator<Item = Card> {
+    pub fn iter(&self, rank_first: bool) -> impl Iterator<Item = Card> {
         DeckCardIterator::new(self.clone(), rank_first)
-    }
+    }    
 
     /// Returns the nth card from the deck if it exists.
     ///
@@ -482,7 +487,7 @@ impl Deck {
     }
 
     fn get_nth_card_unchecked(&self, index: usize) -> Card {
-        let mut iterator = self.iterate(true);
+        let mut iterator = self.iter(true);
         for i in 0..index + 1 {
             let card = iterator.next();
             if i == index {
@@ -508,7 +513,7 @@ impl Deck {
 
         fn remove_nth_card_unchecked(&mut self, index: usize) -> Card {
         let card = self.get_nth_card_unchecked(index);
-        self.remove_cards([card].iter());
+        self.remove_cards([card].into_iter());
         card
     }
 
@@ -710,6 +715,34 @@ impl BitOr for Deck {
     }
 }
 
+impl Sub for Deck {
+    type Output = Deck;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        let cards = self.cards & !(rhs.cards);
+        Deck { cards }
+    }
+}
+
+impl Sub for &Deck {
+    type Output = Deck;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        let cards = self.cards & !(rhs.cards);
+        Deck { cards }
+    }
+}
+
+impl SubAssign for Deck {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = self.clone() - rhs;
+    }
+}
+impl<'a> SubAssign<&'a Deck> for Deck {
+    fn sub_assign(&mut self, rhs: &'a Deck) {
+        self.cards = self.cards & !rhs.cards;
+    }
+}
 struct CardIterator {
     last_index: usize,
 }
@@ -787,23 +820,23 @@ mod test {
         let mut full = Deck::all_cards();
 
         for card in Card::values() {
-            assert!(!empty.has_card(card));
-            assert!(full.has_card(card))
+            assert!(!empty.has_card(&card));
+            assert!(full.has_card(&card))
         }
 
         let two_clubs = Card::new(Rank::Two, Suit::Clubs);
         let three_clubs = Card::new(Rank::Three, Suit::Clubs);
 
         empty.insert_cards([two_clubs.clone()].iter());
-        full.remove_cards([three_clubs.clone()].iter());
-        assert!(empty.has_card(two_clubs));
-        assert!(!empty.has_card(three_clubs));
-        assert!(!full.has_card(three_clubs));
-        assert!(full.has_card(two_clubs));
+        full.remove_cards([three_clubs.clone()].into_iter());
+        assert!(empty.has_card(&two_clubs));
+        assert!(!empty.has_card(&three_clubs));
+        assert!(!full.has_card(&three_clubs));
+        assert!(full.has_card(&two_clubs));
 
         let card = empty.try_remove_nth_card(0).unwrap();
         assert_eq!(card, two_clubs);
-        assert!(!empty.has_card(two_clubs));
+        assert!(!empty.has_card(&two_clubs));
 
         println!("{}", full);
         let card = full.try_remove_nth_card(3).unwrap();
