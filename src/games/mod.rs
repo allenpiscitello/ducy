@@ -4,7 +4,7 @@ use crate::ranking::hand_rank::HandRanking;
 
 pub mod holdem;
 pub mod omaha;
-
+pub mod flop_game;
 
 pub trait GameState {
 

@@ -2,85 +2,18 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::{deck::{Card, Deck}, games::{GameEvaluation, GameState, GameWinner}, ranking::{hand_rank::StandardHandRanks, standard_hand_ranker::StandardHandRanker}};
+use crate::{deck::{Card, Deck}, games::{GameEvaluation, GameState, GameWinner, flop_game::{FlopGame, FlopGameState}}, ranking::{hand_rank::StandardHandRanks, standard_hand_ranker::StandardHandRanker}};
 
 
 pub struct HoldemGameState {
-    hole_cards: Vec<Deck>,
-    flop: Deck,
-    turn: Option<Card>,
-    river: Option<Card>,
-    remaining_cards_in_deck: Deck,
+    flop_game_state: FlopGameState,
 }
-
 
 impl HoldemGameState {
     pub fn new() -> Self {
         Self { 
-            hole_cards: vec![],
-            flop: Deck::empty(),
-            turn: None,
-            river: None,
-            remaining_cards_in_deck: Deck::all_cards()
-        }
-    }
-    pub fn add_player(&mut self, cards: Deck) -> Result<(), String> {
-        if cards.num_cards() != 2 {
-            return Err("Incorrect number of cards".to_owned())
-        }
-        if !self.remaining_cards_in_deck.has_cards(&cards) {
-            return Err("Cards not in deck".to_owned());
-        }
-
-        self.remaining_cards_in_deck -= cards;
-        self.hole_cards.push(cards);
-
-        Ok(())
-    } 
-
-    pub fn set_flop(&mut self, cards: Deck) -> Result<(), String> {
-        if cards.num_cards() != 3 {
-            return Err("Incorrect number of cards".to_owned())
-        }
-        if !self.remaining_cards_in_deck.has_cards(&cards) {
-            return Err("Cards not in deck".to_owned());
-        }
-        self.remaining_cards_in_deck -= cards;
-        self.flop = cards;
-        
-        Ok(())
-        
-    }
-
-    pub fn set_turn(&mut self, card: Card) -> Result<(), String> {
-        if !self.remaining_cards_in_deck.has_card(&card) {
-            return Err("Card is not in deck".to_owned())
-        } 
-        self.remaining_cards_in_deck.remove_cards([card].into_iter());
-        self.turn = Some(card);
-        Ok(())   
-    }
-
-    pub fn set_river(&mut self, card: Card) -> Result<(), String> {
-        if !self.remaining_cards_in_deck.has_card(&card) {
-            return Err("Card is not in deck".to_owned())
-        } 
-        self.remaining_cards_in_deck.remove_cards([card].into_iter());
-        self.river = Some(card);
-        Ok(())   
-    }
-
-    pub fn get_community_cards(&self) -> Deck {
-        let mut cards = self.flop;
-        let mut other_cards = vec![];
-        if let Some(turn) = self.turn {
-            other_cards.push(turn);
-        }
-        if let Some(river) = self.river {
-            other_cards.push(river);
-        }
-        cards.insert_cards(other_cards.iter());
-        cards
+            flop_game_state: FlopGameState::new(2)
+         }
     }
 }
 
@@ -89,6 +22,33 @@ impl Default for HoldemGameState {
         Self::new()
     }
 }
+
+impl FlopGame for HoldemGameState {
+    fn get_community_cards(&self) -> Deck {
+        self.flop_game_state.get_community_cards()
+    }
+
+    fn add_player(&mut self, cards: Deck) -> Result<(), String> {
+        self.flop_game_state.add_player(cards)
+    }
+    
+    fn set_flop(&mut self, cards: Deck) -> Result<(), String> {
+        self.flop_game_state.set_flop(cards)
+    }
+    
+    fn set_turn(&mut self, card: Card) -> Result<(), String> {
+        self.flop_game_state.set_turn(card)
+    }
+    
+    fn set_river(&mut self, card: Card) -> Result<(), String> {
+        self.flop_game_state.set_river(card)
+    }
+    
+    fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck> {
+        self.flop_game_state.get_player_hole_cards()
+    }
+}
+
 
 impl GameState for HoldemGameState {}
 
@@ -110,7 +70,7 @@ impl GameEvaluation<HoldemGameState, StandardHandRanks> for HoldemGameEvaluation
     fn evaluate_winners(&self, game_state: &HoldemGameState) -> Vec<GameWinner<StandardHandRanks>> {
         let mut best_hand: Option<StandardHandRanks> = None;
         let mut winners = vec![];
-        for (i, player) in game_state.hole_cards.iter().enumerate() {
+        for (i, player) in game_state.get_player_hole_cards().enumerate() {
             let combined_deck = *player | game_state.get_community_cards();
             let rank = StandardHandRanker::get_rank(&combined_deck);
             match best_hand {
@@ -143,7 +103,7 @@ impl GameEvaluation<HoldemGameState, StandardHandRanks> for HoldemGameEvaluation
 mod test {
     use rust_decimal_macros::dec;
 
-use crate::{deck::{Card, Deck, Rank}, games::{GameEvaluation, GameWinner, holdem::{HoldemGameEvaluation, HoldemGameState}}, ranking::hand_rank::StandardHandRanks};
+use crate::{deck::{Card, Deck, Rank}, games::{GameEvaluation, GameWinner, flop_game::FlopGame, holdem::{HoldemGameEvaluation, HoldemGameState}}, ranking::hand_rank::StandardHandRanks};
 
     
     #[test]
