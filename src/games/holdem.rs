@@ -164,8 +164,8 @@ use crate::{deck::{Card, Deck, Rank}, games::{GameEvaluation, GameWinner, holdem
         let winners = HoldemGameEvaluation{}.evaluate_winners(&holdem_hand);
 
         assert_eq!(winners.len(), 2);
-        assert_eq!(winners[0], GameWinner { player_index: 0, pot_amount: dec!(.5), winning_hand: StandardHandRanks::Straight { s: Rank::Ace } });
-        assert_eq!(winners[1], GameWinner { player_index: 1, pot_amount: dec!(.5), winning_hand: StandardHandRanks::Straight { s: Rank::Ace } });
+        assert_eq!(winners[0], GameWinner { player_index: 0, pot_amount: dec!(0.5), winning_hand: StandardHandRanks::Straight { s: Rank::Ace } });
+        assert_eq!(winners[1], GameWinner { player_index: 1, pot_amount: dec!(0.5), winning_hand: StandardHandRanks::Straight { s: Rank::Ace } });
      
     }
 
