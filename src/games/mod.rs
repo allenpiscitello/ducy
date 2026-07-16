@@ -30,3 +30,7 @@ impl<H: HandRanking> GameWinner<H> {
 pub trait GameEvaluation<GS: GameState, H: HandRanking>  {
     fn evaluate_winners(&self, game_state: &GS) -> Vec<GameWinner<H>>; 
 }
+
+pub trait GameEquityEvaluation<GS: GameState, H: HandRanking, GE: GameEvaluation<GS, H>> {
+    fn evaluate_equity(&self, game_state: &GS) -> Vec<Decimal>;
+}

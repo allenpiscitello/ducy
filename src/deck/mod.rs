@@ -379,8 +379,8 @@ impl Deck {
     /// # Arguments
     ///
     /// * `rank_first` - If true, the iterator will prioritize ranks over suits.
-    pub fn iter(&self, rank_first: bool) -> impl Iterator<Item = Card> {
-        DeckCardIterator::new(*self, rank_first)
+    pub fn iter(self, rank_first: bool) -> impl Iterator<Item = Card> {
+        DeckCardIterator::new(self, rank_first)
     }    
 
     /// Returns the nth card from the deck if it exists.
