@@ -7,6 +7,7 @@ pub struct FlopGameState {
     flop: Deck,
     turn: Option<Card>,
     river: Option<Card>,
+    community_cards: Deck,
     remaining_cards_in_deck: Deck,
     num_hole_cards_per_player: u32,
 }
@@ -18,9 +19,17 @@ impl FlopGameState {
             flop: Deck::empty(),
             turn: None,
             river: None,
+            community_cards: Deck::empty(),
             remaining_cards_in_deck: Deck::all_cards(),
             num_hole_cards_per_player,
         }
+    }
+
+    pub fn add_community_cards(&mut self, deck: &Deck) -> Result<(), String>{
+        //TODO: should make sure the sizes of these are right
+        // we could arbitrarily assign flop/turn/river for these as well
+        self.community_cards |= *deck;
+        Ok(())
     }
 }
 
@@ -49,6 +58,7 @@ impl FlopGame for FlopGameState {
         }
         self.remaining_cards_in_deck -= cards;
         self.flop = cards;
+        self.community_cards |= cards;
         
         Ok(())
         
@@ -61,6 +71,7 @@ impl FlopGame for FlopGameState {
         } 
         self.remaining_cards_in_deck.remove_cards([card].into_iter());
         self.turn = Some(card);
+        self.community_cards |= card;
         Ok(())   
     }
 
@@ -70,20 +81,12 @@ impl FlopGame for FlopGameState {
         } 
         self.remaining_cards_in_deck.remove_cards([card].into_iter());
         self.river = Some(card);
+        self.community_cards |= card;
         Ok(())   
     }
 
     fn get_community_cards(&self) -> Deck {
-        let mut cards = self.flop;
-        let mut other_cards = vec![];
-        if let Some(turn) = self.turn {
-            other_cards.push(turn);
-        }
-        if let Some(river) = self.river {
-            other_cards.push(river);
-        }
-        cards.insert_cards(other_cards.iter());
-        cards
+        self.community_cards
     }
     
     fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck> {
@@ -91,45 +94,35 @@ impl FlopGame for FlopGameState {
     }
     
     fn get_final_states<'a>(&'a self) -> impl Iterator<Item = Self> +'a {
-        // TODO: This can be optimized by not caring about which card is flop/turn/river and do way fewer evaluations
-    
+
         if self.flop.is_empty() {
-            let flop_iterator = self.remaining_cards_in_deck.enumerate_combinations(3);
-            FlopGameStateIterator::Flop { iterator: FlopIterator { base_state: self.clone(), flop_iterator: Box::new(flop_iterator), turn_iterator: None } } 
+            FlopGameStateIterator::AllCards { iterator: CommunityCardIterator { base_state: self.clone(), iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(5)) } }
         } else if self.turn.is_none() {
-            let turn_iterator = self.remaining_cards_in_deck.iter(true);
-            FlopGameStateIterator::Turn { iterator: TurnIterator {
-                base_state: self.clone(),
-                turn_iterator: Box::new(turn_iterator),
-                river_iterator: None,
-                }
-            } 
+            FlopGameStateIterator::AllCards { iterator: CommunityCardIterator { base_state: self.clone(), iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(2)) } }
         }
         else if self.river.is_none() {
-            let river_iterator = self.remaining_cards_in_deck.iter(true);
-            FlopGameStateIterator::River { 
-                iterator: RiverIterator { 
-                    base_state: self.clone(),
-                    river_iterator: Box::new(river_iterator),
-                }
-            }
+            FlopGameStateIterator::AllCards { iterator: CommunityCardIterator { base_state: self.clone(), iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(1)) } }
         }
         else {
             FlopGameStateIterator::Complete { game_state: self.clone(), iterated: false }
         }
     }
+
 }
 
 enum FlopGameStateIterator {
-    Flop {
-        iterator: FlopIterator,
+    AllCards {
+        iterator: CommunityCardIterator,
     },
-    Turn { 
-       iterator: TurnIterator
-    },
-    River {
-        iterator: RiverIterator
-    },
+    // Flop {
+    //     iterator: FlopIterator,
+    // },
+    // Turn { 
+    //    iterator: TurnIterator
+    // },
+    // River {
+    //     iterator: RiverIterator
+    // },
     Complete {
         game_state: FlopGameState,
         iterated: bool,
@@ -142,9 +135,10 @@ impl Iterator for FlopGameStateIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            FlopGameStateIterator::Flop { iterator } => iterator.next(),
-            FlopGameStateIterator::Turn { iterator } => iterator.next(),
-            FlopGameStateIterator::River { iterator } => iterator.next(),
+            FlopGameStateIterator::AllCards { iterator } => { iterator.next() }
+            // FlopGameStateIterator::Flop { iterator } => iterator.next(),
+            // FlopGameStateIterator::Turn { iterator } => iterator.next(),
+            // FlopGameStateIterator::River { iterator } => iterator.next(),
             FlopGameStateIterator::Complete { game_state,iterated  } => {
                 if *iterated { None } else { 
                     *iterated = true;
@@ -154,103 +148,120 @@ impl Iterator for FlopGameStateIterator {
     }
 }
 
-
-struct FlopIterator {
+struct CommunityCardIterator {
     base_state: FlopGameState,
-    flop_iterator: Box<dyn Iterator<Item=Deck>>,
-    turn_iterator: Option<TurnIterator>,
+    iterator: Box<dyn Iterator<Item = Deck>>,
+}
+
+impl Iterator for CommunityCardIterator {
+    type Item = FlopGameState;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iterator.next().map(|x| {
+            let mut game_state = self.base_state.clone();
+            game_state.add_community_cards(&x).unwrap();
+            game_state
+        })
+    
+    }
 }
 
 
-impl Iterator for FlopIterator {
-    type Item = FlopGameState;
+// struct FlopIterator {
+//     base_state: FlopGameState,
+//     flop_iterator: Box<dyn Iterator<Item=Deck>>,
+//     turn_iterator: Option<TurnIterator>,
+// }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(turn_iterator) = &mut self.turn_iterator {
-            match turn_iterator.next() {
-                Some(state) => Some(state),
-                None => {
-                    self.turn_iterator = None;
-                    self.next()
-                }
-            }
-        } else {
-            match self.flop_iterator.next() {
-                Some(flop) => {
-                    let mut game_state = self.base_state.clone();
-                    game_state.set_flop(flop).unwrap();
-                    self.turn_iterator = 
-                    Some(TurnIterator {
-                        base_state: game_state.clone(),
-                        turn_iterator: Box::new(game_state.remaining_cards_in_deck.iter(true)),
-                        river_iterator: None, 
-                    });
-                    self.next()
-                }
-                None => None
-            }
+
+// impl Iterator for FlopIterator {
+//     type Item = FlopGameState;
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         if let Some(turn_iterator) = &mut self.turn_iterator {
+//             match turn_iterator.next() {
+//                 Some(state) => Some(state),
+//                 None => {
+//                     self.turn_iterator = None;
+//                     self.next()
+//                 }
+//             }
+//         } else {
+//             match self.flop_iterator.next() {
+//                 Some(flop) => {
+//                     let mut game_state = self.base_state.clone();
+//                     game_state.set_flop(flop).unwrap();
+//                     self.turn_iterator = 
+//                     Some(TurnIterator {
+//                         base_state: game_state.clone(),
+//                         turn_iterator: Box::new(game_state.remaining_cards_in_deck.iter(true)),
+//                         river_iterator: None, 
+//                     });
+//                     self.next()
+//                 }
+//                 None => None
+//             }
             
-        }
-    }
-}
+//         }
+//     }
+// }
 
-struct TurnIterator {
-    base_state: FlopGameState,
-    turn_iterator: Box<dyn Iterator<Item=Card>>,
-    river_iterator: Option<RiverIterator>,
-}
+// struct TurnIterator {
+//     base_state: FlopGameState,
+//     turn_iterator: Box<dyn Iterator<Item=Card>>,
+//     river_iterator: Option<RiverIterator>,
+// }
 
-impl Iterator for TurnIterator {
-    type Item = FlopGameState;
+// impl Iterator for TurnIterator {
+//     type Item = FlopGameState;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(river_iterator) = &mut self.river_iterator {
-            match river_iterator.next() {
-                Some(state) => Some(state),
-                None => {
-                    self.river_iterator = None;
-                    self.next()
-                }
-            }
-        } else {
-            match self.turn_iterator.next() {
-                Some(turn) => {
-                    let mut game_state = self.base_state.clone();
-                    game_state.set_turn(turn).unwrap();
-                    self.river_iterator = 
-                    Some(RiverIterator {
-                        base_state: game_state.clone(),
-                        river_iterator: Box::new(game_state.remaining_cards_in_deck.iter(true))
-                    });
-                    self.next()
-                }
-                None => None
-            }
+//     fn next(&mut self) -> Option<Self::Item> {
+//         if let Some(river_iterator) = &mut self.river_iterator {
+//             match river_iterator.next() {
+//                 Some(state) => Some(state),
+//                 None => {
+//                     self.river_iterator = None;
+//                     self.next()
+//                 }
+//             }
+//         } else {
+//             match self.turn_iterator.next() {
+//                 Some(turn) => {
+//                     let mut game_state = self.base_state.clone();
+//                     game_state.set_turn(turn).unwrap();
+//                     self.river_iterator = 
+//                     Some(RiverIterator {
+//                         base_state: game_state.clone(),
+//                         river_iterator: Box::new(game_state.remaining_cards_in_deck.iter(true))
+//                     });
+//                     self.next()
+//                 }
+//                 None => None
+//             }
             
-        }
-    }
-}
+//         }
+//     }
+// }
 
 
-struct RiverIterator {
-    base_state: FlopGameState,
-    river_iterator: Box<dyn Iterator<Item=Card>>,
-}
+// struct RiverIterator {
+//     base_state: FlopGameState,
+//     river_iterator: Box<dyn Iterator<Item=Card>>,
+// }
 
-impl Iterator for RiverIterator {
-    type Item = FlopGameState;
+// impl Iterator for RiverIterator {
+//     type Item = FlopGameState;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut new_state = self.base_state.clone();
-        if let Some(river) = self.river_iterator.next() {
-            new_state.set_river(river).unwrap();
-            Some(new_state)
-        }
-        else {
-            None
-        }
-    }
-}
+//     fn next(&mut self) -> Option<Self::Item> {
+//         let mut new_state = self.base_state.clone();
+//         if let Some(river) = self.river_iterator.next() {
+//             new_state.set_river(river).unwrap();
+//             Some(new_state)
+//         }
+//         else {
+//             None
+//         }
+//     }
+// }
 
 
 pub trait FlopGame {

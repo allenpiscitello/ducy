@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::{deck::{Card, Deck}, games::{GameEvaluation, GameState, GameWinner, flop_game::{FlopGame, FlopGameState}}, ranking::{hand_rank::StandardHandRanks, hand_rank::StandardHandRanker}};
+use crate::{deck::{Card, Deck}, games::{GameEquityEvaluation, GameEvaluation, GameState, GameWinner, flop_game::{FlopGame, FlopGameState}}, ranking::hand_rank::{StandardHandRanker, StandardHandRanks}};
 
 pub struct OmahaGameState {
     flop_game_state: FlopGameState
@@ -104,12 +104,32 @@ impl GameEvaluation<OmahaGameState, StandardHandRanks> for OmahaGameEvaluation {
     }
 }
 
+ 
+impl GameEquityEvaluation<OmahaGameState, StandardHandRanks, OmahaGameEvaluation> for OmahaGameEvaluation {
+    fn evaluate_equity(&self, game_state: &OmahaGameState) -> Vec<Decimal> {
+        let mut winner_equity: Vec<Decimal> = game_state.get_player_hole_cards().map(|_| dec!(0)).collect();
+        let mut hand_count = 0;
+        for runout in game_state.get_final_states() {
+            let winners = OmahaGameEvaluation{}.evaluate_winners(&runout);
+            let num_winners = winners.len();
+            let equity = if num_winners > 0 {
+                dec!(1.0) / Decimal::from(num_winners)
+            } else { dec!(0) };
+            for winner in winners {
+                winner_equity[winner.player_index] += equity;
+            } 
+            hand_count += 1;           
+        }
+        winner_equity.iter().map(|x| x / Decimal::from(hand_count)).collect()
+    }
+}
+
 
 #[cfg(test)]
 mod test {
     use rust_decimal_macros::dec;
 
-use crate::{deck::{Card, Deck, Rank}, games::{GameEvaluation, GameWinner, flop_game::FlopGame, omaha::{OmahaGameEvaluation, OmahaGameState}}, ranking::hand_rank::StandardHandRanks};
+    use crate::{deck::{Card, Deck, Rank}, games::{GameEquityEvaluation, GameEvaluation, GameWinner, flop_game::FlopGame, omaha::{OmahaGameEvaluation, OmahaGameState}}, ranking::hand_rank::StandardHandRanks};
 
     
     #[test]
@@ -134,6 +154,11 @@ use crate::{deck::{Card, Deck, Rank}, games::{GameEvaluation, GameWinner, flop_g
         let winners = evaluator.evaluate_winners(&state);
         assert_eq!(winners.len(), 1);
         assert_eq!(winners[0], GameWinner { player_index: 0, pot_amount: dec!(1), winning_hand: StandardHandRanks::FullHouse { t: Rank::Jack, p: Rank::Ten} } );
+
+        let equity = evaluator.evaluate_equity(&state);
+        assert_eq!(equity.len(), 2);
+        assert_eq!(equity[0], dec!(38)/ dec!(40));
+        assert_eq!(equity[1], dec!(2)/ dec!(40));
 
         state.set_river(Card::parse("Qh").unwrap()).unwrap();
 

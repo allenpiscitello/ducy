@@ -1,6 +1,6 @@
 
 use std::fmt::Display;
-use std::ops::{BitOr, Sub, SubAssign};
+use std::ops::{BitOr, BitOrAssign, Sub, SubAssign};
 
 use numerica::combinatorics::CombinationIterator;
 
@@ -714,6 +714,18 @@ impl BitOr for Deck {
     }
 }
 
+impl BitOrAssign for Deck {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.cards |= rhs.cards
+    }
+}
+
+impl BitOrAssign<Card> for Deck {
+    fn bitor_assign(&mut self, rhs: Card) {
+        self.cards |= rhs.val.cards
+    }
+}
+
 impl Sub for Deck {
     type Output = Deck;
 
@@ -742,6 +754,8 @@ impl<'a> SubAssign<&'a Deck> for Deck {
         self.cards &= !rhs.cards;
     }
 }
+
+
 struct CardIterator {
     last_index: usize,
 }
