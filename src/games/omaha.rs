@@ -72,7 +72,7 @@ impl GameEvaluation<OmahaGameState, StandardHandRanks> for OmahaGameEvaluation {
             // This will brute force things are correct by attempting every combintaion
             for community_cards_of_3 in game_state.get_community_cards().enumerate_combinations(3) {
                 for player_cards_group_of_2 in player.enumerate_combinations(2) {
-                    // TODO: Common short circuit here:
+                    
                     let combined_deck = community_cards_of_3 | player_cards_group_of_2;
                     if let Some(rank) = StandardHandRanker::get_rank_at_least(&combined_deck, best_hand) {
                         match best_hand {

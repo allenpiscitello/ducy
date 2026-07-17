@@ -26,8 +26,9 @@ impl FlopGameState {
     }
 
     pub fn add_community_cards(&mut self, deck: &Deck) -> Result<(), String>{
-        //TODO: should make sure the sizes of these are right
-        // we could arbitrarily assign flop/turn/river for these as well
+        if self.community_cards.num_cards() + deck.num_cards() > 5 {
+            return Err("Too many community cards".to_owned())
+        }
         self.community_cards |= *deck;
         Ok(())
     }
@@ -65,7 +66,9 @@ impl FlopGame for FlopGameState {
     }
 
     fn set_turn(&mut self, card: Card) -> Result<(), String> {
-        // TODO: need to have flop set
+        if self.flop.is_empty() {
+            return Err("Must set flop first".to_owned());
+        }
         if !self.remaining_cards_in_deck.has_card(&card) {
             return Err("Card is not in deck".to_owned())
         } 
