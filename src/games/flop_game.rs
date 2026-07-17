@@ -79,6 +79,9 @@ impl FlopGame for FlopGameState {
     }
 
     fn set_river(&mut self, card: Card) -> Result<(), String> {
+        if self.turn.is_none() {
+            return Err("Need to set turn first".to_owned());
+        }
         if !self.remaining_cards_in_deck.has_card(&card) {
             return Err("Card is not in deck".to_owned())
         } 
