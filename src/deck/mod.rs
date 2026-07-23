@@ -755,6 +755,17 @@ impl<'a> SubAssign<&'a Deck> for Deck {
     }
 }
 
+impl From<u64> for Deck {
+    fn from(value: u64) -> Self {
+        Deck { cards: value }
+    }
+}
+
+impl From<Deck> for u64 {
+    fn from(val: Deck) -> Self {
+        val.cards
+    }
+}
 
 struct CardIterator {
     last_index: usize,

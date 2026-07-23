@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::{deck::{Card, Deck}, games::{GameEquityEvaluation, GameEvaluation, GameState, GameWinner, flop_game::{FlopGame, FlopGameState}}, ranking::hand_rank::{StandardHandRanker, StandardHandRanks}};
+use crate::{deck::{Card, Deck, Suit}, games::{GameEquityEvaluation, GameEvaluation, GameState, GameWinner, flop_game::{FlopGame, FlopGameState}}, ranking::hand_rank::{StandardHandRanker, StandardHandRanks}};
 
 pub struct OmahaGameState {
     flop_game_state: FlopGameState
@@ -12,6 +12,17 @@ impl OmahaGameState {
    pub fn new(cards_per_player: u32) -> Self { 
     Self { flop_game_state: FlopGameState::new(cards_per_player)}
    }
+   // Evaluate what state we have
+   // SF Possible? If so, how many?
+   // Boats possible? If so now many combos are possible
+   // Big difference if it's 3 of a kind vs pair board, as lots of quads possible
+   // Board pair card is important, if it's the lowest or highest
+   // If it's 4 of a kind out
+   // Get Nuts Combos
+   // Nuts = Cannot be beat
+   // Nut blockers
+   // What cards completely block the nuts
+   // What cards partially block nuts (1/4, 1/2, 3/4, fully)
 }
 
 impl FlopGame for OmahaGameState {
@@ -47,6 +58,61 @@ impl FlopGame for OmahaGameState {
 
 impl GameState for OmahaGameState {}
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum BoardTone {
+    Monotone { suit: Suit },
+    FourFlush { suit: Suit },
+    ThreeFlush { suit: Suit },
+    Rainbow { }    
+}
+
+pub enum BoardPairs { 
+    NoPairs,
+    OnePair,
+    Trips,
+    Quads,
+    TwoPairs,
+    FullHouse,
+}
+
+pub enum BoardTexture {
+    Todo,
+}
+
+
+pub trait OmahaBoardAnalysis {
+    fn board_tone(&self) -> BoardTone;
+    fn board_pairs(&self) -> BoardPairs;
+    fn board_texture(&self) -> BoardTexture;
+    fn board_straight_flushes(&self) -> BoardTexture;
+}
+
+impl OmahaBoardAnalysis for OmahaGameState {
+    fn board_tone(&self) -> BoardTone {
+        for (ranks, suit) in self.get_community_cards().get_single_suit_ranks() {
+            match ranks.num_unique_ranks() {
+                5 => return BoardTone::Monotone { suit },
+                4 => return BoardTone::FourFlush { suit },
+                3 => return BoardTone::ThreeFlush { suit },
+                _ => {}
+            }
+        }
+        BoardTone::Rainbow {  }
+    }
+
+    fn board_pairs(&self) -> BoardPairs {
+        let _ranks = self.get_community_cards().get_rank_count();
+        todo!()
+    }
+
+    fn board_texture(&self) -> BoardTexture {
+        todo!()
+    }
+
+    fn board_straight_flushes(&self) -> BoardTexture {
+        todo!()
+    }
+}
 
 pub struct OmahaGameEvaluation {
 }
@@ -129,7 +195,7 @@ impl GameEquityEvaluation<OmahaGameState, StandardHandRanks, OmahaGameEvaluation
 mod test {
     use rust_decimal_macros::dec;
 
-    use crate::{deck::{Card, Deck, Rank}, games::{GameEquityEvaluation, GameEvaluation, GameWinner, flop_game::FlopGame, omaha::{OmahaGameEvaluation, OmahaGameState}}, ranking::hand_rank::StandardHandRanks};
+    use crate::{deck::{Card, Deck, Rank, Suit}, games::{GameEquityEvaluation, GameEvaluation, GameWinner, flop_game::FlopGame, omaha::{BoardTone, OmahaBoardAnalysis, OmahaGameEvaluation, OmahaGameState}}, ranking::hand_rank::StandardHandRanks};
 
     
     #[test]
@@ -144,12 +210,15 @@ mod test {
 
         let evaluator = OmahaGameEvaluation {};
 
+        assert_eq!(state.board_tone(), BoardTone::Rainbow {});
+
         let winners = evaluator.evaluate_winners(&state);
 
         assert_eq!(winners.len(), 1);
         assert_eq!(winners[0], GameWinner { player_index: 1, pot_amount: dec!(1), winning_hand: StandardHandRanks::Straight { s: Rank::Queen} } );
 
         state.set_turn(Card::parse("Jd").unwrap()).unwrap();
+        assert_eq!(state.board_tone(), BoardTone::Rainbow {});
 
         let winners = evaluator.evaluate_winners(&state);
         assert_eq!(winners.len(), 1);
@@ -162,10 +231,15 @@ mod test {
 
         state.set_river(Card::parse("Qh").unwrap()).unwrap();
 
+        assert_eq!(state.board_tone(), BoardTone::ThreeFlush { suit: Suit::Hearts});
+
         let winners = evaluator.evaluate_winners(&state);
         assert_eq!(winners.len(), 1);
         assert_eq!(winners[0], GameWinner { player_index: 1, pot_amount: dec!(1), winning_hand: StandardHandRanks::StraightFlush { sf: Rank::Queen}});
 
+    
+
     }
 
+        
 }

@@ -101,7 +101,7 @@ const FOUR_OF_KIND_BASE: u32 = FULL_HOUSE_BASE + TWO_OPTIONS;
 const STRAIGHT_FLUSH_BASE: u32 = FOUR_OF_KIND_BASE + TWO_OPTIONS;
 
 impl StandardHandRanks {
-    fn get_score(&self) -> u32 {
+    pub fn get_score(&self) -> u32 {
         match self {
             StandardHandRanks::HighCard { c1, c2, c3, c4, c5 } => {
                 Self::get_score_from_ranks(&[c1, c2, c3, c4, c5])

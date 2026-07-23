@@ -103,7 +103,7 @@ impl GameEvaluation<HoldemGameState, StandardHandRanks> for HoldemGameEvaluation
     } 
 
 }
-
+ 
 impl GameEquityEvaluation<HoldemGameState, StandardHandRanks, HoldemGameEvaluation> for HoldemGameEvaluation {
     fn evaluate_equity(&self, game_state: &HoldemGameState) -> Vec<Decimal> {
         let mut winner_equity: Vec<Decimal> = game_state.get_player_hole_cards().map(|_| dec!(0)).collect();
