@@ -8,6 +8,25 @@ pub enum RankOrder {
 
 impl RankOrder {
 
+    pub fn get_ranks_between(&self, low_rank: &Rank, high_rank: Option<&Rank>) -> impl Iterator<Item = Rank> {
+        // high card must be higher than 
+        let mut cards = vec![Rank::Ace, Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six, Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten, Rank::Jack, Rank::Queen, Rank::King, Rank::Ace];
+        if let &RankOrder::AceIsLow = self {
+            cards.truncate(13);
+        } else {
+            cards.remove(0);
+        }       
+
+        let low_score = self.get_score(low_rank);
+        cards.retain(|x| self.get_score(x) >= low_score);
+        if let Some(high_rank) = high_rank {
+            let high_score = self.get_score(high_rank);
+            cards.retain(|x| self.get_score(x) < high_score);
+          
+        }
+        cards.into_iter()
+    }
+   
     pub fn get_score(&self, rank: &Rank) -> u32 {
         let return_val = match rank {
             Rank::Two => 1,
@@ -41,9 +60,7 @@ impl RankOrder {
 #[cfg(test)]
 mod test {
     use crate::{
-        deck::*,
-        ranking::hand_rank::StandardHandRanks,
-        ranking::hand_rank::StandardHandRanker,
+        deck::*, ranking::{hand_rank::{StandardHandRanker, StandardHandRanks}, standard_hand_ranker::RankOrder},
     };
 
     macro_rules! assert_rank {
@@ -125,5 +142,17 @@ mod test {
                 c3: Rank::Four
             }
         );
+    }
+
+    #[test]
+    pub fn test_rank_between() {
+
+        let ranks_between: Vec<Rank> = RankOrder::AceIsHigh.get_ranks_between(&Rank::Three, Some(&Rank::Seven)).collect();
+
+        assert_eq!(ranks_between, [Rank::Three, Rank::Four, Rank::Five, Rank::Six]);
+        let ranks_between: Vec<Rank> = RankOrder::AceIsHigh.get_ranks_between(&Rank::Queen, None).collect();
+
+        assert_eq!(ranks_between, [Rank::Queen, Rank::King, Rank::Ace]);
+
     }
 }

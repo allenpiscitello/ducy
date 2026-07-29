@@ -8,9 +8,10 @@ description = "A performant analysis library for poker."
 
 
 [dependencies]
-strum = "0.26"
-strum_macros = "0.26"
-rand = "0.10.1"
-numerica = "1.4.3"
+strum = "0.28.0"
+strum_macros = "0.28.0"
+rand = "0.10.2"
+numerica = "2.2.0"
 rust_decimal = "1.42.1"
 rust_decimal_macros = "1.40.0"
+regex = "1.13.1"

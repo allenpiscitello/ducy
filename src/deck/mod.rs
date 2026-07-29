@@ -9,6 +9,8 @@ use strum_macros::EnumIter;
 use crate::ranking::standard_hand_ranker::RankOrder;
 
 
+pub mod range;
+
 /// Represents the rank of a playing card (Two through Ace).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Hash)]
 pub enum Rank {
@@ -207,7 +209,7 @@ impl Card {
 /// Represents a deck of playing cards.
 /// Able to hold any subset of playing cards, up to one of each card.
 /// Provides methods to create, parse, and display decks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Deck {
     cards: u64,
 }
