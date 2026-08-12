@@ -660,7 +660,7 @@ impl RankSet {
         for i in 0..(15 - field_length) {
             let must_match = required_on_bits << (14 - field_length - i);
             if must_match & self.ranks == must_match {
-                return Some(RANKS[16 - field_length - i + 2]);
+                return Some(RANKS[13 - i]);
             }
         }
         None
