@@ -1,4 +1,3 @@
-
 use std::fmt::Display;
 use std::ops::{BitOr, BitOrAssign, Sub, SubAssign};
 
@@ -7,7 +6,6 @@ use numerica::combinatorics::CombinationIterator;
 use strum_macros::EnumIter;
 
 use crate::ranking::standard_hand_ranker::RankOrder;
-
 
 pub mod range;
 
@@ -108,7 +106,6 @@ impl Display for Suit {
     }
 }
 
-
 /// Represents a playing card with a rank and suit.
 /// Provides methods to create, parse, and display cards.
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -205,7 +202,6 @@ impl Card {
     }
 }
 
-
 /// Represents a deck of playing cards.
 /// Able to hold any subset of playing cards, up to one of each card.
 /// Provides methods to create, parse, and display decks.
@@ -230,8 +226,7 @@ const ALL_CARDS_BITFIELD: u64 = SINGLE_SUIT_BITFIELD
     | SINGLE_SUIT_BITFIELD << 16
     | SINGLE_SUIT_BITFIELD << 32
     | SINGLE_SUIT_BITFIELD << 48;
-const ALL_CARDS_NO_LOW_ACES_BITFIELD: u64 =
-    SINGLE_SUIT_HIGH_ACE_BITFIELD
+const ALL_CARDS_NO_LOW_ACES_BITFIELD: u64 = SINGLE_SUIT_HIGH_ACE_BITFIELD
     | SINGLE_SUIT_HIGH_ACE_BITFIELD << 16
     | SINGLE_SUIT_HIGH_ACE_BITFIELD << 32
     | SINGLE_SUIT_HIGH_ACE_BITFIELD << 48;
@@ -276,7 +271,6 @@ const RANK_BITS: [u64; 13] = [
 const SUITS: [Suit; 4] = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
 
 impl Deck {
-    
     /// Creates an empty deck with no cards.
     pub fn empty() -> Self {
         Self { cards: 0 }
@@ -383,7 +377,7 @@ impl Deck {
     /// * `rank_first` - If true, the iterator will prioritize ranks over suits.
     pub fn iter(self, rank_first: bool) -> impl Iterator<Item = Card> {
         DeckCardIterator::new(self, rank_first)
-    }    
+    }
 
     /// Returns the nth card from the deck if it exists.
     ///
@@ -412,7 +406,7 @@ impl Deck {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a vector of the removed `Card`s if successful, or an error message if there are not enough cards in the deck. 
+    /// A `Result` containing a vector of the removed `Card`s if successful, or an error message if there are not enough cards in the deck.
     pub fn try_remove_random_cards(&mut self, number_to_remove: u32) -> Result<Vec<Card>, String> {
         let mut num_cards = self.num_cards();
         let mut cards = vec![];
@@ -474,7 +468,6 @@ impl Deck {
         DeckIterator::new(self, num_cards)
     }
 
-
     fn get_single_suit_card_ranks(&self, i: usize) -> u64 {
         self.cards >> (16 * i) & SINGLE_SUIT_BITFIELD
     }
@@ -513,7 +506,7 @@ impl Deck {
         cards & ALL_CARDS_NO_LOW_ACES_BITFIELD
     }
 
-        fn remove_nth_card_unchecked(&mut self, index: usize) -> Card {
+    fn remove_nth_card_unchecked(&mut self, index: usize) -> Card {
         let card = self.get_nth_card_unchecked(index);
         self.remove_cards([card].into_iter());
         card
@@ -543,7 +536,6 @@ impl Deck {
         };
         rank_bits << suit_shift
     }
-
 }
 
 struct DeckCardIterator {
@@ -596,11 +588,7 @@ impl Iterator for DeckCardIterator {
                 }
             }
 
-            if card.is_some() {
-                card
-            } else {
-                self.next()
-            }
+            if card.is_some() { card } else { self.next() }
         }
     }
 }
@@ -630,19 +618,18 @@ pub struct RankSet {
 }
 
 impl RankSet {
-    
     /// Returns the number of unique ranks present.
     pub fn num_unique_ranks(&self) -> u32 {
         self.ranks.count_ones()
     }
-    
+
     /// Returns the highest five ranks present, if there are at least five unique ranks.
     pub fn get_highest_five(&self, rank_order: &RankOrder) -> Option<[Rank; 5]> {
-    
-        let all_ranks = self.ranks & match rank_order {
-            RankOrder::AceIsHigh => SINGLE_SUIT_HIGH_ACE_BITFIELD,
-            RankOrder::AceIsLow => SINGLE_SUIT_LOW_ACE_BITFIELD,
-        };
+        let all_ranks = self.ranks
+            & match rank_order {
+                RankOrder::AceIsHigh => SINGLE_SUIT_HIGH_ACE_BITFIELD,
+                RankOrder::AceIsLow => SINGLE_SUIT_LOW_ACE_BITFIELD,
+            };
 
         let count = u64::count_ones(all_ranks);
         if count < 5 {
@@ -664,15 +651,11 @@ impl RankSet {
     }
 
     /// Checks if the rank set matches a specific bit pattern.
-    /// 
+    ///
     /// `required_on_bits` specifies which bits must be set.
     /// `field_length` specifies the length of the bit field to check.
     /// Returns the highest rank that matches the pattern, if any.
-    pub fn matches_pattern(
-        &self,
-        required_on_bits: u64,
-        field_length: usize
-    ) -> Option<Rank> {
+    pub fn matches_pattern(&self, required_on_bits: u64, field_length: usize) -> Option<Rank> {
         for i in 0..(15 - field_length) {
             let must_match = required_on_bits << (14 - field_length - i);
             if must_match & self.ranks == must_match {
@@ -803,10 +786,7 @@ impl DeckIterator {
     fn new(deck: Deck, size: usize) -> Self {
         let num_cards = deck.num_cards();
         let iterator = numerica::combinatorics::CombinationIterator::new(num_cards as usize, size);
-        Self {
-            deck,
-            iterator,
-        }
+        Self { deck, iterator }
     }
 }
 
@@ -926,10 +906,7 @@ mod test {
             assert_eq!(other_card, card);
         }
 
-        assert_eq!(
-            Card::parse("As")?,
-            Card::new(Rank::Ace, Suit::Spades)
-        );
+        assert_eq!(Card::parse("As")?, Card::new(Rank::Ace, Suit::Spades));
 
         Ok(())
     }
