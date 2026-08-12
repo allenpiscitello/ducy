@@ -236,7 +236,8 @@ const SINGLE_RANK_FILTER: u64 = SINGLE_RANK_BITFIELD
     | SINGLE_RANK_BITFIELD << 32
     | SINGLE_RANK_BITFIELD << 48;
 
-const RANKS: [Rank; 13] = [
+const RANKS: [Rank; 14] = [
+    Rank::Ace,
     Rank::Two,
     Rank::Three,
     Rank::Four,
@@ -569,7 +570,7 @@ impl Iterator for DeckCardIterator {
                     Deck {
                         cards: bit_to_check,
                     },
-                    RANKS[12 - self.rank_index],
+                    RANKS[13 - self.rank_index],
                     SUITS[self.suit_index],
                 ))
             } else {
@@ -639,7 +640,7 @@ impl RankSet {
             for i in 1..14 {
                 let target = 0b1 << (14 - i);
                 if target & all_ranks == target {
-                    return_val.push(RANKS[13 - i]);
+                    return_val.push(RANKS[14 - i]);
                     if return_val.len() == 5 {
                         break;
                     }
@@ -659,7 +660,7 @@ impl RankSet {
         for i in 0..(15 - field_length) {
             let must_match = required_on_bits << (14 - field_length - i);
             if must_match & self.ranks == must_match {
-                return Some(RANKS[15 - field_length - i + 2]);
+                return Some(RANKS[16 - field_length - i + 2]);
             }
         }
         None
@@ -677,11 +678,11 @@ impl RankCount {
         target_count: u32,
     ) -> Option<Rank> {
         for (index, val) in self.rank_counts.iter().enumerate() {
-            if ranks_to_exclude.contains(&RANKS[12 - index]) {
+            if ranks_to_exclude.contains(&RANKS[13 - index]) {
                 continue;
             } else {
                 if *val >= target_count {
-                    return Some(RANKS[12 - index]);
+                    return Some(RANKS[13 - index]);
                 }
             }
         }
