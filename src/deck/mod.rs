@@ -621,7 +621,7 @@ pub struct RankSet {
 impl RankSet {
     /// Returns the number of unique ranks present.
     pub fn num_unique_ranks(&self) -> u32 {
-        self.ranks.count_ones()
+        (self.ranks & SINGLE_SUIT_LOW_ACE_BITFIELD).count_ones()
     }
 
     /// Returns the highest five ranks present, if there are at least five unique ranks.
