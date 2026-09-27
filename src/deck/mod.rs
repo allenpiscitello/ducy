@@ -680,10 +680,8 @@ impl RankCount {
         for (index, val) in self.rank_counts.iter().enumerate() {
             if ranks_to_exclude.contains(&RANKS[13 - index]) {
                 continue;
-            } else {
-                if *val >= target_count {
-                    return Some(RANKS[13 - index]);
-                }
+            } else if *val >= target_count {
+                return Some(RANKS[13 - index]);
             }
         }
         None

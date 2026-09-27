@@ -1,5 +1,4 @@
-use crate::{deck::{Card, Deck}};
-
+use crate::deck::{Card, Deck};
 
 #[derive(Clone)]
 pub struct FlopGameState {
@@ -14,7 +13,7 @@ pub struct FlopGameState {
 
 impl FlopGameState {
     pub fn new(num_hole_cards_per_player: u32) -> Self {
-        Self { 
+        Self {
             hole_cards: vec![],
             flop: Deck::empty(),
             turn: None,
@@ -25,9 +24,9 @@ impl FlopGameState {
         }
     }
 
-    pub fn add_community_cards(&mut self, deck: &Deck) -> Result<(), String>{
+    pub fn add_community_cards(&mut self, deck: &Deck) -> Result<(), String> {
         if self.community_cards.num_cards() + deck.num_cards() > 5 {
-            return Err("Too many community cards".to_owned())
+            return Err("Too many community cards".to_owned());
         }
         self.community_cards |= *deck;
         Ok(())
@@ -35,10 +34,9 @@ impl FlopGameState {
 }
 
 impl FlopGame for FlopGameState {
-    
     fn add_player(&mut self, cards: Deck) -> Result<(), String> {
         if cards.num_cards() != self.num_hole_cards_per_player {
-            return Err("Incorrect number of cards".to_owned())
+            return Err("Incorrect number of cards".to_owned());
         }
         if !self.remaining_cards_in_deck.has_cards(&cards) {
             return Err("Cards not in deck".to_owned());
@@ -48,11 +46,11 @@ impl FlopGame for FlopGameState {
         self.hole_cards.push(cards);
 
         Ok(())
-    } 
+    }
 
     fn set_flop(&mut self, cards: Deck) -> Result<(), String> {
         if cards.num_cards() != 3 {
-            return Err("Incorrect number of cards".to_owned())
+            return Err("Incorrect number of cards".to_owned());
         }
         if !self.remaining_cards_in_deck.has_cards(&cards) {
             return Err("Cards not in deck".to_owned());
@@ -60,9 +58,8 @@ impl FlopGame for FlopGameState {
         self.remaining_cards_in_deck -= cards;
         self.flop = cards;
         self.community_cards |= cards;
-        
+
         Ok(())
-        
     }
 
     fn set_turn(&mut self, card: Card) -> Result<(), String> {
@@ -70,12 +67,13 @@ impl FlopGame for FlopGameState {
             return Err("Must set flop first".to_owned());
         }
         if !self.remaining_cards_in_deck.has_card(&card) {
-            return Err("Card is not in deck".to_owned())
-        } 
-        self.remaining_cards_in_deck.remove_cards([card].into_iter());
+            return Err("Card is not in deck".to_owned());
+        }
+        self.remaining_cards_in_deck
+            .remove_cards([card].into_iter());
         self.turn = Some(card);
         self.community_cards |= card;
-        Ok(())   
+        Ok(())
     }
 
     fn set_river(&mut self, card: Card) -> Result<(), String> {
@@ -83,37 +81,52 @@ impl FlopGame for FlopGameState {
             return Err("Need to set turn first".to_owned());
         }
         if !self.remaining_cards_in_deck.has_card(&card) {
-            return Err("Card is not in deck".to_owned())
-        } 
-        self.remaining_cards_in_deck.remove_cards([card].into_iter());
+            return Err("Card is not in deck".to_owned());
+        }
+        self.remaining_cards_in_deck
+            .remove_cards([card].into_iter());
         self.river = Some(card);
         self.community_cards |= card;
-        Ok(())   
+        Ok(())
     }
 
     fn get_community_cards(&self) -> Deck {
         self.community_cards
     }
-    
+
     fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck> {
         self.hole_cards.iter()
     }
-    
-    fn get_final_states<'a>(&'a self) -> impl Iterator<Item = Self> +'a {
 
+    fn get_final_states<'a>(&'a self) -> impl Iterator<Item = Self> + 'a {
         if self.flop.is_empty() {
-            FlopGameStateIterator::AllCards { iterator: CommunityCardIterator { base_state: self.clone(), iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(5)) } }
+            FlopGameStateIterator::AllCards {
+                iterator: CommunityCardIterator {
+                    base_state: self.clone(),
+                    iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(5)),
+                },
+            }
         } else if self.turn.is_none() {
-            FlopGameStateIterator::AllCards { iterator: CommunityCardIterator { base_state: self.clone(), iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(2)) } }
-        }
-        else if self.river.is_none() {
-            FlopGameStateIterator::AllCards { iterator: CommunityCardIterator { base_state: self.clone(), iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(1)) } }
-        }
-        else {
-            FlopGameStateIterator::Complete { game_state: self.clone(), iterated: false }
+            FlopGameStateIterator::AllCards {
+                iterator: CommunityCardIterator {
+                    base_state: self.clone(),
+                    iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(2)),
+                },
+            }
+        } else if self.river.is_none() {
+            FlopGameStateIterator::AllCards {
+                iterator: CommunityCardIterator {
+                    base_state: self.clone(),
+                    iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(1)),
+                },
+            }
+        } else {
+            FlopGameStateIterator::Complete {
+                game_state: self.clone(),
+                iterated: false,
+            }
         }
     }
-
 }
 
 enum FlopGameStateIterator {
@@ -123,8 +136,7 @@ enum FlopGameStateIterator {
     Complete {
         game_state: FlopGameState,
         iterated: bool,
-    }
-    
+    },
 }
 
 impl Iterator for FlopGameStateIterator {
@@ -132,12 +144,18 @@ impl Iterator for FlopGameStateIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            FlopGameStateIterator::AllCards { iterator } => { iterator.next() }
-            FlopGameStateIterator::Complete { game_state,iterated  } => {
-                if *iterated { None } else { 
+            FlopGameStateIterator::AllCards { iterator } => iterator.next(),
+            FlopGameStateIterator::Complete {
+                game_state,
+                iterated,
+            } => {
+                if *iterated {
+                    None
+                } else {
                     *iterated = true;
-                    Some(game_state.clone())}
-                },
+                    Some(game_state.clone())
+                }
+            }
         }
     }
 }
@@ -155,14 +173,13 @@ impl Iterator for CommunityCardIterator {
             game_state.add_community_cards(&x).unwrap();
             game_state
         })
-    
     }
 }
 
 pub trait FlopGame {
     fn get_community_cards(&self) -> Deck;
     fn add_player(&mut self, cards: Deck) -> Result<(), String>;
-    
+
     fn set_flop(&mut self, cards: Deck) -> Result<(), String>;
 
     fn set_turn(&mut self, card: Card) -> Result<(), String>;
@@ -171,5 +188,5 @@ pub trait FlopGame {
 
     fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck>;
 
-    fn get_final_states<'a>(&'a self) -> impl Iterator<Item = Self> +'a;
+    fn get_final_states<'a>(&'a self) -> impl Iterator<Item = Self> + 'a;
 }
