@@ -285,4 +285,34 @@ mod test {
             }
         );
     }
+
+    #[test]
+    pub fn test_board_tone_monotone() {
+        let mut state = OmahaGameState::new(4);
+        state
+            .add_player(Deck::parse("As Ac 2d 3d").unwrap())
+            .unwrap();
+        state.set_flop(Deck::parse("2h 3h 4h").unwrap()).unwrap();
+        state.set_turn(Card::parse("5h").unwrap()).unwrap();
+        state.set_river(Card::parse("6h").unwrap()).unwrap();
+        assert_eq!(
+            state.board_tone(),
+            BoardTone::Monotone { suit: Suit::Hearts }
+        );
+    }
+
+    #[test]
+    pub fn test_board_tone_four_flush() {
+        let mut state = OmahaGameState::new(4);
+        state
+            .add_player(Deck::parse("As Ac 2d 3d").unwrap())
+            .unwrap();
+        state.set_flop(Deck::parse("2h 3h 4h").unwrap()).unwrap();
+        state.set_turn(Card::parse("5h").unwrap()).unwrap();
+        state.set_river(Card::parse("6c").unwrap()).unwrap();
+        assert_eq!(
+            state.board_tone(),
+            BoardTone::FourFlush { suit: Suit::Hearts }
+        );
+    }
 }

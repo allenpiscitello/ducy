@@ -388,4 +388,47 @@ mod test {
 
         assert_eq!(actual_range_items, range_1);
     }
+
+    #[test]
+    pub fn test_add_player_wrong_card_count() {
+        let mut game = HoldemGameState::new();
+        assert!(game.add_player(Deck::parse("As Ks Qs").unwrap()).is_err());
+    }
+
+    #[test]
+    pub fn test_add_player_duplicate_cards() {
+        let mut game = HoldemGameState::new();
+        game.add_player(Deck::parse("As Ks").unwrap()).unwrap();
+        assert!(game.add_player(Deck::parse("As Qd").unwrap()).is_err());
+    }
+
+    #[test]
+    pub fn test_set_flop_wrong_card_count() {
+        let mut game = HoldemGameState::new();
+        game.add_player(Deck::parse("As Ks").unwrap()).unwrap();
+        assert!(game.set_flop(Deck::parse("Qd Jd").unwrap()).is_err());
+    }
+
+    #[test]
+    pub fn test_set_turn_before_flop() {
+        let mut game = HoldemGameState::new();
+        game.add_player(Deck::parse("As Ks").unwrap()).unwrap();
+        assert!(game.set_turn(Card::parse("2c").unwrap()).is_err());
+    }
+
+    #[test]
+    pub fn test_set_river_before_turn() {
+        let mut game = HoldemGameState::new();
+        game.add_player(Deck::parse("As Ks").unwrap()).unwrap();
+        game.set_flop(Deck::parse("Qd Jd Td").unwrap()).unwrap();
+        assert!(game.set_river(Card::parse("2c").unwrap()).is_err());
+    }
+
+    #[test]
+    pub fn test_set_turn_card_not_in_deck() {
+        let mut game = HoldemGameState::new();
+        game.add_player(Deck::parse("As Ks").unwrap()).unwrap();
+        game.set_flop(Deck::parse("Qd Jd Td").unwrap()).unwrap();
+        assert!(game.set_turn(Card::parse("As").unwrap()).is_err());
+    }
 }
