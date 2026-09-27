@@ -5,6 +5,7 @@ use numerica::combinatorics::CombinationIterator;
 
 use strum_macros::EnumIter;
 
+use crate::error::DucyError;
 use crate::ranking::standard_hand_ranker::RankOrder;
 
 pub mod range;
@@ -31,7 +32,7 @@ impl Rank {
     /// Tries to create a `Rank` from a character representation.
     /// Returns `Ok(Rank)` if successful, or `Err(String)` if the character is invalid.
     /// Characters representing ranks are: '2'-'9', 'T' (Ten), 'J' (Jack), 'Q' (Queen), 'K' (King), 'A' (Ace).
-    pub fn try_from_char(val: &char) -> Result<Self, String> {
+    pub fn try_from_char(val: &char) -> Result<Self, DucyError> {
         match val.to_ascii_lowercase() {
             'a' => Ok(Rank::Ace),
             '2' => Ok(Rank::Two),
@@ -46,7 +47,7 @@ impl Rank {
             'j' => Ok(Rank::Jack),
             'q' => Ok(Rank::Queen),
             'k' => Ok(Rank::King),
-            _ => Err("Invalid value".to_owned()),
+            _ => Err(DucyError::InvalidRank),
         }
     }
 }
@@ -84,13 +85,13 @@ impl Suit {
     /// Tries to create a `Suit` from a character representation.
     /// Returns `Ok(Suit)` if successful, or `Err(String)` if the character is invalid.
     /// Characters representing suits are: 'c' (Clubs), 'd' (Diamonds), 'h' (Hearts), 's' (Spades).
-    pub fn try_from_char(val: &char) -> Result<Self, String> {
+    pub fn try_from_char(val: &char) -> Result<Self, DucyError> {
         match val.to_ascii_lowercase() {
             'c' => Ok(Suit::Clubs),
             'd' => Ok(Suit::Diamonds),
             'h' => Ok(Suit::Hearts),
             's' => Ok(Suit::Spades),
-            _ => Err("Invalid value".to_owned()),
+            _ => Err(DucyError::InvalidSuit),
         }
     }
 }
@@ -161,14 +162,14 @@ impl Card {
     /// Parses a string representation of a card and returns a `Card` instance if successful.
     /// The string should have the format "<rank><suit>", e.g., "Ah" for Ace of Hearts.
     /// Returns `Err(String)` if the string is invalid.
-    pub fn parse(val: &str) -> Result<Self, String> {
+    pub fn parse(val: &str) -> Result<Self, DucyError> {
         let trimmed = val.trim();
         if trimmed.len() < 2 {
-            return Err("Invalid Value".to_owned());
+            return Err(DucyError::InvalidCard);
         }
         let mut chars = val.chars();
-        let rank: char = chars.next().ok_or("Invalid value".to_owned())?;
-        let suit = chars.next().ok_or("Invalid value".to_owned())?;
+        let rank: char = chars.next().ok_or(DucyError::InvalidCard)?;
+        let suit = chars.next().ok_or(DucyError::InvalidCard)?;
         Ok(Self::new(
             Rank::try_from_char(&rank)?,
             Suit::try_from_char(&suit)?,
@@ -292,11 +293,11 @@ impl Deck {
     /// # Returns
     ///
     /// A `Result` containing the `Deck` instance if parsing is successful, or an error message if parsing fails.
-    pub fn parse(val: &str) -> Result<Self, String> {
+    pub fn parse(val: &str) -> Result<Self, DucyError> {
         let owned_cards: Vec<Card> = val
             .split(' ')
-            .map(|x| Card::parse(x).map_err(|_| "Invalid value for card".to_owned()))
-            .collect::<Result<Vec<Card>, String>>()?; // ? unwraps the Result
+            .map(Card::parse)
+            .collect::<Result<Vec<Card>, DucyError>>()?;
 
         let mut empty = Self::empty();
         empty.insert_cards(owned_cards.iter());
@@ -363,10 +364,10 @@ impl Deck {
     /// # Returns
     ///
     /// A `Result` containing the removed `Card` if successful, or an error message if the index is out of bounds.
-    fn try_remove_nth_card(&mut self, index: usize) -> Result<Card, String> {
+    fn try_remove_nth_card(&mut self, index: usize) -> Result<Card, DucyError> {
         let num_cards = self.num_cards();
         if index >= num_cards as usize {
-            return Err("Too many cards".to_owned());
+            return Err(DucyError::NotEnoughCards);
         }
         Ok(self.remove_nth_card_unchecked(index))
     }
@@ -408,12 +409,15 @@ impl Deck {
     /// # Returns
     ///
     /// A `Result` containing a vector of the removed `Card`s if successful, or an error message if there are not enough cards in the deck.
-    pub fn try_remove_random_cards(&mut self, number_to_remove: u32) -> Result<Vec<Card>, String> {
+    pub fn try_remove_random_cards(
+        &mut self,
+        number_to_remove: u32,
+    ) -> Result<Vec<Card>, DucyError> {
         let mut num_cards = self.num_cards();
         let mut cards = vec![];
 
         if number_to_remove > num_cards {
-            return Err("Too many cards to remove".to_owned());
+            return Err(DucyError::NotEnoughCards);
         }
         for _ in 0..number_to_remove {
             let index = rand::random_range(0..num_cards);
@@ -890,7 +894,7 @@ mod test {
     }
 
     #[test]
-    pub fn test_from_str() -> Result<(), String> {
+    pub fn test_from_str() -> Result<(), DucyError> {
         for i in 0..52 {
             let card = Deck::all_cards().try_get_nth_card(i).unwrap();
             let display: String = format!("{}", card);

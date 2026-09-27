@@ -3,6 +3,7 @@ use rust_decimal_macros::dec;
 
 use crate::{
     deck::{Card, Deck, Suit},
+    error::DucyError,
     games::{
         GameEquityEvaluation, GameEvaluation, GameState, GameWinner,
         flop_game::{FlopGame, FlopGameState},
@@ -20,17 +21,6 @@ impl OmahaGameState {
             flop_game_state: FlopGameState::new(cards_per_player),
         }
     }
-    // Evaluate what state we have
-    // SF Possible? If so, how many?
-    // Boats possible? If so now many combos are possible
-    // Big difference if it's 3 of a kind vs pair board, as lots of quads possible
-    // Board pair card is important, if it's the lowest or highest
-    // If it's 4 of a kind out
-    // Get Nuts Combos
-    // Nuts = Cannot be beat
-    // Nut blockers
-    // What cards completely block the nuts
-    // What cards partially block nuts (1/4, 1/2, 3/4, fully)
 }
 
 impl FlopGame for OmahaGameState {
@@ -38,19 +28,19 @@ impl FlopGame for OmahaGameState {
         self.flop_game_state.get_community_cards()
     }
 
-    fn add_player(&mut self, cards: Deck) -> Result<(), String> {
+    fn add_player(&mut self, cards: Deck) -> Result<(), DucyError> {
         self.flop_game_state.add_player(cards)
     }
 
-    fn set_flop(&mut self, cards: Deck) -> Result<(), String> {
+    fn set_flop(&mut self, cards: Deck) -> Result<(), DucyError> {
         self.flop_game_state.set_flop(cards)
     }
 
-    fn set_turn(&mut self, card: Card) -> Result<(), String> {
+    fn set_turn(&mut self, card: Card) -> Result<(), DucyError> {
         self.flop_game_state.set_turn(card)
     }
 
-    fn set_river(&mut self, card: Card) -> Result<(), String> {
+    fn set_river(&mut self, card: Card) -> Result<(), DucyError> {
         self.flop_game_state.set_river(card)
     }
 
@@ -145,9 +135,6 @@ impl GameEvaluation<OmahaGameState, StandardHandRanks> for OmahaGameEvaluation {
         let mut best_hand: Option<StandardHandRanks> = None;
         let mut winners = vec![];
         for (i, player) in game_state.get_player_hole_cards().enumerate() {
-            // There are more optimal ways to do this, where you require a hand to be greater than the best found so far.
-            // Or even rule out certain classes based on board texture and serach in that order
-            // This will brute force things are correct by attempting every combintaion
             for community_cards_of_3 in game_state.get_community_cards().enumerate_combinations(3) {
                 for player_cards_group_of_2 in player.enumerate_combinations(2) {
                     let combined_deck = community_cards_of_3 | player_cards_group_of_2;
