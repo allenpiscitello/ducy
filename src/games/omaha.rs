@@ -65,24 +65,8 @@ pub enum BoardTone {
     Rainbow {},
 }
 
-pub enum BoardPairs {
-    NoPairs,
-    OnePair,
-    Trips,
-    Quads,
-    TwoPairs,
-    FullHouse,
-}
-
-pub enum BoardTexture {
-    Todo,
-}
-
 pub trait OmahaBoardAnalysis {
     fn board_tone(&self) -> BoardTone;
-    fn board_pairs(&self) -> BoardPairs;
-    fn board_texture(&self) -> BoardTexture;
-    fn board_straight_flushes(&self) -> BoardTexture;
 }
 
 impl OmahaBoardAnalysis for OmahaGameState {
@@ -96,19 +80,6 @@ impl OmahaBoardAnalysis for OmahaGameState {
             }
         }
         BoardTone::Rainbow {}
-    }
-
-    fn board_pairs(&self) -> BoardPairs {
-        let _ranks = self.get_community_cards().get_rank_count();
-        todo!()
-    }
-
-    fn board_texture(&self) -> BoardTexture {
-        todo!()
-    }
-
-    fn board_straight_flushes(&self) -> BoardTexture {
-        todo!()
     }
 }
 

@@ -234,11 +234,7 @@ impl HoldemRange {
             return self.add_suited_range(first_card, second_card, weight);
         }
 
-        //TODO: Pair+
-
-        //TODO: just single combo
-
-        Ok(())
+        Err(DucyError::InvalidRange)
     }
 }
 
