@@ -1,7 +1,9 @@
 use std::fmt::Display;
 
-use crate::{deck::{Deck, Rank, RankSet}, ranking::standard_hand_ranker::RankOrder};
-
+use crate::{
+    deck::{Deck, Rank, RankSet},
+    ranking::standard_hand_ranker::RankOrder,
+};
 
 pub trait HandRanking {}
 
@@ -73,11 +75,17 @@ impl Display for StandardHandRanks {
             StandardHandRanks::HighCard { c1, c2, c3, c4, c5 } => {
                 write!(f, "High Card {} {} {} {} {}", c1, c2, c3, c4, c5)
             }
-            StandardHandRanks::OnePair { p, c1, c2, c3 } => write!(f, "Pair of {p}, {c1} {c2} {c3}"),
+            StandardHandRanks::OnePair { p, c1, c2, c3 } => {
+                write!(f, "Pair of {p}, {c1} {c2} {c3}")
+            }
             StandardHandRanks::TwoPair { p1, p2, c1 } => write!(f, "Two Pair {p1} over {p2}, {c1}"),
-            StandardHandRanks::ThreeOfAKind { t, c1, c2 } => write!(f, "Three of a Kind {t}, {c1} {c2}"),
+            StandardHandRanks::ThreeOfAKind { t, c1, c2 } => {
+                write!(f, "Three of a Kind {t}, {c1} {c2}")
+            }
             StandardHandRanks::Straight { s } => write!(f, "Straight {s} high"),
-            StandardHandRanks::Flush { c1, c2, c3, c4, c5 } => write!(f, "Flush {c1} {c2} {c3} {c4} {c5}"),
+            StandardHandRanks::Flush { c1, c2, c3, c4, c5 } => {
+                write!(f, "Flush {c1} {c2} {c3} {c4} {c5}")
+            }
             StandardHandRanks::FullHouse { t, p } => write!(f, "Full House {t} full of {p}"),
             StandardHandRanks::FourOfAKind { q, c } => write!(f, "Four of a Kind {q}, {c}"),
             StandardHandRanks::StraightFlush { sf } => write!(f, "Straight Flush {sf} high"),
@@ -120,11 +128,15 @@ impl StandardHandRanks {
             StandardHandRanks::Flush { c1, c2, c3, c4, c5 } => {
                 Self::get_score_from_ranks(&[c1, c2, c3, c4, c5]) + FLUSH_BASE
             }
-            StandardHandRanks::FullHouse { t, p } => Self::get_score_from_ranks(&[t, p]) + FULL_HOUSE_BASE,
+            StandardHandRanks::FullHouse { t, p } => {
+                Self::get_score_from_ranks(&[t, p]) + FULL_HOUSE_BASE
+            }
             StandardHandRanks::FourOfAKind { q, c } => {
                 Self::get_score_from_ranks(&[q, c]) + FOUR_OF_KIND_BASE
             }
-            StandardHandRanks::StraightFlush { sf } => RankOrder::AceIsHigh.get_score(sf) + STRAIGHT_FLUSH_BASE,
+            StandardHandRanks::StraightFlush { sf } => {
+                RankOrder::AceIsHigh.get_score(sf) + STRAIGHT_FLUSH_BASE
+            }
         }
     }
 
@@ -137,38 +149,48 @@ impl StandardHandRanks {
     }
 }
 
-
 pub struct StandardHandRanker {}
 
 impl StandardHandRanker {
     pub fn get_rank(deck: &Deck) -> StandardHandRanks {
         Self::get_rank_at_least(deck, None).unwrap()
     }
-    
-    pub fn get_rank_at_least(deck: &Deck, must_be_at_least: Option<StandardHandRanks>) -> Option<StandardHandRanks> {
+
+    pub fn get_rank_at_least(
+        deck: &Deck,
+        must_be_at_least: Option<StandardHandRanks>,
+    ) -> Option<StandardHandRanks> {
         let rank_to_beat = must_be_at_least.map(|x| x.get_score()).unwrap_or(0);
-    
+
         if let Some(sf) = Self::get_best_straight_flush(deck) {
             Some(StandardHandRanks::StraightFlush { sf })
         } else {
-            if rank_to_beat >= STRAIGHT_FLUSH_BASE { return None; }
+            if rank_to_beat >= STRAIGHT_FLUSH_BASE {
+                return None;
+            }
             let rank_count = deck.get_rank_count();
             let best_quads = rank_count.find_highest_with_n(&[], 4);
 
             if let Some(quad) = best_quads
-                && let Some(kicker) = rank_count.find_highest_with_n(&[quad], 1) {
-                    return Some(StandardHandRanks::FourOfAKind { q: quad, c: kicker });
-                }
-            
-            if rank_to_beat >= FOUR_OF_KIND_BASE { return None; }
+                && let Some(kicker) = rank_count.find_highest_with_n(&[quad], 1)
+            {
+                return Some(StandardHandRanks::FourOfAKind { q: quad, c: kicker });
+            }
+
+            if rank_to_beat >= FOUR_OF_KIND_BASE {
+                return None;
+            }
             let best_trips = rank_count.find_highest_with_n(&[], 3);
 
             if let Some(trip) = best_trips
-                && let Some(pair) = rank_count.find_highest_with_n(&[trip], 2) {
-                    return Some(StandardHandRanks::FullHouse { t: trip, p: pair });
-                }
+                && let Some(pair) = rank_count.find_highest_with_n(&[trip], 2)
+            {
+                return Some(StandardHandRanks::FullHouse { t: trip, p: pair });
+            }
 
-            if rank_to_beat >= FULL_HOUSE_BASE { return None; }
+            if rank_to_beat >= FULL_HOUSE_BASE {
+                return None;
+            }
             if let Some(flush_ranks) = Self::get_flush(deck) {
                 return Some(StandardHandRanks::Flush {
                     c1: flush_ranks[0],
@@ -176,48 +198,61 @@ impl StandardHandRanker {
                     c3: flush_ranks[2],
                     c4: flush_ranks[3],
                     c5: flush_ranks[4],
-                })
+                });
             }
-            if rank_to_beat >= FLUSH_BASE { return None; }
+            if rank_to_beat >= FLUSH_BASE {
+                return None;
+            }
             if let Some(s) = Self::get_straight(deck) {
                 return Some(StandardHandRanks::Straight { s });
             }
-            if rank_to_beat >= STRAIGHT_BASE { return None; }
+            if rank_to_beat >= STRAIGHT_BASE {
+                return None;
+            }
             if let Some(trip) = best_trips
                 && let Some(c1) = rank_count.find_highest_with_n(&[trip], 1)
-                    && let Some(c2) = rank_count.find_highest_with_n(&[trip, c1], 1) {
-                        return Some(StandardHandRanks::ThreeOfAKind { t: trip, c1, c2 });
-                    }
+                && let Some(c2) = rank_count.find_highest_with_n(&[trip, c1], 1)
+            {
+                return Some(StandardHandRanks::ThreeOfAKind { t: trip, c1, c2 });
+            }
 
-            if rank_to_beat >= TRIP_BASE { return None; }
+            if rank_to_beat >= TRIP_BASE {
+                return None;
+            }
             if let Some(best_pair) = rank_count.find_highest_with_n(&[], 2) {
                 if let Some(second_best_pair) = rank_count.find_highest_with_n(&[best_pair], 2)
                     && let Some(c) =
                         rank_count.find_highest_with_n(&[best_pair, second_best_pair], 1)
-                    {
-                        return Some(StandardHandRanks::TwoPair {
-                            p1: best_pair,
-                            p2: second_best_pair,
-                            c1: c,
-                        });
-                    }
-    
-            if rank_to_beat >= TWO_PAIR_BASE { return None; }
+                {
+                    return Some(StandardHandRanks::TwoPair {
+                        p1: best_pair,
+                        p2: second_best_pair,
+                        c1: c,
+                    });
+                }
+
+                if rank_to_beat >= TWO_PAIR_BASE {
+                    return None;
+                }
                 if let Some(c1) = rank_count.find_highest_with_n(&[best_pair], 1)
                     && let Some(c2) = rank_count.find_highest_with_n(&[best_pair, c1], 1)
-                        && let Some(c3) =
-                            rank_count.find_highest_with_n(&[best_pair, c1, c2], 1)
-                        {
-                            return Some(StandardHandRanks::OnePair {
-                                p: best_pair,
-                                c1,
-                                c2,
-                                c3,
-                            });
-                        }
+                    && let Some(c3) = rank_count.find_highest_with_n(&[best_pair, c1, c2], 1)
+                {
+                    return Some(StandardHandRanks::OnePair {
+                        p: best_pair,
+                        c1,
+                        c2,
+                        c3,
+                    });
+                }
             }
-            if rank_to_beat >= ONE_PAIR_BASE { return None; }
-            if let Some(highest_cards) = deck.get_combined_ranks().get_highest_five(&RankOrder::AceIsHigh) {
+            if rank_to_beat >= ONE_PAIR_BASE {
+                return None;
+            }
+            if let Some(highest_cards) = deck
+                .get_combined_ranks()
+                .get_highest_five(&RankOrder::AceIsHigh)
+            {
                 return Some(StandardHandRanks::HighCard {
                     c1: highest_cards[0],
                     c2: highest_cards[1],
@@ -233,12 +268,11 @@ impl StandardHandRanker {
     fn get_straight(deck: &Deck) -> Option<Rank> {
         let combined_ranks = deck.get_combined_ranks();
         Self::get_straight_from_rank_bitfield(&combined_ranks)
-     }
+    }
 
     fn get_straight_from_rank_bitfield(rank_bitfield: &RankSet) -> Option<Rank> {
         rank_bitfield.matches_pattern(0b11111, 5)
     }
-
 
     fn get_flush(deck: &Deck) -> Option<[Rank; 5]> {
         let mut best: Option<[Rank; 5]> = None;
@@ -247,12 +281,11 @@ impl StandardHandRanker {
                 match (best, bits.get_highest_five(&RankOrder::AceIsHigh)) {
                     (Some(existing), Some(newest)) => {
                         for i in 0..5 {
-                            match
-                             RankOrder::AceIsHigh.cmp(newest[i], existing[i])        {
+                            match RankOrder::AceIsHigh.cmp(newest[i], existing[i]) {
                                 std::cmp::Ordering::Less => continue,
-                                std::cmp::Ordering::Equal => {},
+                                std::cmp::Ordering::Equal => {}
                                 std::cmp::Ordering::Greater => best = Some(existing),
-                              }
+                            }
                         }
                     }
                     (None, Some(existing)) => best = Some(existing),
@@ -266,9 +299,15 @@ impl StandardHandRanker {
     fn get_best_straight_flush(deck: &Deck) -> Option<Rank> {
         let mut found: Option<Rank> = None;
         for (single_suit_rank, _) in deck.get_single_suit_ranks() {
-            match (Self::get_straight_from_rank_bitfield(&single_suit_rank), found) {
+            match (
+                Self::get_straight_from_rank_bitfield(&single_suit_rank),
+                found,
+            ) {
                 (Some(straight), Some(found_val)) => {
-                    if RankOrder::AceIsHigh.cmp(straight, found_val) == std::cmp::Ordering::Greater { found = Some(straight) }
+                    if RankOrder::AceIsHigh.cmp(straight, found_val) == std::cmp::Ordering::Greater
+                    {
+                        found = Some(straight)
+                    }
                 }
                 (Some(straight), None) => found = Some(straight),
                 (None, _) => {}
@@ -277,7 +316,6 @@ impl StandardHandRanker {
         found
     }
 }
-
 
 #[cfg(test)]
 mod test {
