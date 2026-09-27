@@ -23,6 +23,18 @@ impl<H: HandRanking> GameWinner<H> {
             winning_hand,
         }
     }
+
+    pub fn player_index(&self) -> usize {
+        self.player_index
+    }
+
+    pub fn pot_amount(&self) -> Decimal {
+        self.pot_amount
+    }
+
+    pub fn winning_hand(&self) -> &H {
+        &self.winning_hand
+    }
 }
 
 pub trait GameEvaluation<GS: GameState, H: HandRanking> {
