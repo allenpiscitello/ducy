@@ -3,12 +3,17 @@ use rust_decimal_macros::dec;
 
 use crate::ranking::hand_rank::HandRanking;
 
+/// Flop-based game state management (shared by Hold'em and Omaha).
 pub mod flop_game;
+/// Texas Hold'em game state, evaluation, and ranges.
 pub mod holdem;
+/// Omaha game state, evaluation, and board analysis.
 pub mod omaha;
 
+/// Marker trait for game state types.
 pub trait GameState {}
 
+/// A winning player's result: their index, pot share, and best hand.
 #[derive(Eq, PartialEq, Debug)]
 pub struct GameWinner<H: HandRanking> {
     pub player_index: usize,
@@ -17,6 +22,7 @@ pub struct GameWinner<H: HandRanking> {
 }
 
 impl<H: HandRanking> GameWinner<H> {
+    /// Creates a new winner result.
     pub fn new(index: usize, pot_amount: Decimal, winning_hand: H) -> Self {
         Self {
             player_index: index,
@@ -88,10 +94,14 @@ impl<H: HandRanking + Ord + Copy> WinnerTracker<H> {
     }
 }
 
+/// Evaluates a game state to determine winners.
 pub trait GameEvaluation<GS: GameState, H: HandRanking> {
+    /// Returns the winners for the given game state.
     fn evaluate_winners(&self, game_state: &GS) -> Vec<GameWinner<H>>;
 }
 
+/// Evaluates equity (expected pot share) across all possible runouts.
 pub trait GameEquityEvaluation<GS: GameState, H: HandRanking, GE: GameEvaluation<GS, H>> {
+    /// Returns each player's equity as a fraction of the pot.
     fn evaluate_equity(&self, game_state: &GS) -> Vec<Decimal>;
 }

@@ -21,11 +21,13 @@ use crate::{
     },
 };
 
+/// Texas Hold'em game state (2 hole cards per player).
 pub struct HoldemGameState {
     pub(crate) flop_game_state: FlopGameState,
 }
 
 impl HoldemGameState {
+    /// Creates a new Hold'em game state.
     pub fn new() -> Self {
         Self {
             flop_game_state: FlopGameState::new(2),
@@ -73,6 +75,7 @@ impl FlopGame for HoldemGameState {
 
 impl GameState for HoldemGameState {}
 
+/// Evaluates Hold'em hands to determine winners.
 pub struct HoldemGameEvaluation {}
 
 impl GameEvaluation<HoldemGameState, StandardHandRanks> for HoldemGameEvaluation {
@@ -129,11 +132,13 @@ impl GameEquityEvaluation<HoldemGameState, StandardHandRanks, HoldemGameEvaluati
     }
 }
 
+/// A Hold'em hand range supporting offsuit and suited range notation (e.g. "AQo+", "AJs+").
 pub struct HoldemRange {
     range_base: RangeBase,
 }
 
 impl HoldemRange {
+    /// Creates an empty range.
     pub fn new() -> Self {
         Self {
             range_base: RangeBase::new(),
@@ -192,6 +197,7 @@ impl HoldemRange {
         Ok(())
     }
 
+    /// Adds hands matching a range string (e.g. "AQo+", "AJs+") with the given weight.
     pub fn add(&mut self, range: &str, weight: Decimal) -> Result<(), DucyError> {
         let offsuit_range = regex!(r"([23456789TtJjQqKkAa])([234567789TtJjQqKkAa])o\+");
         if let Some(x) = offsuit_range.captures(range).into_iter().next() {

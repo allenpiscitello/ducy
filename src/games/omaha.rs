@@ -11,11 +11,13 @@ use crate::{
     ranking::hand_rank::{StandardHandRanker, StandardHandRanks},
 };
 
+/// Omaha game state (configurable number of hole cards per player).
 pub struct OmahaGameState {
     pub(crate) flop_game_state: FlopGameState,
 }
 
 impl OmahaGameState {
+    /// Creates a new Omaha game state with the given number of hole cards per player.
     pub fn new(cards_per_player: u32) -> Self {
         Self {
             flop_game_state: FlopGameState::new(cards_per_player),
@@ -58,14 +60,30 @@ impl FlopGame for OmahaGameState {
 impl GameState for OmahaGameState {}
 
 #[derive(Debug, PartialEq, Eq)]
+/// Describes the flush texture of the community cards.
 pub enum BoardTone {
-    Monotone { suit: Suit },
-    FourFlush { suit: Suit },
-    ThreeFlush { suit: Suit },
+    /// All five cards share one suit.
+    Monotone {
+        /// The dominant suit.
+        suit: Suit,
+    },
+    /// Four cards share one suit.
+    FourFlush {
+        /// The dominant suit.
+        suit: Suit,
+    },
+    /// Three cards share one suit.
+    ThreeFlush {
+        /// The dominant suit.
+        suit: Suit,
+    },
+    /// No suit has three or more cards.
     Rainbow {},
 }
 
+/// Board analysis methods for Omaha games.
 pub trait OmahaBoardAnalysis {
+    /// Returns the flush texture of the community cards.
     fn board_tone(&self) -> BoardTone;
 }
 
@@ -83,6 +101,7 @@ impl OmahaBoardAnalysis for OmahaGameState {
     }
 }
 
+/// Evaluates Omaha hands to determine winners (brute-force over all 2-from-hand + 3-from-board combos).
 pub struct OmahaGameEvaluation {}
 
 impl GameEvaluation<OmahaGameState, StandardHandRanks> for OmahaGameEvaluation {
