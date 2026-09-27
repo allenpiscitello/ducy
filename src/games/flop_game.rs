@@ -1,4 +1,5 @@
 use crate::deck::{Card, Deck};
+use crate::error::DucyError;
 
 #[derive(Clone)]
 pub struct FlopGameState {
@@ -24,9 +25,9 @@ impl FlopGameState {
         }
     }
 
-    pub fn add_community_cards(&mut self, deck: &Deck) -> Result<(), String> {
+    pub fn add_community_cards(&mut self, deck: &Deck) -> Result<(), DucyError> {
         if self.community_cards.num_cards() + deck.num_cards() > 5 {
-            return Err("Too many community cards".to_owned());
+            return Err(DucyError::TooManyCommunityCards);
         }
         self.community_cards |= *deck;
         Ok(())
@@ -34,12 +35,12 @@ impl FlopGameState {
 }
 
 impl FlopGame for FlopGameState {
-    fn add_player(&mut self, cards: Deck) -> Result<(), String> {
+    fn add_player(&mut self, cards: Deck) -> Result<(), DucyError> {
         if cards.num_cards() != self.num_hole_cards_per_player {
-            return Err("Incorrect number of cards".to_owned());
+            return Err(DucyError::IncorrectCardCount);
         }
         if !self.remaining_cards_in_deck.has_cards(&cards) {
-            return Err("Cards not in deck".to_owned());
+            return Err(DucyError::CardsNotAvailable);
         }
 
         self.remaining_cards_in_deck -= cards;
@@ -48,12 +49,12 @@ impl FlopGame for FlopGameState {
         Ok(())
     }
 
-    fn set_flop(&mut self, cards: Deck) -> Result<(), String> {
+    fn set_flop(&mut self, cards: Deck) -> Result<(), DucyError> {
         if cards.num_cards() != 3 {
-            return Err("Incorrect number of cards".to_owned());
+            return Err(DucyError::IncorrectCardCount);
         }
         if !self.remaining_cards_in_deck.has_cards(&cards) {
-            return Err("Cards not in deck".to_owned());
+            return Err(DucyError::CardsNotAvailable);
         }
         self.remaining_cards_in_deck -= cards;
         self.flop = cards;
@@ -62,12 +63,12 @@ impl FlopGame for FlopGameState {
         Ok(())
     }
 
-    fn set_turn(&mut self, card: Card) -> Result<(), String> {
+    fn set_turn(&mut self, card: Card) -> Result<(), DucyError> {
         if self.flop.is_empty() {
-            return Err("Must set flop first".to_owned());
+            return Err(DucyError::FlopNotSet);
         }
         if !self.remaining_cards_in_deck.has_card(&card) {
-            return Err("Card is not in deck".to_owned());
+            return Err(DucyError::CardsNotAvailable);
         }
         self.remaining_cards_in_deck
             .remove_cards([card].into_iter());
@@ -76,12 +77,12 @@ impl FlopGame for FlopGameState {
         Ok(())
     }
 
-    fn set_river(&mut self, card: Card) -> Result<(), String> {
+    fn set_river(&mut self, card: Card) -> Result<(), DucyError> {
         if self.turn.is_none() {
-            return Err("Need to set turn first".to_owned());
+            return Err(DucyError::TurnNotSet);
         }
         if !self.remaining_cards_in_deck.has_card(&card) {
-            return Err("Card is not in deck".to_owned());
+            return Err(DucyError::CardsNotAvailable);
         }
         self.remaining_cards_in_deck
             .remove_cards([card].into_iter());
@@ -178,13 +179,13 @@ impl Iterator for CommunityCardIterator {
 
 pub trait FlopGame {
     fn get_community_cards(&self) -> Deck;
-    fn add_player(&mut self, cards: Deck) -> Result<(), String>;
+    fn add_player(&mut self, cards: Deck) -> Result<(), DucyError>;
 
-    fn set_flop(&mut self, cards: Deck) -> Result<(), String>;
+    fn set_flop(&mut self, cards: Deck) -> Result<(), DucyError>;
 
-    fn set_turn(&mut self, card: Card) -> Result<(), String>;
+    fn set_turn(&mut self, card: Card) -> Result<(), DucyError>;
 
-    fn set_river(&mut self, card: Card) -> Result<(), String>;
+    fn set_river(&mut self, card: Card) -> Result<(), DucyError>;
 
     fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck>;
 

@@ -10,6 +10,7 @@ use crate::{
         Card, Deck, Rank, Suit,
         range::{Range, RangeBase},
     },
+    error::DucyError,
     games::{
         GameEquityEvaluation, GameEvaluation, GameState, GameWinner,
         flop_game::{FlopGame, FlopGameState},
@@ -43,19 +44,19 @@ impl FlopGame for HoldemGameState {
         self.flop_game_state.get_community_cards()
     }
 
-    fn add_player(&mut self, cards: Deck) -> Result<(), String> {
+    fn add_player(&mut self, cards: Deck) -> Result<(), DucyError> {
         self.flop_game_state.add_player(cards)
     }
 
-    fn set_flop(&mut self, cards: Deck) -> Result<(), String> {
+    fn set_flop(&mut self, cards: Deck) -> Result<(), DucyError> {
         self.flop_game_state.set_flop(cards)
     }
 
-    fn set_turn(&mut self, card: Card) -> Result<(), String> {
+    fn set_turn(&mut self, card: Card) -> Result<(), DucyError> {
         self.flop_game_state.set_turn(card)
     }
 
-    fn set_river(&mut self, card: Card) -> Result<(), String> {
+    fn set_river(&mut self, card: Card) -> Result<(), DucyError> {
         self.flop_game_state.set_river(card)
     }
 
@@ -169,9 +170,9 @@ impl HoldemRange {
         first_rank: Rank,
         second_rank: Rank,
         weight: Decimal,
-    ) -> Result<(), String> {
+    ) -> Result<(), DucyError> {
         if RankOrder::AceIsHigh.cmp(first_rank, second_rank) != Ordering::Greater {
-            return Err("Invalid range".to_owned());
+            return Err(DucyError::InvalidRange);
         }
 
         for i in RankOrder::AceIsHigh.get_ranks_between(&first_rank, None) {
@@ -197,9 +198,9 @@ impl HoldemRange {
         first_rank: Rank,
         second_rank: Rank,
         weight: Decimal,
-    ) -> Result<(), String> {
+    ) -> Result<(), DucyError> {
         if RankOrder::AceIsHigh.cmp(first_rank, second_rank) != Ordering::Greater {
-            return Err("Invalid range".to_owned());
+            return Err(DucyError::InvalidRange);
         }
 
         for i in RankOrder::AceIsHigh.get_ranks_between(&first_rank, None) {
@@ -216,7 +217,7 @@ impl HoldemRange {
         Ok(())
     }
 
-    pub fn add(&mut self, range: &str, weight: Decimal) -> Result<(), String> {
+    pub fn add(&mut self, range: &str, weight: Decimal) -> Result<(), DucyError> {
         let offsuit_range = regex!(r"([23456789TtJjQqKkAa])([234567789TtJjQqKkAa])o\+");
         if let Some(x) = offsuit_range.captures(range).into_iter().next() {
             let first_card = Rank::try_from_char(&x[1].chars().next().unwrap())?;
@@ -233,9 +234,6 @@ impl HoldemRange {
             return self.add_suited_range(first_card, second_card, weight);
         }
 
-        // if offsuit_range.is_match(range) {
-
-        // }
         //TODO: Pair+
 
         //TODO: just single combo
@@ -280,11 +278,6 @@ mod test {
             .unwrap();
 
         let hand_evaluation = HoldemGameEvaluation {};
-        // let equities = hand_evaluation.evaluate_equity(&holdem_hand);
-
-        // assert_eq!(equities.len(), 2);
-        // assert_eq!(equities[0], dec!(28063310)/ dec!(34246080));
-        // assert_eq!(equities[1], dec!(6182770)/ dec!(34246080));
 
         holdem_hand
             .set_flop(Deck::parse("kc qd js").unwrap())
@@ -389,7 +382,6 @@ mod test {
         range_1.append(&mut range_2);
         range_1.sort();
 
-        // range_2.sort()
         let mut actual_range_items: Vec<String> =
             range.iter().map(|x| x.get_deck().to_string()).collect();
         actual_range_items.sort();
