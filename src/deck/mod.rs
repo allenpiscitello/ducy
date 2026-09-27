@@ -487,15 +487,9 @@ impl Deck {
     }
 
     fn get_nth_card_unchecked(&self, index: usize) -> Card {
-        let mut iterator = self.iter(true);
-        for i in 0..index + 1 {
-            let card = iterator.next();
-            if i == index {
-                return card.unwrap();
-            }
-        }
-        //should never get here
-        panic!();
+        self.iter(true)
+            .nth(index)
+            .expect("index out of bounds in get_nth_card_unchecked")
     }
 
     fn get_rank_counts(&self) -> [u32; 13] {

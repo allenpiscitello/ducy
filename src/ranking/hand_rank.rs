@@ -261,7 +261,7 @@ impl StandardHandRanker {
                     c5: highest_cards[4],
                 });
             }
-            unreachable!()
+            None
         }
     }
 
