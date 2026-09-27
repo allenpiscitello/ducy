@@ -296,7 +296,7 @@ impl Deck {
     pub fn parse(val: &str) -> Result<Self, DucyError> {
         let owned_cards: Vec<Card> = val
             .split(' ')
-            .map(|x| Card::parse(x))
+            .map(Card::parse)
             .collect::<Result<Vec<Card>, DucyError>>()?;
 
         let mut empty = Self::empty();
@@ -409,7 +409,10 @@ impl Deck {
     /// # Returns
     ///
     /// A `Result` containing a vector of the removed `Card`s if successful, or an error message if there are not enough cards in the deck.
-    pub fn try_remove_random_cards(&mut self, number_to_remove: u32) -> Result<Vec<Card>, DucyError> {
+    pub fn try_remove_random_cards(
+        &mut self,
+        number_to_remove: u32,
+    ) -> Result<Vec<Card>, DucyError> {
         let mut num_cards = self.num_cards();
         let mut cards = vec![];
 
