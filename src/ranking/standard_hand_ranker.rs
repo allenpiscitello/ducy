@@ -81,6 +81,7 @@ mod test {
             hand_rank::{StandardHandRanker, StandardHandRanks},
             standard_hand_ranker::RankOrder,
         },
+        test_util::deck_from_cards,
     };
 
     macro_rules! assert_rank {
@@ -88,14 +89,6 @@ mod test {
             let hand = deck_from_cards($hand);
             assert_eq!(StandardHandRanker::get_rank(&hand), $rank);
         };
-    }
-
-    pub fn deck_from_cards(val: &str) -> Deck {
-        let card_strs = val.split(" ");
-        let cards: Vec<Card> = card_strs.map(|x| Card::parse(x).unwrap()).collect();
-        let mut deck = Deck::empty();
-        deck.insert_cards(cards.iter());
-        deck
     }
 
     #[test]

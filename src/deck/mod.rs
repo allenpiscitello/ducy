@@ -810,14 +810,7 @@ impl Iterator for DeckIterator {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    pub fn deck_from_cards(val: &str) -> Deck {
-        let card_strs = val.split(" ");
-        let cards: Vec<Card> = card_strs.map(|x| Card::parse(x).unwrap()).collect();
-        let mut deck = Deck::empty();
-        deck.insert_cards(cards.iter());
-        deck
-    }
+    use crate::test_util::deck_from_cards;
 
     #[test]
     pub fn test_has_card() {
