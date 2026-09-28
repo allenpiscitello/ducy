@@ -352,7 +352,7 @@ impl Deck {
     /// None. The deck is modified in place.
     pub fn remove_cards(&mut self, cards: impl Iterator<Item = Card>) {
         for card in cards {
-            self.cards ^= card.get_deck().cards
+            self.cards &= !card.get_deck().cards;
         }
     }
 
@@ -393,7 +393,7 @@ impl Deck {
     ///
     pub fn try_get_nth_card(&self, index: usize) -> Option<Card> {
         let num_cards = self.num_cards();
-        if index > num_cards as usize {
+        if index >= num_cards as usize {
             None
         } else {
             Some(self.get_nth_card_unchecked(index))
@@ -992,5 +992,23 @@ mod test {
     pub fn test_try_remove_random_cards_too_many() {
         let mut deck = deck_from_cards("As Ks");
         assert!(deck.try_remove_random_cards(3).is_err());
+    }
+
+    #[test]
+    pub fn test_remove_cards_does_not_add() {
+        let mut deck = deck_from_cards("As Ks");
+        let three_clubs = Card::new(Rank::Three, Suit::Clubs);
+        assert!(!deck.has_card(&three_clubs));
+        deck.remove_cards([three_clubs].into_iter());
+        assert!(!deck.has_card(&three_clubs));
+        assert_eq!(deck.num_cards(), 2);
+    }
+
+    #[test]
+    pub fn test_try_get_nth_card_at_boundary() {
+        let deck = deck_from_cards("As Ks");
+        assert!(deck.try_get_nth_card(0).is_some());
+        assert!(deck.try_get_nth_card(1).is_some());
+        assert!(deck.try_get_nth_card(2).is_none());
     }
 }
