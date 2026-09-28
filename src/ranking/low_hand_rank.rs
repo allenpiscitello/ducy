@@ -95,7 +95,7 @@ impl LowHandRanker {
             return LowHandRanks::NoLow;
         }
 
-        ranks.sort_by(|a, b| b.0.cmp(&a.0));
+        ranks.sort_by_key(|a| std::cmp::Reverse(a.0));
 
         LowHandRanks::Low {
             c1: ranks[0].1,
