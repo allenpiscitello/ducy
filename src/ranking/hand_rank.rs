@@ -282,13 +282,16 @@ impl StandardHandRanker {
                     (Some(existing), Some(newest)) => {
                         for i in 0..5 {
                             match RankOrder::AceIsHigh.cmp(newest[i], existing[i]) {
-                                std::cmp::Ordering::Less => continue,
+                                std::cmp::Ordering::Greater => {
+                                    best = Some(newest);
+                                    break;
+                                }
+                                std::cmp::Ordering::Less => break,
                                 std::cmp::Ordering::Equal => {}
-                                std::cmp::Ordering::Greater => best = Some(existing),
                             }
                         }
                     }
-                    (None, Some(existing)) => best = Some(existing),
+                    (None, Some(newest)) => best = Some(newest),
                     (_, None) => {}
                 }
             }
