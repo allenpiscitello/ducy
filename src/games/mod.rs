@@ -15,6 +15,7 @@ pub trait GameState {}
 
 /// A winning player's result: their index, pot share, and best hand.
 #[derive(Eq, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GameWinner<H: HandRanking> {
     pub(crate) player_index: usize,
     pub(crate) pot_amount: Decimal,

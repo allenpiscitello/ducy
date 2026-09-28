@@ -10,6 +10,7 @@ pub trait HandRanking {}
 
 /// Standard poker hand rankings from high card through straight flush.
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum StandardHandRanks {
     /// Five unpaired, unconnected cards.
     HighCard {
