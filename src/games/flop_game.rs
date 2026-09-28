@@ -1,6 +1,7 @@
 use crate::deck::{Card, Deck};
 use crate::error::DucyError;
 
+/// Shared state for flop-based poker games (community cards, hole cards, remaining deck).
 #[derive(Clone)]
 pub struct FlopGameState {
     hole_cards: Vec<Deck>,
@@ -13,6 +14,7 @@ pub struct FlopGameState {
 }
 
 impl FlopGameState {
+    /// Creates a new game state with the specified number of hole cards per player.
     pub fn new(num_hole_cards_per_player: u32) -> Self {
         Self {
             hole_cards: vec![],
@@ -25,6 +27,7 @@ impl FlopGameState {
         }
     }
 
+    /// Adds community cards to the board (max 5 total).
     pub fn add_community_cards(&mut self, deck: &Deck) -> Result<(), DucyError> {
         if self.community_cards.num_cards() + deck.num_cards() > 5 {
             return Err(DucyError::TooManyCommunityCards);
@@ -213,17 +216,20 @@ impl Iterator for CommunityCardIterator {
     }
 }
 
+/// Trait for flop-based poker game variants (Hold'em, Omaha).
 pub trait FlopGame {
+    /// Returns the current community cards.
     fn get_community_cards(&self) -> Deck;
+    /// Adds a player with the given hole cards.
     fn add_player(&mut self, cards: Deck) -> Result<(), DucyError>;
-
+    /// Sets the three flop cards.
     fn set_flop(&mut self, cards: Deck) -> Result<(), DucyError>;
-
+    /// Sets the turn card (requires flop to be set).
     fn set_turn(&mut self, card: Card) -> Result<(), DucyError>;
-
+    /// Sets the river card (requires turn to be set).
     fn set_river(&mut self, card: Card) -> Result<(), DucyError>;
-
+    /// Returns an iterator over each player's hole cards.
     fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck>;
-
+    /// Returns an iterator over all possible final board states.
     fn get_final_states<'a>(&'a self) -> impl Iterator<Item = Self> + 'a;
 }

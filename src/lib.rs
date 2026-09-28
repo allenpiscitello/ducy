@@ -1,6 +1,14 @@
+//! Poker hand analysis library supporting Texas Hold'em and Omaha.
+//!
+//! Provides card/deck primitives, hand ranking, winner evaluation, and equity calculation.
+
+/// Card, deck, and range primitives using bitfield representation.
 pub mod deck;
+/// Custom error types for the library.
 pub mod error;
+/// Game state, evaluation, and equity calculation for poker variants.
 pub mod games;
+/// Hand ranking systems for poker hands.
 pub mod ranking;
 
 #[cfg(test)]

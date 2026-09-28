@@ -8,23 +8,37 @@ use strum_macros::EnumIter;
 use crate::error::DucyError;
 use crate::ranking::standard_hand_ranker::RankOrder;
 
+/// Weighted hand ranges for equity calculations.
 pub mod range;
 
 /// Represents the rank of a playing card (Two through Ace).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Hash)]
 pub enum Rank {
+    /// 2
     Two,
+    /// 3
     Three,
+    /// 4
     Four,
+    /// 5
     Five,
+    /// 6
     Six,
+    /// 7
     Seven,
+    /// 8
     Eight,
+    /// 9
     Nine,
+    /// 10
     Ten,
+    /// Jack
     Jack,
+    /// Queen
     Queen,
+    /// King
     King,
+    /// Ace
     Ace,
 }
 
@@ -75,9 +89,13 @@ impl Display for Rank {
 /// Represents the suit of a playing card (Clubs, Diamonds, Hearts, Spades).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Hash)]
 pub enum Suit {
+    /// Clubs (c)
     Clubs,
+    /// Diamonds (d)
     Diamonds,
+    /// Hearts (h)
     Hearts,
+    /// Spades (s)
     Spades,
 }
 
@@ -159,9 +177,7 @@ impl Card {
         self.val
     }
 
-    /// Parses a string representation of a card and returns a `Card` instance if successful.
-    /// The string should have the format "<rank><suit>", e.g., "Ah" for Ace of Hearts.
-    /// Returns `Err(String)` if the string is invalid.
+    /// Parses a card from a two-character string like `"Ah"` (Ace of Hearts).
     pub fn parse(val: &str) -> Result<Self, DucyError> {
         let trimmed = val.trim();
         if trimmed.len() < 2 {
@@ -612,6 +628,7 @@ impl Iterator for SingleSuitRankIterator {
     }
 }
 
+/// A bitfield representing which ranks are present in a suit or combined view.
 pub struct RankSet {
     ranks: u64,
 }
@@ -665,11 +682,13 @@ impl RankSet {
     }
 }
 
+/// Counts of each rank present in a deck.
 pub struct RankCount {
     rank_counts: [u32; 13],
 }
 
 impl RankCount {
+    /// Returns the highest rank that appears at least `target_count` times, excluding specified ranks.
     pub fn find_highest_with_n(
         &self,
         ranks_to_exclude: &[Rank],

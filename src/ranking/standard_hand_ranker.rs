@@ -1,11 +1,15 @@
 use crate::deck::Rank;
 
+/// Controls whether Ace ranks high (above King) or low (below Two).
 pub enum RankOrder {
+    /// Ace ranks above King.
     AceIsHigh,
+    /// Ace ranks below Two.
     AceIsLow,
 }
 
 impl RankOrder {
+    /// Returns ranks from `low_rank` up to (but not including) `high_rank`, or all above `low_rank` if `None`.
     pub fn get_ranks_between(
         &self,
         low_rank: &Rank,
@@ -43,6 +47,7 @@ impl RankOrder {
         cards.into_iter()
     }
 
+    /// Returns a numeric score for the rank under this ordering.
     pub fn get_score(&self, rank: &Rank) -> u32 {
         let return_val = match rank {
             Rank::Two => 1,
@@ -68,6 +73,7 @@ impl RankOrder {
         }
     }
 
+    /// Compares two ranks under this ordering.
     pub fn cmp(&self, a: Rank, b: Rank) -> std::cmp::Ordering {
         self.get_score(&a).cmp(&self.get_score(&b))
     }

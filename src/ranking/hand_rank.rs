@@ -5,52 +5,89 @@ use crate::{
     ranking::standard_hand_ranker::RankOrder,
 };
 
+/// Marker trait for types that represent a hand's ranking.
 pub trait HandRanking {}
 
+/// Standard poker hand rankings from high card through straight flush.
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum StandardHandRanks {
+    /// Five unpaired, unconnected cards.
     HighCard {
+        /// Highest kicker.
         c1: Rank,
+        /// Second kicker.
         c2: Rank,
+        /// Third kicker.
         c3: Rank,
+        /// Fourth kicker.
         c4: Rank,
+        /// Fifth kicker.
         c5: Rank,
     },
+    /// Two cards of the same rank.
     OnePair {
+        /// Pair rank.
         p: Rank,
+        /// First kicker.
         c1: Rank,
+        /// Second kicker.
         c2: Rank,
+        /// Third kicker.
         c3: Rank,
     },
+    /// Two distinct pairs.
     TwoPair {
+        /// Higher pair rank.
         p1: Rank,
+        /// Lower pair rank.
         p2: Rank,
+        /// Kicker.
         c1: Rank,
     },
+    /// Three cards of the same rank.
     ThreeOfAKind {
+        /// Trips rank.
         t: Rank,
+        /// First kicker.
         c1: Rank,
+        /// Second kicker.
         c2: Rank,
     },
+    /// Five consecutive ranks.
     Straight {
+        /// High card of the straight.
         s: Rank,
     },
+    /// Five cards of the same suit.
     Flush {
+        /// Highest card.
         c1: Rank,
+        /// Second card.
         c2: Rank,
+        /// Third card.
         c3: Rank,
+        /// Fourth card.
         c4: Rank,
+        /// Fifth card.
         c5: Rank,
     },
+    /// Three of a kind plus a pair.
     FullHouse {
+        /// Trips rank.
         t: Rank,
+        /// Pair rank.
         p: Rank,
     },
+    /// Four cards of the same rank.
     FourOfAKind {
+        /// Quads rank.
         q: Rank,
+        /// Kicker.
         c: Rank,
     },
+    /// Five consecutive cards of the same suit.
     StraightFlush {
+        /// High card of the straight flush.
         sf: Rank,
     },
 }
@@ -109,6 +146,7 @@ const FOUR_OF_KIND_BASE: u32 = FULL_HOUSE_BASE + TWO_OPTIONS;
 const STRAIGHT_FLUSH_BASE: u32 = FOUR_OF_KIND_BASE + TWO_OPTIONS;
 
 impl StandardHandRanks {
+    /// Returns a numeric score for comparison; higher is better.
     pub fn get_score(&self) -> u32 {
         match self {
             StandardHandRanks::HighCard { c1, c2, c3, c4, c5 } => {
@@ -149,13 +187,16 @@ impl StandardHandRanks {
     }
 }
 
+/// Evaluates a set of cards to determine the best standard poker hand.
 pub struct StandardHandRanker {}
 
 impl StandardHandRanker {
+    /// Returns the best hand ranking from the given cards.
     pub fn get_rank(deck: &Deck) -> StandardHandRanks {
         Self::get_rank_at_least(deck, None).unwrap()
     }
 
+    /// Returns the best hand ranking if it meets or exceeds the minimum, or `None`.
     pub fn get_rank_at_least(
         deck: &Deck,
         must_be_at_least: Option<StandardHandRanks>,
