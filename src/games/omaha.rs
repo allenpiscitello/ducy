@@ -5,7 +5,7 @@ use crate::{
     deck::{Card, Deck, Suit},
     error::DucyError,
     games::{
-        GameEquityEvaluation, GameEvaluation, GameState, GameWinner,
+        GameEquityEvaluation, GameEvaluation, GameState, GameWinner, WinnerTracker,
         flop_game::{FlopGame, FlopGameState},
     },
     ranking::hand_rank::{StandardHandRanker, StandardHandRanks},
@@ -114,61 +114,22 @@ impl OmahaBoardAnalysis for OmahaGameState {
 
 pub struct OmahaGameEvaluation {}
 
-impl OmahaGameEvaluation {
-    fn add_winner(winners: &mut Vec<usize>, index: usize) {
-        winners.push(index);
-    }
-
-    fn assign_winner(
-        winning_hands: &mut Option<StandardHandRanks>,
-        winners: &mut Vec<usize>,
-        index: usize,
-        winning_hand: StandardHandRanks,
-    ) {
-        *winning_hands = Some(winning_hand);
-        *winners = vec![index];
-    }
-}
-
 impl GameEvaluation<OmahaGameState, StandardHandRanks> for OmahaGameEvaluation {
     fn evaluate_winners(&self, game_state: &OmahaGameState) -> Vec<GameWinner<StandardHandRanks>> {
-        let mut best_hand: Option<StandardHandRanks> = None;
-        let mut winners = vec![];
+        let mut tracker = WinnerTracker::new();
         for (i, player) in game_state.get_player_hole_cards().enumerate() {
             for community_cards_of_3 in game_state.get_community_cards().enumerate_combinations(3) {
                 for player_cards_group_of_2 in player.enumerate_combinations(2) {
                     let combined_deck = community_cards_of_3 | player_cards_group_of_2;
                     if let Some(rank) =
-                        StandardHandRanker::get_rank_at_least(&combined_deck, best_hand)
+                        StandardHandRanker::get_rank_at_least(&combined_deck, tracker.best_hand())
                     {
-                        match best_hand {
-                            Some(best_hand_val) => {
-                                match StandardHandRanks::cmp(&best_hand_val, &rank) {
-                                    std::cmp::Ordering::Less => {
-                                        Self::assign_winner(&mut best_hand, &mut winners, i, rank);
-                                    }
-                                    std::cmp::Ordering::Equal => Self::add_winner(&mut winners, i),
-                                    std::cmp::Ordering::Greater => {}
-                                }
-                            }
-                            None => Self::assign_winner(&mut best_hand, &mut winners, i, rank),
-                        }
+                        tracker.consider(i, rank);
                     }
                 }
             }
         }
-        let winner_count = winners.len();
-        if let Some(best_hand) = best_hand
-            && winner_count > 0
-        {
-            let pot_distribution = dec!(1.0) / Decimal::from(winner_count);
-            winners
-                .iter()
-                .map(|x| GameWinner::new(*x, pot_distribution, best_hand))
-                .collect()
-        } else {
-            vec![]
-        }
+        tracker.into_results()
     }
 }
 
