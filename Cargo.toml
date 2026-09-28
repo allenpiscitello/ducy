@@ -16,3 +16,18 @@ numerica = "2.2.0"
 rust_decimal = "1.42.1"
 rust_decimal_macros = "1.40.0"
 regex = "1.13.1"
+
+[dev-dependencies]
+criterion = { version = "0.7.0", features = ["html_reports"] }
+
+[[bench]]
+name = "equity"
+harness = false
+
+[[bench]]
+name = "hand_ranking"
+harness = false
+
+[[bench]]
+name = "deck_iteration"
+harness = false
