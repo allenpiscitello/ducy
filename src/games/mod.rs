@@ -3,12 +3,20 @@ use rust_decimal_macros::dec;
 
 use crate::ranking::hand_rank::HandRanking;
 
+/// Badugi game state and evaluation.
+pub mod badugi;
+/// Dealt-hand game state (shared by draw and stud variants).
+pub mod dealt_hand;
+/// 2-7 Triple Draw Lowball game state and evaluation.
+pub mod deuce_to_seven;
 /// Flop-based game state management (shared by Hold'em and Omaha).
 pub mod flop_game;
 /// Texas Hold'em game state, evaluation, and ranges.
 pub mod holdem;
 /// Omaha game state, evaluation, and board analysis.
 pub mod omaha;
+/// Razz (Seven-Card Stud Low) game state and evaluation.
+pub mod razz;
 
 /// Marker trait for game state types.
 pub trait GameState {}
