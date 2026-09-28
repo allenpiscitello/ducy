@@ -900,4 +900,97 @@ mod test {
 
         Ok(())
     }
+
+    #[test]
+    pub fn test_parse_invalid_rank() {
+        assert_eq!(
+            Rank::try_from_char(&'x'),
+            Err(crate::error::DucyError::InvalidRank)
+        );
+        assert_eq!(
+            Rank::try_from_char(&'1'),
+            Err(crate::error::DucyError::InvalidRank)
+        );
+    }
+
+    #[test]
+    pub fn test_parse_invalid_suit() {
+        assert_eq!(
+            Suit::try_from_char(&'x'),
+            Err(crate::error::DucyError::InvalidSuit)
+        );
+        assert_eq!(
+            Suit::try_from_char(&'a'),
+            Err(crate::error::DucyError::InvalidSuit)
+        );
+    }
+
+    #[test]
+    pub fn test_parse_invalid_card() {
+        assert!(Card::parse("").is_err());
+        assert!(Card::parse("A").is_err());
+        assert!(Card::parse("Xc").is_err());
+        assert!(Card::parse("Ax").is_err());
+    }
+
+    #[test]
+    pub fn test_parse_invalid_deck() {
+        assert!(Deck::parse("As Xc").is_err());
+        assert!(Deck::parse("not_cards").is_err());
+    }
+
+    #[test]
+    pub fn test_deck_num_cards() {
+        assert_eq!(Deck::empty().num_cards(), 0);
+        assert_eq!(Deck::all_cards().num_cards(), 52);
+        assert_eq!(deck_from_cards("As Ks Qs").num_cards(), 3);
+    }
+
+    #[test]
+    pub fn test_deck_is_empty() {
+        assert!(Deck::empty().is_empty());
+        assert!(!Deck::all_cards().is_empty());
+    }
+
+    #[test]
+    pub fn test_deck_subtraction() {
+        let full = Deck::all_cards();
+        let aces = deck_from_cards("As Ah Ad Ac");
+        let remaining = full - aces;
+        assert_eq!(remaining.num_cards(), 48);
+        assert!(!remaining.has_cards(&aces));
+    }
+
+    #[test]
+    pub fn test_deck_bitor() {
+        let d1 = deck_from_cards("As Ks");
+        let d2 = deck_from_cards("Qs Js");
+        let combined = d1 | d2;
+        assert_eq!(combined.num_cards(), 4);
+        assert!(combined.has_cards(&d1));
+        assert!(combined.has_cards(&d2));
+    }
+
+    #[test]
+    pub fn test_try_remove_nth_card_out_of_bounds() {
+        let mut deck = deck_from_cards("As Ks");
+        assert!(deck.try_remove_nth_card(5).is_err());
+    }
+
+    #[test]
+    pub fn test_try_remove_random_cards() {
+        let mut deck = Deck::all_cards();
+        let removed = deck.try_remove_random_cards(5).unwrap();
+        assert_eq!(removed.len(), 5);
+        assert_eq!(deck.num_cards(), 47);
+        for card in &removed {
+            assert!(!deck.has_card(card));
+        }
+    }
+
+    #[test]
+    pub fn test_try_remove_random_cards_too_many() {
+        let mut deck = deck_from_cards("As Ks");
+        assert!(deck.try_remove_random_cards(3).is_err());
+    }
 }
