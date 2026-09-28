@@ -14,6 +14,7 @@ pub mod range;
 
 /// Represents the rank of a playing card (Two through Ace).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Rank {
     /// 2
     Two,
@@ -89,6 +90,7 @@ impl Display for Rank {
 
 /// Represents the suit of a playing card (Clubs, Diamonds, Hearts, Spades).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Suit {
     /// Clubs (c)
     Clubs,
@@ -129,6 +131,8 @@ impl Display for Suit {
 /// Represents a playing card with a rank and suit.
 /// Provides methods to create, parse, and display cards.
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(into = "String", try_from = "String"))]
 pub struct Card {
     val: Deck,
     suit: Suit,
@@ -227,10 +231,25 @@ impl Card {
     }
 }
 
+impl From<Card> for String {
+    fn from(card: Card) -> Self {
+        card.to_string()
+    }
+}
+
+impl TryFrom<String> for Card {
+    type Error = DucyError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Card::parse(&s)
+    }
+}
+
 /// Represents a deck of playing cards.
 /// Able to hold any subset of playing cards, up to one of each card.
 /// Provides methods to create, parse, and display decks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(into = "String", try_from = "String"))]
 pub struct Deck {
     cards: u64,
 }
@@ -248,6 +267,19 @@ impl FromStr for Deck {
     type Err = DucyError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::parse(s)
+    }
+}
+
+impl From<Deck> for String {
+    fn from(deck: Deck) -> Self {
+        deck.to_string()
+    }
+}
+
+impl TryFrom<String> for Deck {
+    type Error = DucyError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Deck::parse(&s)
     }
 }
 
@@ -1049,5 +1081,33 @@ mod test {
         assert!(deck.try_get_nth_card(0).is_some());
         assert!(deck.try_get_nth_card(1).is_some());
         assert!(deck.try_get_nth_card(2).is_none());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    pub fn test_serde_card_roundtrip() {
+        let card = Card::new(Rank::Ace, Suit::Spades);
+        let json = serde_json::to_string(&card).unwrap();
+        assert_eq!(json, "\"As\"");
+        let deserialized: Card = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, card);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    pub fn test_serde_deck_roundtrip() {
+        let deck = deck_from_cards("As Kh Qd");
+        let json = serde_json::to_string(&deck).unwrap();
+        let deserialized: Deck = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, deck);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    pub fn test_serde_rank_roundtrip() {
+        let rank = Rank::Ace;
+        let json = serde_json::to_string(&rank).unwrap();
+        let deserialized: Rank = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, rank);
     }
 }

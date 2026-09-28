@@ -11,6 +11,9 @@ categories = ["game-engines", "algorithms"]
 keywords = ["poker", "holdem", "omaha", "equity", "cards"]
 
 
+[features]
+serde = ["dep:serde", "rust_decimal/serde-with-str"]
+
 [dependencies]
 strum = "0.28.0"
 strum_macros = "0.28.0"
@@ -19,9 +22,11 @@ numerica = "2.2.0"
 rust_decimal = "1.42.1"
 rust_decimal_macros = "1.40.0"
 rayon = "1.12.0"
+serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["html_reports"] }
+serde_json = "1"
 
 [[bench]]
 name = "equity"
