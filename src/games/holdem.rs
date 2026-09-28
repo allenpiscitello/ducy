@@ -95,22 +95,29 @@ impl GameEquityEvaluation<HoldemGameState, StandardHandRanks, HoldemGameEvaluati
     for HoldemGameEvaluation
 {
     fn evaluate_equity(&self, game_state: &HoldemGameState) -> Vec<Decimal> {
-        let num_players = game_state.get_player_hole_cards().count();
-        let mut win_shares: Vec<u64> = vec![0; num_players];
-        let mut hand_count: u64 = 0;
-        for runout in game_state.get_final_states() {
-            let winners = HoldemGameEvaluation {}.evaluate_winners(&runout);
+        let hole_cards = game_state.flop_game_state.hole_cards();
+        let num_players = hole_cards.len();
+        let runouts: Vec<Deck> = game_state
+            .flop_game_state
+            .enumerate_runout_community_cards()
+            .collect();
+
+        crate::games::accumulate_equity(runouts, num_players, |community, shares| {
+            let mut tracker = WinnerTracker::new();
+            for (i, player) in hole_cards.iter().enumerate() {
+                let combined_deck = *player | *community;
+                if let Some(rank) =
+                    StandardHandRanker::get_rank_at_least(&combined_deck, tracker.best_hand())
+                {
+                    tracker.consider(i, rank);
+                }
+            }
+            let winners = tracker.into_results();
             let num_winners = winners.len() as u64;
             for winner in &winners {
-                win_shares[winner.player_index] += EQUITY_SCALE / num_winners;
+                shares[winner.player_index] += EQUITY_SCALE / num_winners;
             }
-            hand_count += 1;
-        }
-        let divisor = Decimal::from(EQUITY_SCALE) * Decimal::from(hand_count);
-        win_shares
-            .iter()
-            .map(|&s| Decimal::from(s) / divisor)
-            .collect()
+        })
     }
 }
 

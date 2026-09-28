@@ -275,7 +275,7 @@ dependencies = [
  "criterion",
  "numerica",
  "rand 0.10.3",
- "regex",
+ "rayon",
  "rust_decimal",
  "rust_decimal_macros",
  "strum",

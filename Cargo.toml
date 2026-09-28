@@ -18,6 +18,7 @@ rand = "0.10.2"
 numerica = "2.2.0"
 rust_decimal = "1.42.1"
 rust_decimal_macros = "1.40.0"
+rayon = "1.12.0"
 
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["html_reports"] }
