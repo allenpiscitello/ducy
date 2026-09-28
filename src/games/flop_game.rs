@@ -1,10 +1,13 @@
 use crate::deck::{Card, Deck};
 use crate::error::DucyError;
 
+const MAX_PLAYERS: usize = 10;
+
 /// Shared state for flop-based poker games (community cards, hole cards, remaining deck).
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct FlopGameState {
-    hole_cards: Vec<Deck>,
+    hole_cards: [Deck; MAX_PLAYERS],
+    num_players: usize,
     flop: Deck,
     turn: Option<Card>,
     river: Option<Card>,
@@ -17,7 +20,8 @@ impl FlopGameState {
     /// Creates a new game state with the specified number of hole cards per player.
     pub fn new(num_hole_cards_per_player: u32) -> Self {
         Self {
-            hole_cards: vec![],
+            hole_cards: [Deck::empty(); MAX_PLAYERS],
+            num_players: 0,
             flop: Deck::empty(),
             turn: None,
             river: None,
@@ -69,7 +73,7 @@ impl FlopGameState {
     }
 
     pub fn hole_cards(&self) -> &[Deck] {
-        &self.hole_cards
+        &self.hole_cards[..self.num_players]
     }
 }
 
@@ -81,9 +85,13 @@ impl FlopGame for FlopGameState {
         if !self.remaining_cards_in_deck.has_cards(&cards) {
             return Err(DucyError::CardsNotAvailable);
         }
+        if self.num_players >= MAX_PLAYERS {
+            return Err(DucyError::TooManyPlayers);
+        }
 
         self.remaining_cards_in_deck -= cards;
-        self.hole_cards.push(cards);
+        self.hole_cards[self.num_players] = cards;
+        self.num_players += 1;
 
         Ok(())
     }
@@ -135,34 +143,34 @@ impl FlopGame for FlopGameState {
     }
 
     fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck> {
-        self.hole_cards.iter()
+        self.hole_cards[..self.num_players].iter()
     }
 
     fn get_final_states<'a>(&'a self) -> impl Iterator<Item = Self> + 'a {
         if self.flop.is_empty() {
             FlopGameStateIterator::AllCards {
                 iterator: CommunityCardIterator {
-                    base_state: self.clone(),
+                    base_state: *self,
                     iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(5)),
                 },
             }
         } else if self.turn.is_none() {
             FlopGameStateIterator::AllCards {
                 iterator: CommunityCardIterator {
-                    base_state: self.clone(),
+                    base_state: *self,
                     iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(2)),
                 },
             }
         } else if self.river.is_none() {
             FlopGameStateIterator::AllCards {
                 iterator: CommunityCardIterator {
-                    base_state: self.clone(),
+                    base_state: *self,
                     iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(1)),
                 },
             }
         } else {
             FlopGameStateIterator::Complete {
-                game_state: self.clone(),
+                game_state: *self,
                 iterated: false,
             }
         }
@@ -193,7 +201,7 @@ impl Iterator for FlopGameStateIterator {
                     None
                 } else {
                     *iterated = true;
-                    Some(game_state.clone())
+                    Some(*game_state)
                 }
             }
         }
@@ -209,7 +217,7 @@ impl Iterator for CommunityCardIterator {
     type Item = FlopGameState;
     fn next(&mut self) -> Option<Self::Item> {
         self.iterator.next().map(|x| {
-            let mut game_state = self.base_state.clone();
+            let mut game_state = self.base_state;
             game_state.add_community_cards(&x).unwrap();
             game_state
         })
