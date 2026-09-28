@@ -173,6 +173,137 @@ mod test {
     }
 
     #[test]
+    pub fn test_ace_low_straight() {
+        assert_rank!(
+            "As 2s 3h 4c 5d",
+            StandardHandRanks::Straight { s: Rank::Five }
+        );
+    }
+
+    #[test]
+    pub fn test_ace_high_straight_broadway() {
+        assert_rank!(
+            "Ts Js Qh Kc Ad",
+            StandardHandRanks::Straight { s: Rank::Ace }
+        );
+    }
+
+    #[test]
+    pub fn test_ace_low_straight_flush() {
+        assert_rank!(
+            "As 2s 3s 4s 5s",
+            StandardHandRanks::StraightFlush { sf: Rank::Five }
+        );
+    }
+
+    #[test]
+    pub fn test_royal_flush() {
+        assert_rank!(
+            "Ts Js Qs Ks As",
+            StandardHandRanks::StraightFlush { sf: Rank::Ace }
+        );
+    }
+
+    #[test]
+    pub fn test_best_flush_from_six_suited() {
+        assert_rank!(
+            "2s 4s 6s 8s Ts Qs",
+            StandardHandRanks::Flush {
+                c1: Rank::Queen,
+                c2: Rank::Ten,
+                c3: Rank::Eight,
+                c4: Rank::Six,
+                c5: Rank::Four,
+            }
+        );
+    }
+
+    #[test]
+    pub fn test_best_flush_from_seven_suited() {
+        assert_rank!(
+            "2s 3s 5s 7s 9s Js Ks",
+            StandardHandRanks::Flush {
+                c1: Rank::King,
+                c2: Rank::Jack,
+                c3: Rank::Nine,
+                c4: Rank::Seven,
+                c5: Rank::Five,
+            }
+        );
+    }
+
+    #[test]
+    pub fn test_full_house_with_two_trips() {
+        assert_rank!(
+            "3c 3d 3h Kc Kd Kh 2s",
+            StandardHandRanks::FullHouse {
+                t: Rank::King,
+                p: Rank::Three,
+            }
+        );
+    }
+
+    #[test]
+    pub fn test_full_house_with_two_pairs_and_trips() {
+        assert_rank!(
+            "Ac Ad Ah 5c 5d 9c 9d",
+            StandardHandRanks::FullHouse {
+                t: Rank::Ace,
+                p: Rank::Nine,
+            }
+        );
+    }
+
+    #[test]
+    pub fn test_kicker_comparison_one_pair() {
+        let hand_a = deck_from_cards("As Ah Kc Qd Jh");
+        let hand_b = deck_from_cards("As Ah Kc Qd Th");
+        let rank_a = StandardHandRanker::get_rank(&hand_a);
+        let rank_b = StandardHandRanker::get_rank(&hand_b);
+        assert!(rank_a > rank_b);
+    }
+
+    #[test]
+    pub fn test_identical_hands_are_equal() {
+        let hand_a = deck_from_cards("As Kc Qd Jh 9s");
+        let hand_b = deck_from_cards("Ah Kd Qs Jc 9d");
+        let rank_a = StandardHandRanker::get_rank(&hand_a);
+        let rank_b = StandardHandRanker::get_rank(&hand_b);
+        assert_eq!(rank_a, rank_b);
+    }
+
+    #[test]
+    pub fn test_straight_beats_trips() {
+        let trips = deck_from_cards("Ac Ad Ah 5c 3d");
+        let straight = deck_from_cards("5c 6d 7h 8s 9c");
+        let rank_trips = StandardHandRanker::get_rank(&trips);
+        let rank_straight = StandardHandRanker::get_rank(&straight);
+        assert!(rank_straight > rank_trips);
+    }
+
+    #[test]
+    pub fn test_flush_beats_straight() {
+        let straight = deck_from_cards("5c 6d 7h 8s 9c");
+        let flush = deck_from_cards("2s 4s 6s 8s Ts");
+        let rank_straight = StandardHandRanker::get_rank(&straight);
+        let rank_flush = StandardHandRanker::get_rank(&flush);
+        assert!(rank_flush > rank_straight);
+    }
+
+    #[test]
+    pub fn test_seven_card_best_hand_selection() {
+        assert_rank!(
+            "2c 5d 8h Ts Qd Ac Ah",
+            StandardHandRanks::OnePair {
+                p: Rank::Ace,
+                c1: Rank::Queen,
+                c2: Rank::Ten,
+                c3: Rank::Eight,
+            }
+        );
+    }
+
+    #[test]
     pub fn test_rank_between() {
         let ranks_between: Vec<Rank> = RankOrder::AceIsHigh
             .get_ranks_between(&Rank::Three, Some(&Rank::Seven))
