@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::ops::{BitOr, BitOrAssign, Sub, SubAssign};
+use std::str::FromStr;
 
 use numerica::combinatorics::CombinationIterator;
 
@@ -207,6 +208,13 @@ impl Display for Card {
     }
 }
 
+impl FromStr for Card {
+    type Err = DucyError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
 impl Card {
     /// Returns the rank of the card.
     pub fn rank(&self) -> Rank {
@@ -233,6 +241,13 @@ impl Display for Deck {
         let cards_str: Vec<String> = card_iterator.map(|x| format!("{}", x)).collect();
         let cards_as_str = cards_str.join(" ");
         write!(f, "{}", cards_as_str)
+    }
+}
+
+impl FromStr for Deck {
+    type Err = DucyError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -909,6 +924,20 @@ mod test {
         assert_eq!(Card::parse("As")?, Card::new(Rank::Ace, Suit::Spades));
 
         Ok(())
+    }
+
+    #[test]
+    pub fn test_card_fromstr_trait() {
+        let card: Card = "As".parse().unwrap();
+        assert_eq!(card, Card::new(Rank::Ace, Suit::Spades));
+        assert!("xx".parse::<Card>().is_err());
+    }
+
+    #[test]
+    pub fn test_deck_fromstr_trait() {
+        let deck: Deck = "As Kh".parse().unwrap();
+        assert_eq!(deck, Deck::parse("As Kh").unwrap());
+        assert_eq!(deck.num_cards(), 2);
     }
 
     #[test]
