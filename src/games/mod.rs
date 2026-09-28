@@ -16,9 +16,9 @@ pub trait GameState {}
 /// A winning player's result: their index, pot share, and best hand.
 #[derive(Eq, PartialEq, Debug)]
 pub struct GameWinner<H: HandRanking> {
-    pub player_index: usize,
-    pub pot_amount: Decimal,
-    pub winning_hand: H,
+    pub(crate) player_index: usize,
+    pub(crate) pot_amount: Decimal,
+    pub(crate) winning_hand: H,
 }
 
 impl<H: HandRanking> GameWinner<H> {

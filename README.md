@@ -35,7 +35,7 @@ game.set_flop(Deck::parse("Kc Qd Js").unwrap()).unwrap();
 
 let evaluator = HoldemGameEvaluation {};
 let winners = evaluator.evaluate_winners(&game);
-println!("Winner: player {}", winners[0].player_index);
+println!("Winner: player {}", winners[0].player_index());
 ```
 
 ### Evaluate an Omaha hand

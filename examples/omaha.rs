@@ -18,7 +18,11 @@ fn main() {
     let winners = evaluator.evaluate_winners(&game);
     println!("\nAfter flop (Jh Th Qd):");
     for w in &winners {
-        println!("  Player {} wins with {}", w.player_index, w.winning_hand);
+        println!(
+            "  Player {} wins with {}",
+            w.player_index(),
+            w.winning_hand()
+        );
     }
 
     game.set_turn(Card::parse("Jd").unwrap()).unwrap();
@@ -26,7 +30,11 @@ fn main() {
     let winners = evaluator.evaluate_winners(&game);
     println!("\nAfter turn (Jd):");
     for w in &winners {
-        println!("  Player {} wins with {}", w.player_index, w.winning_hand);
+        println!(
+            "  Player {} wins with {}",
+            w.player_index(),
+            w.winning_hand()
+        );
     }
 
     let equity = evaluator.evaluate_equity(&game);
@@ -41,6 +49,10 @@ fn main() {
     let winners = evaluator.evaluate_winners(&game);
     println!("\nAfter river (Qh):");
     for w in &winners {
-        println!("  Player {} wins with {}", w.player_index, w.winning_hand);
+        println!(
+            "  Player {} wins with {}",
+            w.player_index(),
+            w.winning_hand()
+        );
     }
 }
