@@ -15,6 +15,8 @@ pub mod flop_game;
 pub mod holdem;
 /// Omaha game state, evaluation, and board analysis.
 pub mod omaha;
+/// Omaha Hi-Lo 8-or-Better game state and split-pot evaluation.
+pub mod omaha_hilo;
 /// Razz (Seven-Card Stud Low) game state and evaluation.
 pub mod razz;
 
