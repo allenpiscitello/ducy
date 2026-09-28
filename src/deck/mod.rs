@@ -750,12 +750,14 @@ impl From<Deck> for u64 {
 }
 
 struct CardIterator {
-    last_index: usize,
+    inner: DeckCardIterator,
 }
 
 impl CardIterator {
     pub fn new() -> Self {
-        Self { last_index: 0 }
+        Self {
+            inner: DeckCardIterator::new(Deck::all_cards(), true),
+        }
     }
 }
 
@@ -763,27 +765,20 @@ impl Iterator for CardIterator {
     type Item = Card;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.last_index >= 52 {
-            return None;
-        }
-
-        let card = Some(Deck::all_cards().get_nth_card_unchecked(self.last_index));
-
-        self.last_index += 1;
-        card
+        self.inner.next()
     }
 }
 
 struct DeckIterator {
-    deck: Deck,
+    cards: Vec<Card>,
     iterator: CombinationIterator,
 }
 
 impl DeckIterator {
     fn new(deck: Deck, size: usize) -> Self {
-        let num_cards = deck.num_cards();
-        let iterator = numerica::combinatorics::CombinationIterator::new(num_cards as usize, size);
-        Self { deck, iterator }
+        let cards: Vec<Card> = deck.iter(true).collect();
+        let iterator = numerica::combinatorics::CombinationIterator::new(cards.len(), size);
+        Self { cards, iterator }
     }
 }
 
@@ -791,17 +786,13 @@ impl Iterator for DeckIterator {
     type Item = Deck;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(vals) = self.iterator.next() {
+        self.iterator.next().map(|vals| {
             let mut deck = Deck::empty();
-            let cards: Vec<Card> = vals
-                .iter()
-                .map(|i| self.deck.get_nth_card_unchecked(*i))
-                .collect::<Vec<Card>>();
-            deck.insert_cards(cards.iter());
-            Some(deck)
-        } else {
-            None
-        }
+            for &i in vals {
+                deck.cards |= self.cards[i].get_deck().cards;
+            }
+            deck
+        })
     }
 }
 
