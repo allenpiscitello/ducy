@@ -22,6 +22,14 @@ pub mod omaha_bomb_pot;
 pub mod omaha_hilo;
 /// Razz (Seven-Card Stud Low) game state and evaluation.
 pub mod razz;
+/// Single Draw Deuce-to-Seven Lowball (Kansas City Lowball) game state and evaluation.
+pub mod single_draw_27;
+/// Single Draw Ace-to-Five Lowball (California Lowball) game state and evaluation.
+pub mod single_draw_a5;
+/// Seven-Card Stud (high only) game state and evaluation.
+pub mod stud;
+/// Seven-Card Stud Hi-Lo 8-or-Better game state and evaluation.
+pub mod stud_hilo;
 
 /// Marker trait for game state types.
 pub trait GameState {}
