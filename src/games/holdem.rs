@@ -102,10 +102,8 @@ impl GameEquityEvaluation<HoldemGameState, StandardHandRanks, HoldemGameEvaluati
         for runout in game_state.get_final_states() {
             let winners = HoldemGameEvaluation {}.evaluate_winners(&runout);
             let num_winners = winners.len() as u64;
-            if num_winners > 0 {
-                for winner in &winners {
-                    win_shares[winner.player_index] += EQUITY_SCALE / num_winners;
-                }
+            for winner in &winners {
+                win_shares[winner.player_index] += EQUITY_SCALE / num_winners;
             }
             hand_count += 1;
         }
