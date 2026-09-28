@@ -22,7 +22,7 @@ use crate::{
 };
 
 pub struct HoldemGameState {
-    flop_game_state: FlopGameState,
+    pub(crate) flop_game_state: FlopGameState,
 }
 
 impl HoldemGameState {
@@ -94,13 +94,23 @@ impl GameEquityEvaluation<HoldemGameState, StandardHandRanks, HoldemGameEvaluati
     for HoldemGameEvaluation
 {
     fn evaluate_equity(&self, game_state: &HoldemGameState) -> Vec<Decimal> {
-        let mut winner_equity: Vec<Decimal> = game_state
-            .get_player_hole_cards()
-            .map(|_| dec!(0))
-            .collect();
+        let hole_cards = game_state.flop_game_state.hole_cards();
+        let mut winner_equity: Vec<Decimal> = hole_cards.iter().map(|_| dec!(0)).collect();
         let mut hand_count = 0;
-        for runout in game_state.get_final_states() {
-            let winners = HoldemGameEvaluation {}.evaluate_winners(&runout);
+        for community_cards in game_state
+            .flop_game_state
+            .enumerate_runout_community_cards()
+        {
+            let mut tracker = WinnerTracker::new();
+            for (i, player) in hole_cards.iter().enumerate() {
+                let combined_deck = *player | community_cards;
+                if let Some(rank) =
+                    StandardHandRanker::get_rank_at_least(&combined_deck, tracker.best_hand())
+                {
+                    tracker.consider(i, rank);
+                }
+            }
+            let winners = tracker.into_results();
             let num_winners = winners.len();
             let equity = if num_winners > 0 {
                 dec!(1.0) / Decimal::from(num_winners)
