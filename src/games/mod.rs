@@ -97,6 +97,52 @@ impl<H: HandRanking + Ord + Copy> WinnerTracker<H> {
 // LCM(1..10) — allows exact integer division for any split up to 10 winners
 pub(crate) const EQUITY_SCALE: u64 = 2520;
 
+const PARALLEL_THRESHOLD: usize = 100;
+
+pub(crate) fn accumulate_equity<F>(
+    runouts: Vec<crate::deck::Deck>,
+    num_players: usize,
+    eval: F,
+) -> Vec<Decimal>
+where
+    F: Fn(&crate::deck::Deck, &mut [u64]) + Send + Sync,
+{
+    let hand_count = runouts.len() as u64;
+    let win_shares = if runouts.len() >= PARALLEL_THRESHOLD {
+        use rayon::prelude::*;
+        runouts
+            .par_iter()
+            .fold(
+                || vec![0u64; num_players],
+                |mut shares, community| {
+                    eval(community, &mut shares);
+                    shares
+                },
+            )
+            .reduce(
+                || vec![0u64; num_players],
+                |mut a, b| {
+                    for (i, &v) in b.iter().enumerate() {
+                        a[i] += v;
+                    }
+                    a
+                },
+            )
+    } else {
+        let mut shares = vec![0u64; num_players];
+        for community in &runouts {
+            eval(community, &mut shares);
+        }
+        shares
+    };
+
+    let divisor = Decimal::from(EQUITY_SCALE) * Decimal::from(hand_count);
+    win_shares
+        .iter()
+        .map(|&s| Decimal::from(s) / divisor)
+        .collect()
+}
+
 /// Evaluates a game state to determine winners.
 pub trait GameEvaluation<GS: GameState, H: HandRanking> {
     /// Returns the winners for the given game state.
