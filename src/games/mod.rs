@@ -94,6 +94,9 @@ impl<H: HandRanking + Ord + Copy> WinnerTracker<H> {
     }
 }
 
+// LCM(1..10) — allows exact integer division for any split up to 10 winners
+pub(crate) const EQUITY_SCALE: u64 = 2520;
+
 /// Evaluates a game state to determine winners.
 pub trait GameEvaluation<GS: GameState, H: HandRanking> {
     /// Returns the winners for the given game state.
