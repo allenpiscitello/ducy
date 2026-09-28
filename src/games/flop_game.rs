@@ -32,6 +32,42 @@ impl FlopGameState {
         self.community_cards |= *deck;
         Ok(())
     }
+
+    pub fn enumerate_runout_community_cards(&self) -> impl Iterator<Item = Deck> + '_ {
+        let cards_needed = if self.flop.is_empty() {
+            5
+        } else if self.turn.is_none() {
+            2
+        } else if self.river.is_none() {
+            1
+        } else {
+            0
+        };
+
+        let base_community = self.community_cards;
+        let complete = if cards_needed == 0 {
+            Some(base_community)
+        } else {
+            None
+        };
+
+        let combos: Box<dyn Iterator<Item = Deck>> = if cards_needed > 0 {
+            Box::new(
+                self.remaining_cards_in_deck
+                    .enumerate_combinations(cards_needed),
+            )
+        } else {
+            Box::new(std::iter::empty())
+        };
+
+        complete
+            .into_iter()
+            .chain(combos.map(move |c| base_community | c))
+    }
+
+    pub fn hole_cards(&self) -> &[Deck] {
+        &self.hole_cards
+    }
 }
 
 impl FlopGame for FlopGameState {
