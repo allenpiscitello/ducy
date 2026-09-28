@@ -647,22 +647,22 @@ impl RankSet {
                 RankOrder::AceIsLow => SINGLE_SUIT_LOW_ACE_BITFIELD,
             };
 
-        let count = u64::count_ones(all_ranks);
-        if count < 5 {
+        if u64::count_ones(all_ranks) < 5 {
             None
         } else {
-            let mut return_val = vec![];
+            let mut result = [Rank::Two; 5];
+            let mut found = 0;
             for i in 1..14 {
                 let target = 0b1 << (14 - i);
                 if target & all_ranks == target {
-                    return_val.push(RANKS[14 - i]);
-                    if return_val.len() == 5 {
+                    result[found] = RANKS[14 - i];
+                    found += 1;
+                    if found == 5 {
                         break;
                     }
                 }
             }
-            let slice = return_val.try_into().unwrap();
-            Some(slice)
+            Some(result)
         }
     }
 
