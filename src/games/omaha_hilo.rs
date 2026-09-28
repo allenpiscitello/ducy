@@ -196,13 +196,11 @@ mod test {
     use rust_decimal_macros::dec;
 
     use crate::{
-        deck::{Card, Deck, Rank},
+        deck::{Card, Deck},
         games::{
-            GameWinner,
             flop_game::FlopGame,
             omaha_hilo::{OmahaHiLoGameEvaluation, OmahaHiLoGameState},
         },
-        ranking::{hand_rank::StandardHandRanks, low_hand_rank::LowHandRanks},
     };
 
     #[test]
