@@ -22,6 +22,8 @@ pub enum DucyError {
     TurnNotSet,
     /// Invalid range specification
     InvalidRange,
+    /// Too many players (maximum 10)
+    TooManyPlayers,
 }
 
 impl fmt::Display for DucyError {
@@ -37,6 +39,7 @@ impl fmt::Display for DucyError {
             DucyError::FlopNotSet => write!(f, "flop must be set before turn"),
             DucyError::TurnNotSet => write!(f, "turn must be set before river"),
             DucyError::InvalidRange => write!(f, "invalid range specification"),
+            DucyError::TooManyPlayers => write!(f, "too many players (maximum 10)"),
         }
     }
 }
