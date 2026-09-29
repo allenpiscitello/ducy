@@ -18,7 +18,9 @@ pub struct HoldemGame {
 }
 
 impl Default for HoldemGame {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen]
@@ -145,7 +147,9 @@ pub struct OmahaHiLoGame {
 }
 
 impl Default for OmahaHiLoGame {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen]
@@ -193,7 +197,9 @@ pub struct RandomDeck {
 }
 
 impl Default for RandomDeck {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen]

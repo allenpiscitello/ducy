@@ -499,6 +499,41 @@ impl Deck {
         u64::count_ones(all_ranks)
     }
 
+    /// Returns `true` if all cards in the deck belong to a single suit.
+    pub fn is_single_suit(&self) -> bool {
+        self.single_suit_index().is_some()
+    }
+
+    /// Returns the suit index (0-3) if all cards share one suit, or `None`.
+    pub fn single_suit_index(&self) -> Option<usize> {
+        let no_low = Self::get_without_low_aces(self.cards);
+        if no_low == 0 {
+            return None;
+        }
+        for i in 0..4 {
+            let mask = SINGLE_SUIT_HIGH_ACE_BITFIELD << (16 * i);
+            if no_low & mask == no_low {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Returns `true` if all cards belong to the suit at the given index (0-3).
+    pub fn all_in_suit_index(&self, suit_index: usize) -> bool {
+        let no_low = Self::get_without_low_aces(self.cards);
+        if no_low == 0 {
+            return false;
+        }
+        let mask = SINGLE_SUIT_HIGH_ACE_BITFIELD << (16 * suit_index);
+        no_low & mask == no_low
+    }
+
+    /// Returns `true` if any rank appears more than once.
+    pub fn has_rank_pair(&self) -> bool {
+        self.get_combined_ranks().num_unique_ranks() < self.num_cards()
+    }
+
     /// Returns an iterator over for each suit in the deck that returns a set of which ranks are present in each suit.  
     pub fn get_single_suit_ranks(&self) -> impl Iterator<Item = (RankSet, Suit)> {
         SingleSuitRankIterator {
