@@ -14,23 +14,23 @@ use crate::{
     },
 };
 
-/// Omaha Hi-Lo 8-or-Better game state (4 hole cards per player, split pot).
+/// Omaha Hi-Lo 8-or-Better game state (configurable number of hole cards per player, split pot).
 pub struct OmahaHiLoGameState {
     pub(crate) flop_game_state: FlopGameState,
 }
 
 impl OmahaHiLoGameState {
-    /// Creates a new Omaha Hi-Lo game state.
-    pub fn new() -> Self {
+    /// Creates a new Omaha Hi-Lo game state with the given number of hole cards per player.
+    pub fn new(cards_per_player: u32) -> Self {
         Self {
-            flop_game_state: FlopGameState::new(4),
+            flop_game_state: FlopGameState::new(cards_per_player),
         }
     }
 }
 
 impl Default for OmahaHiLoGameState {
     fn default() -> Self {
-        Self::new()
+        Self::new(4)
     }
 }
 
@@ -219,7 +219,7 @@ mod test {
 
     #[test]
     fn test_hilo_high_scoops_no_low() {
-        let mut state = OmahaHiLoGameState::new();
+        let mut state = OmahaHiLoGameState::new(4);
         state
             .add_player(Deck::parse("Ks Kd Qc Qd").unwrap())
             .unwrap();
@@ -241,7 +241,7 @@ mod test {
 
     #[test]
     fn test_hilo_split_pot() {
-        let mut state = OmahaHiLoGameState::new();
+        let mut state = OmahaHiLoGameState::new(4);
         // Player 0: strong high hand
         state
             .add_player(Deck::parse("Ks Kd Qc Qd").unwrap())
@@ -270,7 +270,7 @@ mod test {
 
     #[test]
     fn test_hilo_scoop_both_high_and_low() {
-        let mut state = OmahaHiLoGameState::new();
+        let mut state = OmahaHiLoGameState::new(4);
         // Player 0: A-2 with strong high potential
         state
             .add_player(Deck::parse("As 2d Kc Kd").unwrap())
@@ -298,7 +298,7 @@ mod test {
 
     #[test]
     fn test_hilo_equity_no_low_possible() {
-        let mut state = OmahaHiLoGameState::new();
+        let mut state = OmahaHiLoGameState::new(4);
         state
             .add_player(Deck::parse("Ks Kd Qc Qd").unwrap())
             .unwrap();
