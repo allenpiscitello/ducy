@@ -25,6 +25,8 @@ pub enum DucyError {
     InvalidRange,
     /// Too many players (maximum 10)
     TooManyPlayers,
+    /// Board index is out of range
+    InvalidBoardIndex,
 }
 
 impl fmt::Display for DucyError {
@@ -41,6 +43,7 @@ impl fmt::Display for DucyError {
             DucyError::TurnNotSet => write!(f, "turn must be set before river"),
             DucyError::InvalidRange => write!(f, "invalid range specification"),
             DucyError::TooManyPlayers => write!(f, "too many players (maximum 10)"),
+            DucyError::InvalidBoardIndex => write!(f, "board index out of range"),
         }
     }
 }
