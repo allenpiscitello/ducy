@@ -108,6 +108,7 @@ impl<H: HandRanking + Ord + Copy> WinnerTracker<H> {
 // LCM(1..10) — allows exact integer division for any split up to 10 winners
 pub(crate) const EQUITY_SCALE: u64 = 2520;
 
+#[cfg(feature = "parallel")]
 const PARALLEL_THRESHOLD: usize = 100;
 
 pub(crate) fn accumulate_equity<F>(
@@ -119,32 +120,45 @@ where
     F: Fn(&crate::deck::Deck, &mut [u64]) + Send + Sync,
 {
     let hand_count = runouts.len() as u64;
-    let win_shares = if runouts.len() >= PARALLEL_THRESHOLD {
-        use rayon::prelude::*;
-        runouts
-            .par_iter()
-            .fold(
-                || vec![0u64; num_players],
-                |mut shares, community| {
+    let win_shares = {
+        #[cfg(feature = "parallel")]
+        {
+            if runouts.len() >= PARALLEL_THRESHOLD {
+                use rayon::prelude::*;
+                runouts
+                    .par_iter()
+                    .fold(
+                        || vec![0u64; num_players],
+                        |mut shares, community| {
+                            eval(community, &mut shares);
+                            shares
+                        },
+                    )
+                    .reduce(
+                        || vec![0u64; num_players],
+                        |mut a, b| {
+                            for (i, &v) in b.iter().enumerate() {
+                                a[i] += v;
+                            }
+                            a
+                        },
+                    )
+            } else {
+                let mut shares = vec![0u64; num_players];
+                for community in &runouts {
                     eval(community, &mut shares);
-                    shares
-                },
-            )
-            .reduce(
-                || vec![0u64; num_players],
-                |mut a, b| {
-                    for (i, &v) in b.iter().enumerate() {
-                        a[i] += v;
-                    }
-                    a
-                },
-            )
-    } else {
-        let mut shares = vec![0u64; num_players];
-        for community in &runouts {
-            eval(community, &mut shares);
+                }
+                shares
+            }
         }
-        shares
+        #[cfg(not(feature = "parallel"))]
+        {
+            let mut shares = vec![0u64; num_players];
+            for community in &runouts {
+                eval(community, &mut shares);
+            }
+            shares
+        }
     };
 
     let divisor = Decimal::from(EQUITY_SCALE) * Decimal::from(hand_count);

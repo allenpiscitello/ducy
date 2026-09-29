@@ -2,8 +2,6 @@ use std::fmt::Display;
 use std::ops::{BitOr, BitOrAssign, Sub, SubAssign};
 use std::str::FromStr;
 
-use numerica::combinatorics::CombinationIterator;
-
 use strum_macros::EnumIter;
 
 use crate::error::DucyError;
@@ -837,14 +835,25 @@ impl Iterator for CardIterator {
 
 struct DeckIterator {
     cards: Vec<Card>,
-    iterator: CombinationIterator,
+    indices: Vec<usize>,
+    n: usize,
+    k: usize,
+    done: bool,
 }
 
 impl DeckIterator {
     fn new(deck: Deck, size: usize) -> Self {
         let cards: Vec<Card> = deck.iter(true).collect();
-        let iterator = numerica::combinatorics::CombinationIterator::new(cards.len(), size);
-        Self { cards, iterator }
+        let n = cards.len();
+        let done = size == 0 || size > n;
+        let indices: Vec<usize> = (0..size).collect();
+        Self {
+            cards,
+            indices,
+            n,
+            k: size,
+            done,
+        }
     }
 }
 
@@ -852,13 +861,29 @@ impl Iterator for DeckIterator {
     type Item = Deck;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iterator.next().map(|vals| {
-            let mut deck = Deck::empty();
-            for &i in vals {
-                deck.cards |= self.cards[i].get_deck().cards;
+        if self.done {
+            return None;
+        }
+        let mut deck = Deck::empty();
+        for &i in &self.indices {
+            deck.cards |= self.cards[i].get_deck().cards;
+        }
+        let mut i = self.k;
+        while i > 0 {
+            i -= 1;
+            if self.indices[i] != i + self.n - self.k {
+                break;
             }
-            deck
-        })
+            if i == 0 {
+                self.done = true;
+                return Some(deck);
+            }
+        }
+        self.indices[i] += 1;
+        for j in (i + 1)..self.k {
+            self.indices[j] = self.indices[j - 1] + 1;
+        }
+        Some(deck)
     }
 }
 
