@@ -2,8 +2,6 @@ use std::fmt::Display;
 use std::ops::{BitOr, BitOrAssign, Sub, SubAssign};
 use std::str::FromStr;
 
-use numerica::combinatorics::CombinationIterator;
-
 use strum_macros::EnumIter;
 
 use crate::error::DucyError;
@@ -501,6 +499,41 @@ impl Deck {
         u64::count_ones(all_ranks)
     }
 
+    /// Returns `true` if all cards in the deck belong to a single suit.
+    pub fn is_single_suit(&self) -> bool {
+        self.single_suit_index().is_some()
+    }
+
+    /// Returns the suit index (0-3) if all cards share one suit, or `None`.
+    pub fn single_suit_index(&self) -> Option<usize> {
+        let no_low = Self::get_without_low_aces(self.cards);
+        if no_low == 0 {
+            return None;
+        }
+        for i in 0..4 {
+            let mask = SINGLE_SUIT_HIGH_ACE_BITFIELD << (16 * i);
+            if no_low & mask == no_low {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Returns `true` if all cards belong to the suit at the given index (0-3).
+    pub fn all_in_suit_index(&self, suit_index: usize) -> bool {
+        let no_low = Self::get_without_low_aces(self.cards);
+        if no_low == 0 {
+            return false;
+        }
+        let mask = SINGLE_SUIT_HIGH_ACE_BITFIELD << (16 * suit_index);
+        no_low & mask == no_low
+    }
+
+    /// Returns `true` if any rank appears more than once.
+    pub fn has_rank_pair(&self) -> bool {
+        self.get_combined_ranks().num_unique_ranks() < self.num_cards()
+    }
+
     /// Returns an iterator over for each suit in the deck that returns a set of which ranks are present in each suit.  
     pub fn get_single_suit_ranks(&self) -> impl Iterator<Item = (RankSet, Suit)> {
         SingleSuitRankIterator {
@@ -837,14 +870,25 @@ impl Iterator for CardIterator {
 
 struct DeckIterator {
     cards: Vec<Card>,
-    iterator: CombinationIterator,
+    indices: Vec<usize>,
+    n: usize,
+    k: usize,
+    done: bool,
 }
 
 impl DeckIterator {
     fn new(deck: Deck, size: usize) -> Self {
         let cards: Vec<Card> = deck.iter(true).collect();
-        let iterator = numerica::combinatorics::CombinationIterator::new(cards.len(), size);
-        Self { cards, iterator }
+        let n = cards.len();
+        let done = size == 0 || size > n;
+        let indices: Vec<usize> = (0..size).collect();
+        Self {
+            cards,
+            indices,
+            n,
+            k: size,
+            done,
+        }
     }
 }
 
@@ -852,13 +896,29 @@ impl Iterator for DeckIterator {
     type Item = Deck;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iterator.next().map(|vals| {
-            let mut deck = Deck::empty();
-            for &i in vals {
-                deck.cards |= self.cards[i].get_deck().cards;
+        if self.done {
+            return None;
+        }
+        let mut deck = Deck::empty();
+        for &i in &self.indices {
+            deck.cards |= self.cards[i].get_deck().cards;
+        }
+        let mut i = self.k;
+        while i > 0 {
+            i -= 1;
+            if self.indices[i] != i + self.n - self.k {
+                break;
             }
-            deck
-        })
+            if i == 0 {
+                self.done = true;
+                return Some(deck);
+            }
+        }
+        self.indices[i] += 1;
+        for j in (i + 1)..self.k {
+            self.indices[j] = self.indices[j - 1] + 1;
+        }
+        Some(deck)
     }
 }
 
