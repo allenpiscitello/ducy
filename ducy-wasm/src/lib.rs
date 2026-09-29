@@ -4,6 +4,7 @@ use ducy::deck::{Card, Deck};
 use ducy::games::flop_game::FlopGame;
 use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState};
 use ducy::games::omaha::{OmahaGameEvaluation, OmahaGameState};
+use ducy::games::omaha_bomb_pot::{OmahaBombPotGameEvaluation, OmahaBombPotGameState};
 use ducy::games::omaha_hilo::{OmahaHiLoGameEvaluation, OmahaHiLoGameState};
 use ducy::games::{GameEquityEvaluation, GameEvaluation};
 
@@ -188,6 +189,70 @@ impl OmahaHiLoGame {
             .into_iter()
             .map(|d| d.try_into().unwrap_or(0.0))
             .collect()
+    }
+}
+
+#[wasm_bindgen]
+pub struct OmahaBombPotGame {
+    state: OmahaBombPotGameState,
+    eval: OmahaBombPotGameEvaluation,
+}
+
+#[wasm_bindgen]
+impl OmahaBombPotGame {
+    #[wasm_bindgen(constructor)]
+    pub fn new(num_boards: usize, cards_per_player: u32) -> Self {
+        Self {
+            state: OmahaBombPotGameState::new(num_boards, cards_per_player),
+            eval: OmahaBombPotGameEvaluation {},
+        }
+    }
+
+    pub fn add_player(&mut self, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.add_player(deck).map_err(to_js_err)
+    }
+
+    pub fn set_flop(&mut self, board_index: usize, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.set_flop(board_index, deck).map_err(to_js_err)
+    }
+
+    pub fn set_turn(&mut self, board_index: usize, card: &str) -> Result<(), JsError> {
+        let c = Card::parse(card).map_err(to_js_err)?;
+        self.state.set_turn(board_index, c).map_err(to_js_err)
+    }
+
+    pub fn set_river(&mut self, board_index: usize, card: &str) -> Result<(), JsError> {
+        let c = Card::parse(card).map_err(to_js_err)?;
+        self.state.set_river(board_index, c).map_err(to_js_err)
+    }
+
+    pub fn evaluate_equity(&self) -> Vec<f64> {
+        self.eval
+            .evaluate_equity(&self.state)
+            .into_iter()
+            .map(|d| d.try_into().unwrap_or(0.0))
+            .collect()
+    }
+
+    pub fn evaluate_winners(&self) -> Result<JsValue, JsError> {
+        let result = self.eval.evaluate_winners(&self.state);
+        let board_results: Vec<Vec<WinnerResult>> = result
+            .board_winners
+            .into_iter()
+            .map(|winners| {
+                winners
+                    .into_iter()
+                    .map(|w| WinnerResult {
+                        player_index: w.player_index(),
+                        pot_share: w.pot_amount().try_into().unwrap_or(0.0),
+                        hand: w.winning_hand().to_string(),
+                    })
+                    .collect()
+            })
+            .collect();
+        serde_wasm_bindgen::to_value(&board_results).map_err(|e| JsError::new(&e.to_string()))
     }
 }
 
