@@ -86,13 +86,20 @@ impl OmahaHiLoGameEvaluation {
         let mut high_tracker = WinnerTracker::new();
         let mut low_tracker: WinnerTracker<LowHandRanks> = WinnerTracker::new();
 
-        for (i, player) in game_state.get_player_hole_cards().enumerate() {
-            for community_cards_of_3 in community.enumerate_combinations(3) {
+        for community_cards_of_3 in community.enumerate_combinations(3) {
+            let board_suit = community_cards_of_3.single_suit_index();
+            let board_paired = community_cards_of_3.has_rank_pair();
+            for (i, player) in game_state.get_player_hole_cards().enumerate() {
                 for player_cards_of_2 in player.enumerate_combinations(2) {
+                    let flush_possible =
+                        board_suit.is_some_and(|s| player_cards_of_2.all_in_suit_index(s));
                     let combined = community_cards_of_3 | player_cards_of_2;
-                    if let Some(rank) =
-                        StandardHandRanker::get_rank_at_least(&combined, high_tracker.best_hand())
-                    {
+                    if let Some(rank) = StandardHandRanker::get_rank_at_least_with_hints(
+                        &combined,
+                        high_tracker.best_hand(),
+                        flush_possible,
+                        board_paired,
+                    ) {
                         high_tracker.consider(i, rank);
                     }
                     if let Some(rank) =
@@ -140,13 +147,20 @@ impl OmahaHiLoGameEvaluation {
             let mut high_tracker = WinnerTracker::new();
             let mut low_tracker: WinnerTracker<LowHandRanks> = WinnerTracker::new();
 
-            for (i, player) in runout.get_player_hole_cards().enumerate() {
-                for community_cards_of_3 in community.enumerate_combinations(3) {
+            let hole_cards: Vec<&Deck> = runout.get_player_hole_cards().collect();
+            for community_cards_of_3 in community.enumerate_combinations(3) {
+                let board_suit = community_cards_of_3.single_suit_index();
+                let board_paired = community_cards_of_3.has_rank_pair();
+                for (i, player) in hole_cards.iter().enumerate() {
                     for player_cards_of_2 in player.enumerate_combinations(2) {
+                        let flush_possible =
+                            board_suit.is_some_and(|s| player_cards_of_2.all_in_suit_index(s));
                         let combined = community_cards_of_3 | player_cards_of_2;
-                        if let Some(rank) = StandardHandRanker::get_rank_at_least(
+                        if let Some(rank) = StandardHandRanker::get_rank_at_least_with_hints(
                             &combined,
                             high_tracker.best_hand(),
+                            flush_possible,
+                            board_paired,
                         ) {
                             high_tracker.consider(i, rank);
                         }
