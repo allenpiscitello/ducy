@@ -146,18 +146,12 @@ pub struct OmahaHiLoGame {
     eval: OmahaHiLoGameEvaluation,
 }
 
-impl Default for OmahaHiLoGame {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[wasm_bindgen]
 impl OmahaHiLoGame {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
+    pub fn new(cards_per_player: u32) -> Self {
         Self {
-            state: OmahaHiLoGameState::new(),
+            state: OmahaHiLoGameState::new(cards_per_player),
             eval: OmahaHiLoGameEvaluation {},
         }
     }
