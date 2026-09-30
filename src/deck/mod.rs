@@ -869,8 +869,8 @@ impl Iterator for CardIterator {
 }
 
 struct DeckIterator {
-    cards: Vec<Card>,
-    indices: Vec<usize>,
+    card_bits: [u64; 52],
+    indices: [usize; 5],
     n: usize,
     k: usize,
     done: bool,
@@ -878,12 +878,26 @@ struct DeckIterator {
 
 impl DeckIterator {
     fn new(deck: Deck, size: usize) -> Self {
-        let cards: Vec<Card> = deck.iter(true).collect();
-        let n = cards.len();
+        debug_assert!(size <= 5);
+        let mut card_bits = [0u64; 52];
+        let mut n = 0;
+        for suit_idx in 0..4usize {
+            let shift = suit_idx * 16;
+            for rank_bits in &RANK_BITS {
+                let bits = rank_bits << shift;
+                if deck.cards & bits == bits {
+                    card_bits[n] = bits;
+                    n += 1;
+                }
+            }
+        }
         let done = size == 0 || size > n;
-        let indices: Vec<usize> = (0..size).collect();
+        let mut indices = [0usize; 5];
+        for (i, idx) in indices.iter_mut().enumerate().take(size.min(5)) {
+            *idx = i;
+        }
         Self {
-            cards,
+            card_bits,
             indices,
             n,
             k: size,
@@ -895,13 +909,14 @@ impl DeckIterator {
 impl Iterator for DeckIterator {
     type Item = Deck;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.done {
             return None;
         }
-        let mut deck = Deck::empty();
-        for &i in &self.indices {
-            deck.cards |= self.cards[i].get_deck().cards;
+        let mut bits = 0u64;
+        for idx in 0..self.k {
+            bits |= self.card_bits[self.indices[idx]];
         }
         let mut i = self.k;
         while i > 0 {
@@ -911,14 +926,14 @@ impl Iterator for DeckIterator {
             }
             if i == 0 {
                 self.done = true;
-                return Some(deck);
+                return Some(Deck::from(bits));
             }
         }
         self.indices[i] += 1;
         for j in (i + 1)..self.k {
             self.indices[j] = self.indices[j - 1] + 1;
         }
-        Some(deck)
+        Some(Deck::from(bits))
     }
 }
 

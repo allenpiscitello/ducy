@@ -4,7 +4,7 @@ use crate::{
     deck::{Card, Deck, Suit},
     error::DucyError,
     games::{
-        EQUITY_SCALE, GameEquityEvaluation, GameEvaluation, GameState, GameWinner, WinnerTracker,
+        GameEquityEvaluation, GameEvaluation, GameState, GameWinner, WinnerTracker,
         flop_game::{FlopGame, FlopGameState},
     },
     ranking::hand_rank::{StandardHandRanker, StandardHandRanks},
@@ -141,7 +141,7 @@ impl GameEquityEvaluation<OmahaGameState, StandardHandRanks, OmahaGameEvaluation
             .collect();
 
         crate::games::accumulate_equity(runouts, num_players, |community, shares| {
-            let mut tracker = WinnerTracker::new();
+            let mut tracker = crate::games::FastWinnerTracker::new();
             for community_cards_of_3 in community.enumerate_combinations(3) {
                 let board_suit = community_cards_of_3.single_suit_index();
                 let board_paired = community_cards_of_3.has_rank_pair();
@@ -150,22 +150,18 @@ impl GameEquityEvaluation<OmahaGameState, StandardHandRanks, OmahaGameEvaluation
                         let flush_possible = board_suit
                             .is_some_and(|s| player_cards_group_of_2.all_in_suit_index(s));
                         let combined_deck = community_cards_of_3 | player_cards_group_of_2;
-                        if let Some(rank) = StandardHandRanker::get_rank_at_least_with_hints(
+                        if let Some(score) = StandardHandRanker::fast_score_at_least(
                             &combined_deck,
-                            tracker.best_hand(),
+                            tracker.best_score(),
                             flush_possible,
                             board_paired,
                         ) {
-                            tracker.consider(i, rank);
+                            tracker.consider(i, score);
                         }
                     }
                 }
             }
-            let winners = tracker.into_results();
-            let num_winners = winners.len() as u64;
-            for winner in &winners {
-                shares[winner.player_index] += EQUITY_SCALE / num_winners;
-            }
+            tracker.distribute(shares);
         })
     }
 }

@@ -335,6 +335,106 @@ impl StandardHandRanker {
         None
     }
 
+    /// Fast scoring path for equity calculations: returns a u32 score directly,
+    /// bypassing enum construction. Higher scores beat lower scores.
+    pub fn fast_score_at_least(
+        deck: &Deck,
+        score_to_beat: u32,
+        flush_possible: bool,
+        quads_fh_possible: bool,
+    ) -> Option<u32> {
+        if flush_possible {
+            if let Some(sf) = Self::get_best_straight_flush(deck) {
+                return Some(rank_score(sf) + STRAIGHT_FLUSH_BASE);
+            }
+        }
+        if score_to_beat >= STRAIGHT_FLUSH_BASE {
+            return None;
+        }
+
+        let rank_count = deck.get_rank_count();
+
+        if quads_fh_possible
+            && let Some(quad) = rank_count.find_highest_with_n(&[], 4)
+            && let Some(kicker) = rank_count.find_highest_with_n(&[quad], 1)
+        {
+            return Some(rank_score_2(quad, kicker) + FOUR_OF_KIND_BASE);
+        }
+        if score_to_beat >= FOUR_OF_KIND_BASE {
+            return None;
+        }
+
+        let best_trips = rank_count.find_highest_with_n(&[], 3);
+
+        if quads_fh_possible
+            && let Some(trip) = best_trips
+            && let Some(pair) = rank_count.find_highest_with_n(&[trip], 2)
+        {
+            return Some(rank_score_2(trip, pair) + FULL_HOUSE_BASE);
+        }
+        if score_to_beat >= FULL_HOUSE_BASE {
+            return None;
+        }
+
+        if flush_possible {
+            if let Some(flush_ranks) = Self::get_flush(deck) {
+                return Some(
+                    rank_score_5(
+                        flush_ranks[0],
+                        flush_ranks[1],
+                        flush_ranks[2],
+                        flush_ranks[3],
+                        flush_ranks[4],
+                    ) + FLUSH_BASE,
+                );
+            }
+        }
+        if score_to_beat >= FLUSH_BASE {
+            return None;
+        }
+        if let Some(s) = Self::get_straight(deck) {
+            return Some(rank_score(s) + STRAIGHT_BASE);
+        }
+        if score_to_beat >= STRAIGHT_BASE {
+            return None;
+        }
+        if let Some(trip) = best_trips
+            && let Some(c1) = rank_count.find_highest_with_n(&[trip], 1)
+            && let Some(c2) = rank_count.find_highest_with_n(&[trip, c1], 1)
+        {
+            return Some(rank_score_3(trip, c1, c2) + TRIP_BASE);
+        }
+        if score_to_beat >= TRIP_BASE {
+            return None;
+        }
+        if let Some(best_pair) = rank_count.find_highest_with_n(&[], 2) {
+            if let Some(second_best_pair) = rank_count.find_highest_with_n(&[best_pair], 2)
+                && let Some(c) = rank_count.find_highest_with_n(&[best_pair, second_best_pair], 1)
+            {
+                return Some(rank_score_3(best_pair, second_best_pair, c) + TWO_PAIR_BASE);
+            }
+            if score_to_beat >= TWO_PAIR_BASE {
+                return None;
+            }
+            if let Some(c1) = rank_count.find_highest_with_n(&[best_pair], 1)
+                && let Some(c2) = rank_count.find_highest_with_n(&[best_pair, c1], 1)
+                && let Some(c3) = rank_count.find_highest_with_n(&[best_pair, c1, c2], 1)
+            {
+                return Some(rank_score_4(best_pair, c1, c2, c3) + ONE_PAIR_BASE);
+            }
+        }
+        if score_to_beat >= ONE_PAIR_BASE {
+            return None;
+        }
+        if let Some(hc) = deck
+            .get_combined_ranks()
+            .get_highest_five(&RankOrder::AceIsHigh)
+        {
+            return Some(rank_score_5(hc[0], hc[1], hc[2], hc[3], hc[4]));
+        }
+        None
+    }
+
     fn get_straight(deck: &Deck) -> Option<Rank> {
         let combined_ranks = deck.get_combined_ranks();
         Self::get_straight_from_rank_bitfield(&combined_ranks)
@@ -388,6 +488,36 @@ impl StandardHandRanker {
         }
         found
     }
+}
+
+#[inline(always)]
+fn rs(rank: Rank) -> u32 {
+    rank as u32
+}
+
+#[inline(always)]
+fn rank_score(r: Rank) -> u32 {
+    rs(r)
+}
+
+#[inline(always)]
+fn rank_score_2(r1: Rank, r2: Rank) -> u32 {
+    rs(r1) * 13 + rs(r2)
+}
+
+#[inline(always)]
+fn rank_score_3(r1: Rank, r2: Rank, r3: Rank) -> u32 {
+    (rs(r1) * 13 + rs(r2)) * 13 + rs(r3)
+}
+
+#[inline(always)]
+fn rank_score_4(r1: Rank, r2: Rank, r3: Rank, r4: Rank) -> u32 {
+    ((rs(r1) * 13 + rs(r2)) * 13 + rs(r3)) * 13 + rs(r4)
+}
+
+#[inline(always)]
+fn rank_score_5(r1: Rank, r2: Rank, r3: Rank, r4: Rank, r5: Rank) -> u32 {
+    (((rs(r1) * 13 + rs(r2)) * 13 + rs(r3)) * 13 + rs(r4)) * 13 + rs(r5)
 }
 
 #[cfg(test)]
