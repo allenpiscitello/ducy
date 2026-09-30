@@ -81,7 +81,11 @@ impl<H: HandRanking + Ord + Copy> WinnerTracker<H> {
                     self.best_hand = Some(hand);
                     self.winners = vec![player_index];
                 }
-                std::cmp::Ordering::Equal => self.winners.push(player_index),
+                std::cmp::Ordering::Equal => {
+                    if !self.winners.contains(&player_index) {
+                        self.winners.push(player_index);
+                    }
+                }
                 std::cmp::Ordering::Greater => {}
             },
             None => {
@@ -139,7 +143,7 @@ impl FastWinnerTracker {
             self.best_score = score;
             self.winners.clear();
             self.winners.push(player_index);
-        } else if score == self.best_score {
+        } else if score == self.best_score && !self.winners.contains(&player_index) {
             self.winners.push(player_index);
         }
     }

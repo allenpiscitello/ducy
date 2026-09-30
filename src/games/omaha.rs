@@ -260,6 +260,28 @@ mod test {
     }
 
     #[test]
+    pub fn test_tie_split_evenly_when_one_player_ties_with_several_combos() {
+        let mut state = OmahaGameState::new(4);
+        state
+            .add_player(Deck::parse("Qs Ks Qd Kd").unwrap())
+            .unwrap();
+        state
+            .add_player(Deck::parse("Qh Kh 4c 5d").unwrap())
+            .unwrap();
+        state.set_flop(Deck::parse("9h Tc Jd").unwrap()).unwrap();
+        state.set_turn(Card::parse("2s").unwrap()).unwrap();
+        state.set_river(Card::parse("3c").unwrap()).unwrap();
+
+        let evaluator = OmahaGameEvaluation {};
+        let winners = evaluator.evaluate_winners(&state);
+        assert_eq!(winners.len(), 2);
+        assert!(winners.iter().all(|w| w.pot_amount == dec!(0.5)));
+
+        let equity = evaluator.evaluate_equity(&state);
+        assert_eq!(equity, vec![dec!(0.5), dec!(0.5)]);
+    }
+
+    #[test]
     pub fn test_board_tone_monotone() {
         let mut state = OmahaGameState::new(4);
         state

@@ -355,8 +355,10 @@ impl StandardHandRanker {
         let combined_ranks = deck.get_combined_ranks();
         let num_unique = combined_ranks.num_unique_ranks();
 
+        // Each early exit compares against the base of the category above the
+        // one being checked, so hands that tie the current best still return.
         if num_unique == 5 {
-            if score_to_beat >= FLUSH_BASE {
+            if score_to_beat >= FULL_HOUSE_BASE {
                 return None;
             }
             if flush_possible {
@@ -372,7 +374,7 @@ impl StandardHandRanker {
                     );
                 }
             }
-            if score_to_beat >= STRAIGHT_BASE {
+            if score_to_beat >= FLUSH_BASE {
                 return None;
             }
             if let Some(s) = Self::get_straight_from_rank_bitfield(&combined_ranks) {
@@ -577,7 +579,22 @@ fn rank_score_5(r1: Rank, r2: Rank, r3: Rank, r4: Rank, r5: Rank) -> u32 {
 #[cfg(test)]
 mod test {
 
-    use crate::{deck::Rank, ranking::hand_rank::StandardHandRanks};
+    use crate::{
+        deck::{Deck, Rank},
+        ranking::hand_rank::{StandardHandRanker, StandardHandRanks},
+    };
+
+    #[test]
+    pub fn test_fast_score_matches_get_rank_and_keeps_ties() {
+        for deck in Deck::all_cards().enumerate_combinations(5).step_by(7) {
+            let score = StandardHandRanker::get_rank(&deck).get_score();
+            let fast =
+                |to_beat| StandardHandRanker::fast_score_at_least(&deck, to_beat, true, true);
+            assert_eq!(fast(0), Some(score), "{deck:?}");
+            assert_eq!(fast(score), Some(score), "tie dropped for {deck:?}");
+            assert!(fast(score + 1).is_none_or(|s| s == score), "{deck:?}");
+        }
+    }
 
     #[test]
     pub fn test_rank() {
