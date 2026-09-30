@@ -155,6 +155,14 @@ impl FlopGame for FlopGameState {
         Ok(())
     }
 
+    fn add_dead_cards(&mut self, cards: Deck) -> Result<(), DucyError> {
+        if !self.remaining_cards_in_deck.has_cards(&cards) {
+            return Err(DucyError::CardsNotAvailable);
+        }
+        self.remaining_cards_in_deck -= cards;
+        Ok(())
+    }
+
     fn get_community_cards(&self) -> Deck {
         self.community_cards
     }
@@ -253,6 +261,8 @@ pub trait FlopGame {
     fn set_turn(&mut self, card: Card) -> Result<(), DucyError>;
     /// Sets the river card (requires turn to be set).
     fn set_river(&mut self, card: Card) -> Result<(), DucyError>;
+    /// Removes cards known to be out of play (dead cards) from the remaining deck.
+    fn add_dead_cards(&mut self, cards: Deck) -> Result<(), DucyError>;
     /// Returns an iterator over each player's hole cards.
     fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck>;
     /// Returns an iterator over all possible final board states.

@@ -130,6 +130,15 @@ impl OmahaBombPotGameState {
         Ok(())
     }
 
+    /// Removes cards known to be out of play (dead cards) from the remaining deck.
+    pub fn add_dead_cards(&mut self, cards: Deck) -> Result<(), DucyError> {
+        if !self.remaining_cards.has_cards(&cards) {
+            return Err(DucyError::CardsNotAvailable);
+        }
+        self.remaining_cards -= cards;
+        Ok(())
+    }
+
     pub fn get_board_community_cards(&self, board_index: usize) -> Deck {
         self.boards[board_index].community_cards
     }

@@ -54,6 +54,11 @@ impl HoldemGame {
         self.state.set_river(c).map_err(to_js_err)
     }
 
+    pub fn add_dead_cards(&mut self, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.add_dead_cards(deck).map_err(to_js_err)
+    }
+
     pub fn evaluate_equity(&self) -> Vec<f64> {
         self.eval
             .evaluate_equity(&self.state)
@@ -117,6 +122,11 @@ impl OmahaGame {
     pub fn set_river(&mut self, card: &str) -> Result<(), JsError> {
         let c = Card::parse(card).map_err(to_js_err)?;
         self.state.set_river(c).map_err(to_js_err)
+    }
+
+    pub fn add_dead_cards(&mut self, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.add_dead_cards(deck).map_err(to_js_err)
     }
 
     pub fn evaluate_equity(&self) -> Vec<f64> {
@@ -186,6 +196,11 @@ impl OmahaHiLoGame {
         self.state.set_river(c).map_err(to_js_err)
     }
 
+    pub fn add_dead_cards(&mut self, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.add_dead_cards(deck).map_err(to_js_err)
+    }
+
     pub fn evaluate_equity(&self) -> Vec<f64> {
         self.eval
             .evaluate_equity(&self.state)
@@ -247,6 +262,11 @@ impl OmahaBombPotGame {
     pub fn set_river(&mut self, board_index: usize, card: &str) -> Result<(), JsError> {
         let c = Card::parse(card).map_err(to_js_err)?;
         self.state.set_river(board_index, c).map_err(to_js_err)
+    }
+
+    pub fn add_dead_cards(&mut self, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.add_dead_cards(deck).map_err(to_js_err)
     }
 
     pub fn evaluate_equity(&self) -> Vec<f64> {

@@ -46,6 +46,10 @@ impl FlopGame for OmahaGameState {
         self.flop_game_state.set_river(card)
     }
 
+    fn add_dead_cards(&mut self, cards: Deck) -> Result<(), DucyError> {
+        self.flop_game_state.add_dead_cards(cards)
+    }
+
     fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck> {
         self.flop_game_state.get_player_hole_cards()
     }
@@ -298,6 +302,30 @@ mod test {
 
         let equity = evaluator.evaluate_equity(&state);
         assert_eq!(equity, vec![dec!(0.5), dec!(0.5)]);
+    }
+
+    #[test]
+    pub fn test_dead_cards_never_dealt() {
+        let mut state = OmahaGameState::new(4);
+        state
+            .add_player(Deck::parse("As Ac Jc Ts").unwrap())
+            .unwrap();
+        state
+            .add_player(Deck::parse("9h 8h 7d 6d").unwrap())
+            .unwrap();
+        state.set_flop(Deck::parse("Jh Th Qd").unwrap()).unwrap();
+        let dead = Deck::parse("Kh 2c").unwrap();
+        state.add_dead_cards(dead).unwrap();
+        assert!(state.add_dead_cards(dead).is_err());
+
+        let runouts: Vec<Deck> = state
+            .flop_game_state
+            .enumerate_runout_community_cards()
+            .collect();
+        assert_eq!(runouts.len(), 39 * 38 / 2);
+        assert!(runouts.iter().all(|r| u64::from(*r) & u64::from(dead) == 0));
+        let sampled = state.flop_game_state.sample_runout_community_cards(500);
+        assert!(sampled.iter().all(|r| u64::from(*r) & u64::from(dead) == 0));
     }
 
     #[test]
