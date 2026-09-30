@@ -95,14 +95,6 @@ impl<H: HandRanking + Ord + Copy> WinnerTracker<H> {
         }
     }
 
-    pub fn distribute(&self, shares: &mut [u64], scale: u64) {
-        if let Some(share) = scale.checked_div(self.winners.len() as u64) {
-            for &w in &self.winners {
-                shares[w] += share;
-            }
-        }
-    }
-
     pub fn into_results(self) -> Vec<GameWinner<H>> {
         let winner_count = self.winners.len();
         if let Some(best_hand) = self.best_hand

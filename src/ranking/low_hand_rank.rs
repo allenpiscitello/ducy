@@ -68,6 +68,30 @@ impl std::fmt::Display for LowHandRanks {
 pub struct LowHandRanker;
 
 impl LowHandRanker {
+    /// Bitmask of the distinct ace-to-eight ranks in `deck` (bit 0 = ace, bit 7 = eight).
+    #[inline(always)]
+    pub fn low_rank_mask(deck: &Deck) -> u32 {
+        let c = u64::from(*deck);
+        ((c | (c >> 16) | (c >> 32) | (c >> 48)) & 0xFF) as u32
+    }
+
+    /// Converts the low-rank mask of a 5-card hand into a score where higher
+    /// is a better low and 0 means no qualifying low. Comparing masks as
+    /// integers compares highest card first, which is lowball order.
+    #[inline(always)]
+    pub fn score_from_mask(mask: u32) -> u32 {
+        if mask.count_ones() == 5 {
+            0x100 - mask
+        } else {
+            0
+        }
+    }
+
+    /// Fast u32 low score for a 5-card hand; 0 means no qualifying low.
+    pub fn fast_score(deck: &Deck) -> u32 {
+        Self::score_from_mask(Self::low_rank_mask(deck))
+    }
+
     /// Evaluates the best qualifying low hand from a 5-card combination.
     /// Returns `LowHandRanks::Low` if all 5 cards are 8-or-lower with no
     /// pairs, or `LowHandRanks::NoLow` otherwise.
@@ -127,6 +151,26 @@ impl LowHandRanker {
 mod test {
     use super::*;
     use crate::test_util::deck_from_cards;
+
+    #[test]
+    fn test_fast_score_orders_like_get_rank() {
+        let low_cards = deck_from_cards(
+            "As Ah Ad Ac 2s 2h 2d 2c 3s 3h 3d 3c 4s 4h 4d 4c \
+             5s 5h 5d 5c 6s 6h 6d 6c 7s 7h 7d 7c 8s 8h 8d 8c 9s Kh",
+        );
+        let mut hands: Vec<(LowHandRanks, u32)> = low_cards
+            .enumerate_combinations(5)
+            .step_by(11)
+            .map(|d| (LowHandRanker::get_rank(&d), LowHandRanker::fast_score(&d)))
+            .collect();
+        for (rank, score) in &hands {
+            assert_eq!(*rank == LowHandRanks::NoLow, *score == 0);
+        }
+        hands.sort_by_key(|h| h.0);
+        for pair in hands.windows(2) {
+            assert_eq!(pair[0].0.cmp(&pair[1].0), pair[0].1.cmp(&pair[1].1));
+        }
+    }
 
     #[test]
     fn test_wheel_is_best_low() {

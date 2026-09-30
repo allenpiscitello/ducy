@@ -5,7 +5,7 @@ use crate::{
     deck::{Card, Deck},
     error::DucyError,
     games::{
-        EQUITY_SCALE, GameState, GameWinner, WinnerTracker,
+        EQUITY_SCALE, FastWinnerTracker, GameState, GameWinner, WinnerTracker,
         flop_game::{FlopGame, FlopGameState},
     },
     ranking::{
@@ -145,24 +145,36 @@ impl OmahaHiLoGameEvaluation {
             .enumerate_runout_community_cards()
             .collect();
 
-        let player_combos: Vec<Vec<(Deck, Option<usize>)>> = hole_cards
+        // Low masks are kept only when they could be part of a qualifying low:
+        // 2 distinct low ranks from the hand, 3 from the board.
+        let player_combos: Vec<Vec<(Deck, Option<usize>, u32)>> = hole_cards
             .iter()
             .map(|h| {
                 h.enumerate_combinations(2)
-                    .map(|d| (d, d.single_suit_index()))
+                    .map(|d| {
+                        let low = LowHandRanker::low_rank_mask(&d);
+                        let low = if low.count_ones() == 2 { low } else { 0 };
+                        (d, d.single_suit_index(), low)
+                    })
                     .collect()
             })
             .collect();
 
         crate::games::accumulate_equity(runouts, num_players, |community, shares| {
-            let mut high_tracker = crate::games::FastWinnerTracker::new();
-            let mut low_tracker: WinnerTracker<LowHandRanks> = WinnerTracker::new();
+            let mut high_tracker = FastWinnerTracker::new();
+            let mut low_tracker = FastWinnerTracker::new();
 
             for community_cards_of_3 in community.enumerate_combinations(3) {
                 let board_suit = community_cards_of_3.single_suit_index();
                 let board_paired = community_cards_of_3.has_rank_pair();
+                let board_low = LowHandRanker::low_rank_mask(&community_cards_of_3);
+                let board_low = if board_low.count_ones() == 3 {
+                    board_low
+                } else {
+                    0
+                };
                 for (i, combos) in player_combos.iter().enumerate() {
-                    for &(player_deck, player_suit) in combos {
+                    for &(player_deck, player_suit, player_low) in combos {
                         let flush_possible = board_suit.is_some() && board_suit == player_suit;
                         let combined = community_cards_of_3 | player_deck;
                         if let Some(score) = StandardHandRanker::fast_score_at_least(
@@ -173,22 +185,20 @@ impl OmahaHiLoGameEvaluation {
                         ) {
                             high_tracker.consider(i, score);
                         }
-                        if let Some(rank) =
-                            LowHandRanker::get_rank_at_least(&combined, low_tracker.best_hand())
-                        {
-                            low_tracker.consider(i, rank);
+                        if board_low != 0 && player_low != 0 {
+                            let low_score = LowHandRanker::score_from_mask(board_low | player_low);
+                            if low_score != 0 {
+                                low_tracker.consider(i, low_score);
+                            }
                         }
                     }
                 }
             }
 
-            let has_low = low_tracker.best_hand().is_some()
-                && low_tracker.best_hand() != Some(LowHandRanks::NoLow);
-
-            if has_low {
+            if low_tracker.best_score() > 0 {
                 let half_scale = EQUITY_SCALE / 2;
                 high_tracker.distribute_scaled(shares, half_scale);
-                low_tracker.distribute(shares, half_scale);
+                low_tracker.distribute_scaled(shares, half_scale);
             } else {
                 high_tracker.distribute(shares);
             }
@@ -285,6 +295,44 @@ mod test {
         assert_eq!(result.low_winners.len(), 1);
         assert_eq!(result.low_winners[0].player_index(), 0);
         assert_eq!(result.low_winners[0].pot_amount(), dec!(0.5));
+    }
+
+    #[test]
+    fn test_hilo_equity_matches_per_runout_winners() {
+        let mut state = OmahaHiLoGameState::new(4);
+        state
+            .add_player(Deck::parse("As 2d Kc Kd").unwrap())
+            .unwrap();
+        state
+            .add_player(Deck::parse("Ah 3h 4c Qs").unwrap())
+            .unwrap();
+        state
+            .add_player(Deck::parse("2s 3s 7d 8d").unwrap())
+            .unwrap();
+        state.set_flop(Deck::parse("5h 6c Jd").unwrap()).unwrap();
+
+        let evaluator = OmahaHiLoGameEvaluation {};
+        let mut expected = [dec!(0); 3];
+        let mut runouts = 0;
+        for runout in state.get_final_states() {
+            let result = evaluator.evaluate_winners(&runout);
+            for w in &result.high_winners {
+                expected[w.player_index()] += w.pot_amount();
+            }
+            for w in &result.low_winners {
+                expected[w.player_index()] += w.pot_amount();
+            }
+            runouts += 1;
+        }
+        let expected: Vec<_> = expected
+            .iter()
+            .map(|e| e / rust_decimal::Decimal::from(runouts))
+            .collect();
+
+        let equity = evaluator.evaluate_equity(&state);
+        for (e, x) in equity.iter().zip(&expected) {
+            assert!((e - x).abs() < dec!(0.000001), "{equity:?} vs {expected:?}");
+        }
     }
 
     #[test]
