@@ -140,16 +140,24 @@ impl GameEquityEvaluation<OmahaGameState, StandardHandRanks, OmahaGameEvaluation
             .enumerate_runout_community_cards()
             .collect();
 
+        let player_combos: Vec<Vec<(Deck, Option<usize>)>> = hole_cards
+            .iter()
+            .map(|h| {
+                h.enumerate_combinations(2)
+                    .map(|d| (d, d.single_suit_index()))
+                    .collect()
+            })
+            .collect();
+
         crate::games::accumulate_equity(runouts, num_players, |community, shares| {
             let mut tracker = crate::games::FastWinnerTracker::new();
             for community_cards_of_3 in community.enumerate_combinations(3) {
                 let board_suit = community_cards_of_3.single_suit_index();
                 let board_paired = community_cards_of_3.has_rank_pair();
-                for (i, player) in hole_cards.iter().enumerate() {
-                    for player_cards_group_of_2 in player.enumerate_combinations(2) {
-                        let flush_possible = board_suit
-                            .is_some_and(|s| player_cards_group_of_2.all_in_suit_index(s));
-                        let combined_deck = community_cards_of_3 | player_cards_group_of_2;
+                for (i, combos) in player_combos.iter().enumerate() {
+                    for &(player_deck, player_suit) in combos {
+                        let flush_possible = board_suit.is_some() && board_suit == player_suit;
+                        let combined_deck = community_cards_of_3 | player_deck;
                         if let Some(score) = StandardHandRanker::fast_score_at_least(
                             &combined_deck,
                             tracker.best_score(),

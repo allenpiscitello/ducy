@@ -352,6 +352,41 @@ impl StandardHandRanker {
             return None;
         }
 
+        let combined_ranks = deck.get_combined_ranks();
+        let num_unique = combined_ranks.num_unique_ranks();
+
+        if num_unique == 5 {
+            if score_to_beat >= FLUSH_BASE {
+                return None;
+            }
+            if flush_possible {
+                if let Some(flush_ranks) = Self::get_flush(deck) {
+                    return Some(
+                        rank_score_5(
+                            flush_ranks[0],
+                            flush_ranks[1],
+                            flush_ranks[2],
+                            flush_ranks[3],
+                            flush_ranks[4],
+                        ) + FLUSH_BASE,
+                    );
+                }
+            }
+            if score_to_beat >= STRAIGHT_BASE {
+                return None;
+            }
+            if let Some(s) = Self::get_straight_from_rank_bitfield(&combined_ranks) {
+                return Some(rank_score(s) + STRAIGHT_BASE);
+            }
+            if score_to_beat >= ONE_PAIR_BASE {
+                return None;
+            }
+            if let Some(hc) = combined_ranks.get_highest_five(&RankOrder::AceIsHigh) {
+                return Some(rank_score_5(hc[0], hc[1], hc[2], hc[3], hc[4]));
+            }
+            return None;
+        }
+
         let rank_count = deck.get_rank_count();
 
         if quads_fh_possible
@@ -392,7 +427,7 @@ impl StandardHandRanker {
         if score_to_beat >= FLUSH_BASE {
             return None;
         }
-        if let Some(s) = Self::get_straight(deck) {
+        if let Some(s) = Self::get_straight_from_rank_bitfield(&combined_ranks) {
             return Some(rank_score(s) + STRAIGHT_BASE);
         }
         if score_to_beat >= STRAIGHT_BASE {
@@ -426,10 +461,7 @@ impl StandardHandRanker {
         if score_to_beat >= ONE_PAIR_BASE {
             return None;
         }
-        if let Some(hc) = deck
-            .get_combined_ranks()
-            .get_highest_five(&RankOrder::AceIsHigh)
-        {
+        if let Some(hc) = combined_ranks.get_highest_five(&RankOrder::AceIsHigh) {
             return Some(rank_score_5(hc[0], hc[1], hc[2], hc[3], hc[4]));
         }
         None
