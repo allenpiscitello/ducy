@@ -4,7 +4,7 @@ use rust_decimal_macros::dec;
 use crate::{
     deck::{Card, Deck},
     error::DucyError,
-    games::{EQUITY_SCALE, GameState, GameWinner, WinnerTracker},
+    games::{GameState, GameWinner, WinnerTracker},
     ranking::hand_rank::{StandardHandRanker, StandardHandRanks},
 };
 
@@ -195,6 +195,16 @@ impl OmahaBombPotGameEvaluation {
         let board_weight = Decimal::from(1) / Decimal::from(num_boards as u64);
         let mut total_equity = vec![Decimal::ZERO; num_players];
 
+        let player_combos: Vec<Vec<(Deck, Option<usize>)>> = game_state
+            .hole_cards
+            .iter()
+            .map(|h| {
+                h.enumerate_combinations(2)
+                    .map(|d| (d, d.single_suit_index()))
+                    .collect()
+            })
+            .collect();
+
         for board in &game_state.boards {
             let cards_needed = board.cards_needed();
             let base_community = board.community_cards;
@@ -209,37 +219,30 @@ impl OmahaBombPotGameEvaluation {
                     .collect()
             };
 
-            let board_equity = crate::games::accumulate_equity(
-                runouts,
-                num_players,
-                |community, shares| {
-                    let mut tracker = WinnerTracker::new();
+            let board_equity =
+                crate::games::accumulate_equity(runouts, num_players, |community, shares| {
+                    let mut tracker = crate::games::FastWinnerTracker::new();
                     for community_cards_of_3 in community.enumerate_combinations(3) {
                         let board_suit = community_cards_of_3.single_suit_index();
                         let board_paired = community_cards_of_3.has_rank_pair();
-                        for (i, player) in game_state.hole_cards.iter().enumerate() {
-                            for player_cards_of_2 in player.enumerate_combinations(2) {
-                                let flush_possible = board_suit
-                                    .is_some_and(|s| player_cards_of_2.all_in_suit_index(s));
-                                let combined = community_cards_of_3 | player_cards_of_2;
-                                if let Some(rank) = StandardHandRanker::get_rank_at_least_with_hints(
+                        for (i, combos) in player_combos.iter().enumerate() {
+                            for &(player_deck, player_suit) in combos {
+                                let flush_possible =
+                                    board_suit.is_some() && board_suit == player_suit;
+                                let combined = community_cards_of_3 | player_deck;
+                                if let Some(score) = StandardHandRanker::fast_score_at_least(
                                     &combined,
-                                    tracker.best_hand(),
+                                    tracker.best_score(),
                                     flush_possible,
                                     board_paired,
                                 ) {
-                                    tracker.consider(i, rank);
+                                    tracker.consider(i, score);
                                 }
                             }
                         }
                     }
-                    let winners = tracker.into_results();
-                    let num_winners = winners.len() as u64;
-                    for winner in &winners {
-                        shares[winner.player_index] += EQUITY_SCALE / num_winners;
-                    }
-                },
-            );
+                    tracker.distribute(shares);
+                });
 
             for (i, eq) in board_equity.iter().enumerate() {
                 total_equity[i] += eq * board_weight;

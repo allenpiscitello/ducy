@@ -352,6 +352,63 @@ impl StandardHandRanker {
             return None;
         }
 
+        let combined_ranks = deck.get_combined_ranks();
+        let num_unique = combined_ranks.num_unique_ranks();
+
+        if num_unique == 5 {
+            if score_to_beat >= FLUSH_BASE {
+                return None;
+            }
+            if flush_possible {
+                if let Some(flush_ranks) = Self::get_flush(deck) {
+                    return Some(
+                        rank_score_5(
+                            flush_ranks[0],
+                            flush_ranks[1],
+                            flush_ranks[2],
+                            flush_ranks[3],
+                            flush_ranks[4],
+                        ) + FLUSH_BASE,
+                    );
+                }
+            }
+            if score_to_beat >= STRAIGHT_BASE {
+                return None;
+            }
+            if let Some(s) = Self::get_straight_from_rank_bitfield(&combined_ranks) {
+                return Some(rank_score(s) + STRAIGHT_BASE);
+            }
+            if score_to_beat >= ONE_PAIR_BASE {
+                return None;
+            }
+            if let Some(hc) = combined_ranks.get_highest_five(&RankOrder::AceIsHigh) {
+                return Some(rank_score_5(hc[0], hc[1], hc[2], hc[3], hc[4]));
+            }
+            return None;
+        }
+
+        if num_unique == 4 {
+            if score_to_beat >= TWO_PAIR_BASE {
+                return None;
+            }
+            let cards = u64::from(*deck);
+            let s0 = cards & 0x3FFE;
+            let s1 = (cards >> 16) & 0x3FFE;
+            let s2 = (cards >> 32) & 0x3FFE;
+            let s3 = (cards >> 48) & 0x3FFE;
+            let paired = (s0 & s1) | (s0 & s2) | (s0 & s3) | (s1 & s2) | (s1 & s3) | (s2 & s3);
+            let pair_bit = 63 - paired.leading_zeros();
+            let combined = s0 | s1 | s2 | s3;
+            let mut kickers = combined ^ (1u64 << pair_bit);
+            let k1 = 63 - kickers.leading_zeros();
+            kickers ^= 1u64 << k1;
+            let k2 = 63 - kickers.leading_zeros();
+            kickers ^= 1u64 << k2;
+            let k3 = 63 - kickers.leading_zeros();
+            let p = pair_bit - 1;
+            return Some(((p * 13 + (k1 - 1)) * 13 + (k2 - 1)) * 13 + (k3 - 1) + ONE_PAIR_BASE);
+        }
+
         let rank_count = deck.get_rank_count();
 
         if quads_fh_possible
@@ -392,7 +449,7 @@ impl StandardHandRanker {
         if score_to_beat >= FLUSH_BASE {
             return None;
         }
-        if let Some(s) = Self::get_straight(deck) {
+        if let Some(s) = Self::get_straight_from_rank_bitfield(&combined_ranks) {
             return Some(rank_score(s) + STRAIGHT_BASE);
         }
         if score_to_beat >= STRAIGHT_BASE {
@@ -426,10 +483,7 @@ impl StandardHandRanker {
         if score_to_beat >= ONE_PAIR_BASE {
             return None;
         }
-        if let Some(hc) = deck
-            .get_combined_ranks()
-            .get_highest_five(&RankOrder::AceIsHigh)
-        {
+        if let Some(hc) = combined_ranks.get_highest_five(&RankOrder::AceIsHigh) {
             return Some(rank_score_5(hc[0], hc[1], hc[2], hc[3], hc[4]));
         }
         None
