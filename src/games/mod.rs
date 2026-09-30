@@ -137,9 +137,7 @@ impl FastWinnerTracker {
     }
 
     pub fn distribute(&self, shares: &mut [u64]) {
-        let n = self.winners.len() as u64;
-        if n > 0 {
-            let share = EQUITY_SCALE / n;
+        if let Some(share) = EQUITY_SCALE.checked_div(self.winners.len() as u64) {
             for &w in &self.winners {
                 shares[w] += share;
             }
