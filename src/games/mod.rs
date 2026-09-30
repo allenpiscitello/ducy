@@ -107,6 +107,46 @@ impl<H: HandRanking + Ord + Copy> WinnerTracker<H> {
     }
 }
 
+pub(crate) struct FastWinnerTracker {
+    best_score: u32,
+    winners: Vec<usize>,
+}
+
+impl FastWinnerTracker {
+    pub fn new() -> Self {
+        Self {
+            best_score: 0,
+            winners: Vec::with_capacity(4),
+        }
+    }
+
+    #[inline(always)]
+    pub fn best_score(&self) -> u32 {
+        self.best_score
+    }
+
+    #[inline(always)]
+    pub fn consider(&mut self, player_index: usize, score: u32) {
+        if score > self.best_score {
+            self.best_score = score;
+            self.winners.clear();
+            self.winners.push(player_index);
+        } else if score == self.best_score {
+            self.winners.push(player_index);
+        }
+    }
+
+    pub fn distribute(&self, shares: &mut [u64]) {
+        let n = self.winners.len() as u64;
+        if n > 0 {
+            let share = EQUITY_SCALE / n;
+            for &w in &self.winners {
+                shares[w] += share;
+            }
+        }
+    }
+}
+
 // LCM(1..10) — allows exact integer division for any split up to 10 winners
 pub(crate) const EQUITY_SCALE: u64 = 2520;
 
