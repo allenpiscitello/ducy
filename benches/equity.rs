@@ -3,6 +3,7 @@ use ducy::deck::{Card, Deck};
 use ducy::games::flop_game::FlopGame;
 use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState};
 use ducy::games::omaha::{OmahaGameEvaluation, OmahaGameState};
+use ducy::games::omaha_hilo::{OmahaHiLoGameEvaluation, OmahaHiLoGameState};
 use ducy::games::{GameEquityEvaluation, GameEvaluation};
 
 fn holdem_turn_equity(c: &mut Criterion) {
@@ -78,6 +79,21 @@ fn omaha_flop_equity(c: &mut Criterion) {
     });
 }
 
+fn omaha_hilo_flop_equity(c: &mut Criterion) {
+    let mut game = OmahaHiLoGameState::new(4);
+    game.add_player(Deck::parse("As 2d Kc Kd").unwrap())
+        .unwrap();
+    game.add_player(Deck::parse("Ah 3h 4c Qs").unwrap())
+        .unwrap();
+    game.set_flop(Deck::parse("5h 6c Jd").unwrap()).unwrap();
+
+    let evaluator = OmahaHiLoGameEvaluation {};
+
+    c.bench_function("omaha_hilo_flop_equity", |b| {
+        b.iter(|| evaluator.evaluate_equity(&game))
+    });
+}
+
 criterion_group!(
     benches,
     holdem_turn_evaluate_winners,
@@ -85,5 +101,6 @@ criterion_group!(
     holdem_flop_equity,
     omaha_turn_equity,
     omaha_flop_equity,
+    omaha_hilo_flop_equity,
 );
 criterion_main!(benches);

@@ -4,7 +4,8 @@ use crate::{
     deck::{Card, Deck, Suit},
     error::DucyError,
     games::{
-        GameEquityEvaluation, GameEvaluation, GameState, GameWinner, WinnerTracker,
+        FastWinnerTracker, GameEquityEvaluation, GameEvaluation, GameState, GameWinner,
+        WinnerTracker,
         flop_game::{FlopGame, FlopGameState},
     },
     ranking::hand_rank::{StandardHandRanker, StandardHandRanks},
@@ -43,6 +44,10 @@ impl FlopGame for OmahaGameState {
 
     fn set_river(&mut self, card: Card) -> Result<(), DucyError> {
         self.flop_game_state.set_river(card)
+    }
+
+    fn add_dead_cards(&mut self, cards: Deck) -> Result<(), DucyError> {
+        self.flop_game_state.add_dead_cards(cards)
     }
 
     fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck> {
@@ -133,45 +138,63 @@ impl GameEquityEvaluation<OmahaGameState, StandardHandRanks, OmahaGameEvaluation
     for OmahaGameEvaluation
 {
     fn evaluate_equity(&self, game_state: &OmahaGameState) -> Vec<Decimal> {
-        let hole_cards = game_state.flop_game_state.hole_cards();
-        let num_players = hole_cards.len();
-        let runouts: Vec<Deck> = game_state
+        let runouts = game_state
             .flop_game_state
             .enumerate_runout_community_cards()
             .collect();
+        equity_over_runouts(game_state.flop_game_state.hole_cards(), runouts)
+    }
+}
 
-        let player_combos: Vec<Vec<(Deck, Option<usize>)>> = hole_cards
-            .iter()
-            .map(|h| {
-                h.enumerate_combinations(2)
-                    .map(|d| (d, d.single_suit_index()))
-                    .collect()
-            })
-            .collect();
+impl OmahaGameEvaluation {
+    /// Estimates equity from `samples` random runouts instead of enumerating all of them.
+    pub fn sample_equity(&self, game_state: &OmahaGameState, samples: usize) -> Vec<Decimal> {
+        let runouts = game_state
+            .flop_game_state
+            .sample_runout_community_cards(samples);
+        equity_over_runouts(game_state.flop_game_state.hole_cards(), runouts)
+    }
+}
 
-        crate::games::accumulate_equity(runouts, num_players, |community, shares| {
-            let mut tracker = crate::games::FastWinnerTracker::new();
-            for community_cards_of_3 in community.enumerate_combinations(3) {
-                let board_suit = community_cards_of_3.single_suit_index();
-                let board_paired = community_cards_of_3.has_rank_pair();
-                for (i, combos) in player_combos.iter().enumerate() {
-                    for &(player_deck, player_suit) in combos {
-                        let flush_possible = board_suit.is_some() && board_suit == player_suit;
-                        let combined_deck = community_cards_of_3 | player_deck;
-                        if let Some(score) = StandardHandRanker::fast_score_at_least(
-                            &combined_deck,
-                            tracker.best_score(),
-                            flush_possible,
-                            board_paired,
-                        ) {
-                            tracker.consider(i, score);
-                        }
-                    }
+fn equity_over_runouts(hole_cards: &[Deck], runouts: Vec<Deck>) -> Vec<Decimal> {
+    let player_combos: Vec<_> = hole_cards.iter().map(hole_card_combos).collect();
+    crate::games::accumulate_equity(runouts, hole_cards.len(), |community, shares| {
+        high_winners(community, &player_combos).distribute(shares);
+    })
+}
+
+/// Each 2-card combo from a player's hole cards, with its suit if suited.
+pub(crate) type HoleCombos = Vec<(Deck, Option<usize>)>;
+
+pub(crate) fn hole_card_combos(hole_cards: &Deck) -> HoleCombos {
+    hole_cards
+        .enumerate_combinations(2)
+        .map(|d| (d, d.single_suit_index()))
+        .collect()
+}
+
+/// Finds the players with the best Omaha high hand on a complete 5-card board.
+pub(crate) fn high_winners(community: &Deck, player_combos: &[HoleCombos]) -> FastWinnerTracker {
+    let mut tracker = FastWinnerTracker::new();
+    for community_cards_of_3 in community.enumerate_combinations(3) {
+        let board_suit = community_cards_of_3.single_suit_index();
+        let board_paired = community_cards_of_3.has_rank_pair();
+        for (i, combos) in player_combos.iter().enumerate() {
+            for &(player_deck, player_suit) in combos {
+                let flush_possible = board_suit.is_some() && board_suit == player_suit;
+                let combined_deck = community_cards_of_3 | player_deck;
+                if let Some(score) = StandardHandRanker::fast_score_at_least(
+                    &combined_deck,
+                    tracker.best_score(),
+                    flush_possible,
+                    board_paired,
+                ) {
+                    tracker.consider(i, score);
                 }
             }
-            tracker.distribute(shares);
-        })
+        }
     }
+    tracker
 }
 
 #[cfg(test)]
@@ -257,6 +280,71 @@ mod test {
                 winning_hand: StandardHandRanks::StraightFlush { sf: Rank::Queen }
             }
         );
+    }
+
+    #[test]
+    pub fn test_tie_split_evenly_when_one_player_ties_with_several_combos() {
+        let mut state = OmahaGameState::new(4);
+        state
+            .add_player(Deck::parse("Qs Ks Qd Kd").unwrap())
+            .unwrap();
+        state
+            .add_player(Deck::parse("Qh Kh 4c 5d").unwrap())
+            .unwrap();
+        state.set_flop(Deck::parse("9h Tc Jd").unwrap()).unwrap();
+        state.set_turn(Card::parse("2s").unwrap()).unwrap();
+        state.set_river(Card::parse("3c").unwrap()).unwrap();
+
+        let evaluator = OmahaGameEvaluation {};
+        let winners = evaluator.evaluate_winners(&state);
+        assert_eq!(winners.len(), 2);
+        assert!(winners.iter().all(|w| w.pot_amount == dec!(0.5)));
+
+        let equity = evaluator.evaluate_equity(&state);
+        assert_eq!(equity, vec![dec!(0.5), dec!(0.5)]);
+    }
+
+    #[test]
+    pub fn test_dead_cards_never_dealt() {
+        let mut state = OmahaGameState::new(4);
+        state
+            .add_player(Deck::parse("As Ac Jc Ts").unwrap())
+            .unwrap();
+        state
+            .add_player(Deck::parse("9h 8h 7d 6d").unwrap())
+            .unwrap();
+        state.set_flop(Deck::parse("Jh Th Qd").unwrap()).unwrap();
+        let dead = Deck::parse("Kh 2c").unwrap();
+        state.add_dead_cards(dead).unwrap();
+        assert!(state.add_dead_cards(dead).is_err());
+
+        let runouts: Vec<Deck> = state
+            .flop_game_state
+            .enumerate_runout_community_cards()
+            .collect();
+        assert_eq!(runouts.len(), 39 * 38 / 2);
+        assert!(runouts.iter().all(|r| u64::from(*r) & u64::from(dead) == 0));
+        let sampled = state.flop_game_state.sample_runout_community_cards(500);
+        assert!(sampled.iter().all(|r| u64::from(*r) & u64::from(dead) == 0));
+    }
+
+    #[test]
+    pub fn test_sample_equity_close_to_exact() {
+        let mut state = OmahaGameState::new(4);
+        state
+            .add_player(Deck::parse("As Ac Jc Ts").unwrap())
+            .unwrap();
+        state
+            .add_player(Deck::parse("9h 8h 7d 6d").unwrap())
+            .unwrap();
+        state.set_flop(Deck::parse("Jh Th Qd").unwrap()).unwrap();
+
+        let evaluator = OmahaGameEvaluation {};
+        let exact = evaluator.evaluate_equity(&state);
+        let sampled = evaluator.sample_equity(&state, 20_000);
+        for (e, s) in exact.iter().zip(&sampled) {
+            assert!((e - s).abs() < dec!(0.02), "{exact:?} vs {sampled:?}");
+        }
     }
 
     #[test]

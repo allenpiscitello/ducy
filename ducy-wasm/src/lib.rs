@@ -54,6 +54,11 @@ impl HoldemGame {
         self.state.set_river(c).map_err(to_js_err)
     }
 
+    pub fn add_dead_cards(&mut self, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.add_dead_cards(deck).map_err(to_js_err)
+    }
+
     pub fn evaluate_equity(&self) -> Vec<f64> {
         self.eval
             .evaluate_equity(&self.state)
@@ -119,6 +124,11 @@ impl OmahaGame {
         self.state.set_river(c).map_err(to_js_err)
     }
 
+    pub fn add_dead_cards(&mut self, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.add_dead_cards(deck).map_err(to_js_err)
+    }
+
     pub fn evaluate_equity(&self) -> Vec<f64> {
         self.eval
             .evaluate_equity(&self.state)
@@ -138,6 +148,15 @@ impl OmahaGame {
             })
             .collect();
         serde_wasm_bindgen::to_value(&results).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Average equity over `samples` random runouts.
+    pub fn sample_equity(&self, samples: usize) -> Vec<f64> {
+        self.eval
+            .sample_equity(&self.state, samples)
+            .into_iter()
+            .map(|d| d.try_into().unwrap_or(0.0))
+            .collect()
     }
 }
 
@@ -177,6 +196,11 @@ impl OmahaHiLoGame {
         self.state.set_river(c).map_err(to_js_err)
     }
 
+    pub fn add_dead_cards(&mut self, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.add_dead_cards(deck).map_err(to_js_err)
+    }
+
     pub fn evaluate_equity(&self) -> Vec<f64> {
         self.eval
             .evaluate_equity(&self.state)
@@ -184,6 +208,24 @@ impl OmahaHiLoGame {
             .map(|d| d.try_into().unwrap_or(0.0))
             .collect()
     }
+
+    /// Average equity over `samples` random runouts.
+    pub fn sample_equity(&self, samples: usize) -> Vec<f64> {
+        self.eval
+            .sample_equity(&self.state, samples)
+            .into_iter()
+            .map(|d| d.try_into().unwrap_or(0.0))
+            .collect()
+    }
+}
+
+#[derive(serde::Serialize)]
+struct BombPotSampleResult {
+    samples: u64,
+    equity_sum: Vec<f64>,
+    board_wins: Vec<Vec<u64>>,
+    scoops: Vec<u64>,
+    scooped: Vec<u64>,
 }
 
 #[wasm_bindgen]
@@ -222,12 +264,35 @@ impl OmahaBombPotGame {
         self.state.set_river(board_index, c).map_err(to_js_err)
     }
 
+    pub fn add_dead_cards(&mut self, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.add_dead_cards(deck).map_err(to_js_err)
+    }
+
     pub fn evaluate_equity(&self) -> Vec<f64> {
         self.eval
             .evaluate_equity(&self.state)
             .into_iter()
             .map(|d| d.try_into().unwrap_or(0.0))
             .collect()
+    }
+
+    /// Runs `samples` Monte Carlo deals. `random_seats` are the final player
+    /// positions dealt random hands; added players fill the rest in order.
+    /// Returns sums over samples, so batches can be added together.
+    pub fn sample(&self, samples: usize, random_seats: Vec<usize>) -> Result<JsValue, JsError> {
+        let r = self
+            .eval
+            .sample(&self.state, &random_seats, samples)
+            .map_err(to_js_err)?;
+        let result = BombPotSampleResult {
+            samples: r.samples,
+            equity_sum: r.equity_sum,
+            board_wins: r.board_wins,
+            scoops: r.scoops,
+            scooped: r.scooped,
+        };
+        serde_wasm_bindgen::to_value(&result).map_err(|e| JsError::new(&e.to_string()))
     }
 
     pub fn evaluate_winners(&self) -> Result<JsValue, JsError> {

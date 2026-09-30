@@ -60,6 +60,10 @@ impl FlopGame for HoldemGameState {
         self.flop_game_state.set_river(card)
     }
 
+    fn add_dead_cards(&mut self, cards: Deck) -> Result<(), DucyError> {
+        self.flop_game_state.add_dead_cards(cards)
+    }
+
     fn get_player_hole_cards(&self) -> impl Iterator<Item = &Deck> {
         self.flop_game_state.get_player_hole_cards()
     }

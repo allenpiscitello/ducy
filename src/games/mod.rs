@@ -1,6 +1,7 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
+use crate::deck::Deck;
 use crate::ranking::hand_rank::HandRanking;
 
 /// Badugi game state and evaluation.
@@ -81,20 +82,16 @@ impl<H: HandRanking + Ord + Copy> WinnerTracker<H> {
                     self.best_hand = Some(hand);
                     self.winners = vec![player_index];
                 }
-                std::cmp::Ordering::Equal => self.winners.push(player_index),
+                std::cmp::Ordering::Equal => {
+                    if !self.winners.contains(&player_index) {
+                        self.winners.push(player_index);
+                    }
+                }
                 std::cmp::Ordering::Greater => {}
             },
             None => {
                 self.best_hand = Some(hand);
                 self.winners = vec![player_index];
-            }
-        }
-    }
-
-    pub fn distribute(&self, shares: &mut [u64], scale: u64) {
-        if let Some(share) = scale.checked_div(self.winners.len() as u64) {
-            for &w in &self.winners {
-                shares[w] += share;
             }
         }
     }
@@ -139,7 +136,7 @@ impl FastWinnerTracker {
             self.best_score = score;
             self.winners.clear();
             self.winners.push(player_index);
-        } else if score == self.best_score {
+        } else if score == self.best_score && !self.winners.contains(&player_index) {
             self.winners.push(player_index);
         }
     }
@@ -152,12 +149,52 @@ impl FastWinnerTracker {
         }
     }
 
+    pub fn winners(&self) -> &[usize] {
+        &self.winners
+    }
+
     pub fn distribute_scaled(&self, shares: &mut [u64], scale: u64) {
         if let Some(share) = scale.checked_div(self.winners.len() as u64) {
             for &w in &self.winners {
                 shares[w] += share;
             }
         }
+    }
+}
+
+/// Deals random cards from a fixed set using a partial Fisher-Yates shuffle.
+pub(crate) struct CardDealer {
+    cards: Vec<Deck>,
+    dealt: usize,
+}
+
+impl CardDealer {
+    pub fn new(deck: Deck) -> Self {
+        Self {
+            cards: deck.enumerate_combinations(1).collect(),
+            dealt: 0,
+        }
+    }
+
+    pub fn available(&self) -> usize {
+        self.cards.len()
+    }
+
+    /// Returns every card to the deck.
+    pub fn reset(&mut self) {
+        self.dealt = 0;
+    }
+
+    /// Deals `n` cards not already dealt since the last reset. Panics if too few remain.
+    pub fn deal(&mut self, n: usize) -> Deck {
+        let mut hand = Deck::empty();
+        for _ in 0..n {
+            let j = rand::random_range(self.dealt..self.cards.len());
+            self.cards.swap(self.dealt, j);
+            hand |= self.cards[self.dealt];
+            self.dealt += 1;
+        }
+        hand
     }
 }
 
