@@ -96,6 +96,18 @@ impl<H: HandRanking + Ord + Copy> WinnerTracker<H> {
         }
     }
 
+    pub fn winners(&self) -> &[usize] {
+        &self.winners
+    }
+
+    pub fn distribute(&self, shares: &mut [u64]) {
+        if let Some(share) = EQUITY_SCALE.checked_div(self.winners.len() as u64) {
+            for &w in &self.winners {
+                shares[w] += share;
+            }
+        }
+    }
+
     pub fn into_results(self) -> Vec<GameWinner<H>> {
         let winner_count = self.winners.len();
         if let Some(best_hand) = self.best_hand
@@ -193,6 +205,25 @@ impl CardDealer {
             self.cards.swap(self.dealt, j);
             hand |= self.cards[self.dealt];
             self.dealt += 1;
+        }
+        hand
+    }
+
+    /// Like `deal`, but never deals a card in `exclude`. Panics if too few
+    /// non-excluded cards remain.
+    pub fn deal_excluding(&mut self, n: usize, exclude: Deck) -> Deck {
+        let exclude = u64::from(exclude);
+        let mut hand = Deck::empty();
+        let mut dealt_to_hand = 0;
+        while dealt_to_hand < n {
+            let j = rand::random_range(self.dealt..self.cards.len());
+            self.cards.swap(self.dealt, j);
+            let card = self.cards[self.dealt];
+            self.dealt += 1;
+            if u64::from(card) & exclude == 0 {
+                hand |= card;
+                dealt_to_hand += 1;
+            }
         }
         hand
     }
