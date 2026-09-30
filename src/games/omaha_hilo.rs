@@ -138,31 +138,40 @@ impl OmahaHiLoGameEvaluation {
     /// Evaluates equity across all possible runouts, returning each player's
     /// expected pot share accounting for high/low splits and scooping.
     pub fn evaluate_equity(&self, game_state: &OmahaHiLoGameState) -> Vec<Decimal> {
-        let num_players = game_state.get_player_hole_cards().count();
-        let mut win_shares: Vec<u64> = vec![0; num_players];
-        let mut hand_count: u64 = 0;
+        let hole_cards = game_state.flop_game_state.hole_cards();
+        let num_players = hole_cards.len();
+        let runouts: Vec<Deck> = game_state
+            .flop_game_state
+            .enumerate_runout_community_cards()
+            .collect();
 
-        for runout in game_state.get_final_states() {
-            let community = runout.get_community_cards();
-            let mut high_tracker = WinnerTracker::new();
+        let player_combos: Vec<Vec<(Deck, Option<usize>)>> = hole_cards
+            .iter()
+            .map(|h| {
+                h.enumerate_combinations(2)
+                    .map(|d| (d, d.single_suit_index()))
+                    .collect()
+            })
+            .collect();
+
+        crate::games::accumulate_equity(runouts, num_players, |community, shares| {
+            let mut high_tracker = crate::games::FastWinnerTracker::new();
             let mut low_tracker: WinnerTracker<LowHandRanks> = WinnerTracker::new();
 
-            let hole_cards: Vec<&Deck> = runout.get_player_hole_cards().collect();
             for community_cards_of_3 in community.enumerate_combinations(3) {
                 let board_suit = community_cards_of_3.single_suit_index();
                 let board_paired = community_cards_of_3.has_rank_pair();
-                for (i, player) in hole_cards.iter().enumerate() {
-                    for player_cards_of_2 in player.enumerate_combinations(2) {
-                        let flush_possible =
-                            board_suit.is_some_and(|s| player_cards_of_2.all_in_suit_index(s));
-                        let combined = community_cards_of_3 | player_cards_of_2;
-                        if let Some(rank) = StandardHandRanker::get_rank_at_least_with_hints(
+                for (i, combos) in player_combos.iter().enumerate() {
+                    for &(player_deck, player_suit) in combos {
+                        let flush_possible = board_suit.is_some() && board_suit == player_suit;
+                        let combined = community_cards_of_3 | player_deck;
+                        if let Some(score) = StandardHandRanker::fast_score_at_least(
                             &combined,
-                            high_tracker.best_hand(),
+                            high_tracker.best_score(),
                             flush_possible,
                             board_paired,
                         ) {
-                            high_tracker.consider(i, rank);
+                            high_tracker.consider(i, score);
                         }
                         if let Some(rank) =
                             LowHandRanker::get_rank_at_least(&combined, low_tracker.best_hand())
@@ -176,32 +185,14 @@ impl OmahaHiLoGameEvaluation {
             let has_low = low_tracker.best_hand().is_some()
                 && low_tracker.best_hand() != Some(LowHandRanks::NoLow);
 
-            let high_winners = high_tracker.into_results();
-            let high_count = high_winners.len() as u64;
-
             if has_low {
-                let low_winners = low_tracker.into_results();
-                let low_count = low_winners.len() as u64;
                 let half_scale = EQUITY_SCALE / 2;
-                for w in &high_winners {
-                    win_shares[w.player_index] += half_scale / high_count;
-                }
-                for w in &low_winners {
-                    win_shares[w.player_index] += half_scale / low_count;
-                }
+                high_tracker.distribute_scaled(shares, half_scale);
+                low_tracker.distribute(shares, half_scale);
             } else {
-                for w in &high_winners {
-                    win_shares[w.player_index] += EQUITY_SCALE / high_count;
-                }
+                high_tracker.distribute(shares);
             }
-            hand_count += 1;
-        }
-
-        let divisor = Decimal::from(EQUITY_SCALE) * Decimal::from(hand_count);
-        win_shares
-            .iter()
-            .map(|&s| Decimal::from(s) / divisor)
-            .collect()
+        })
     }
 }
 
