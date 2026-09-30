@@ -138,12 +138,23 @@ impl OmahaHiLoGameEvaluation {
     /// Evaluates equity across all possible runouts, returning each player's
     /// expected pot share accounting for high/low splits and scooping.
     pub fn evaluate_equity(&self, game_state: &OmahaHiLoGameState) -> Vec<Decimal> {
-        let hole_cards = game_state.flop_game_state.hole_cards();
-        let num_players = hole_cards.len();
-        let runouts: Vec<Deck> = game_state
+        let runouts = game_state
             .flop_game_state
             .enumerate_runout_community_cards()
             .collect();
+        Self::equity_over_runouts(game_state.flop_game_state.hole_cards(), runouts)
+    }
+
+    /// Estimates equity from `samples` random runouts instead of enumerating all of them.
+    pub fn sample_equity(&self, game_state: &OmahaHiLoGameState, samples: usize) -> Vec<Decimal> {
+        let runouts = game_state
+            .flop_game_state
+            .sample_runout_community_cards(samples);
+        Self::equity_over_runouts(game_state.flop_game_state.hole_cards(), runouts)
+    }
+
+    fn equity_over_runouts(hole_cards: &[Deck], runouts: Vec<Deck>) -> Vec<Decimal> {
+        let num_players = hole_cards.len();
 
         // Low masks are kept only when they could be part of a qualifying low:
         // 2 distinct low ranks from the hand, 3 from the board.
@@ -332,6 +343,11 @@ mod test {
         let equity = evaluator.evaluate_equity(&state);
         for (e, x) in equity.iter().zip(&expected) {
             assert!((e - x).abs() < dec!(0.000001), "{equity:?} vs {expected:?}");
+        }
+
+        let sampled = evaluator.sample_equity(&state, 20_000);
+        for (e, s) in equity.iter().zip(&sampled) {
+            assert!((e - s).abs() < dec!(0.02), "{equity:?} vs {sampled:?}");
         }
     }
 

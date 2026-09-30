@@ -1,5 +1,6 @@
 use crate::deck::{Card, Deck};
 use crate::error::DucyError;
+use crate::games::CardDealer;
 
 const MAX_PLAYERS: usize = 10;
 
@@ -40,8 +41,8 @@ impl FlopGameState {
         Ok(())
     }
 
-    pub fn enumerate_runout_community_cards(&self) -> impl Iterator<Item = Deck> + '_ {
-        let cards_needed = if self.flop.is_empty() {
+    fn cards_needed(&self) -> usize {
+        if self.flop.is_empty() {
             5
         } else if self.turn.is_none() {
             2
@@ -49,7 +50,23 @@ impl FlopGameState {
             1
         } else {
             0
-        };
+        }
+    }
+
+    /// Returns `samples` random complete boards drawn from the remaining deck.
+    pub fn sample_runout_community_cards(&self, samples: usize) -> Vec<Deck> {
+        let cards_needed = self.cards_needed();
+        let mut dealer = CardDealer::new(self.remaining_cards_in_deck);
+        (0..samples)
+            .map(|_| {
+                dealer.reset();
+                self.community_cards | dealer.deal(cards_needed)
+            })
+            .collect()
+    }
+
+    pub fn enumerate_runout_community_cards(&self) -> impl Iterator<Item = Deck> + '_ {
+        let cards_needed = self.cards_needed();
 
         let base_community = self.community_cards;
         let complete = if cards_needed == 0 {
