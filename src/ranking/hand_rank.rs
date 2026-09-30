@@ -387,6 +387,28 @@ impl StandardHandRanker {
             return None;
         }
 
+        if num_unique == 4 {
+            if score_to_beat >= TWO_PAIR_BASE {
+                return None;
+            }
+            let cards = u64::from(*deck);
+            let s0 = cards & 0x3FFE;
+            let s1 = (cards >> 16) & 0x3FFE;
+            let s2 = (cards >> 32) & 0x3FFE;
+            let s3 = (cards >> 48) & 0x3FFE;
+            let paired = (s0 & s1) | (s0 & s2) | (s0 & s3) | (s1 & s2) | (s1 & s3) | (s2 & s3);
+            let pair_bit = 63 - paired.leading_zeros();
+            let combined = s0 | s1 | s2 | s3;
+            let mut kickers = combined ^ (1u64 << pair_bit);
+            let k1 = 63 - kickers.leading_zeros();
+            kickers ^= 1u64 << k1;
+            let k2 = 63 - kickers.leading_zeros();
+            kickers ^= 1u64 << k2;
+            let k3 = 63 - kickers.leading_zeros();
+            let p = pair_bit - 1;
+            return Some(((p * 13 + (k1 - 1)) * 13 + (k2 - 1)) * 13 + (k3 - 1) + ONE_PAIR_BASE);
+        }
+
         let rank_count = deck.get_rank_count();
 
         if quads_fh_possible
