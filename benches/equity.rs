@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use ducy::deck::{Card, Deck};
 use ducy::games::flop_game::FlopGame;
-use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState};
+use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState, HoldemRange};
 use ducy::games::omaha::{OmahaGameEvaluation, OmahaGameState};
 use ducy::games::omaha_hilo::{OmahaHiLoGameEvaluation, OmahaHiLoGameState};
 use ducy::games::{GameEquityEvaluation, GameEvaluation};
@@ -94,8 +94,38 @@ fn omaha_hilo_flop_equity(c: &mut Criterion) {
     });
 }
 
+fn holdem_range_sample_preflop(c: &mut Criterion) {
+    let game = HoldemGameState::new();
+    let ranges = [
+        HoldemRange::parse("QQ+, AK").unwrap(),
+        HoldemRange::parse("22+, ATs+, KQs").unwrap(),
+    ];
+    let evaluator = HoldemGameEvaluation {};
+
+    c.bench_function("holdem_range_sample_preflop_10k", |b| {
+        b.iter(|| evaluator.sample_range_equity(&game, &ranges, 10_000))
+    });
+}
+
+fn holdem_range_exact_turn(c: &mut Criterion) {
+    let mut game = HoldemGameState::new();
+    game.set_flop(Deck::parse("Kc 8d 3s").unwrap()).unwrap();
+    game.set_turn(Card::parse("2h").unwrap()).unwrap();
+    let ranges = [
+        HoldemRange::parse("QQ+, AK").unwrap(),
+        HoldemRange::parse("88-TT, KQs").unwrap(),
+    ];
+    let evaluator = HoldemGameEvaluation {};
+
+    c.bench_function("holdem_range_exact_turn", |b| {
+        b.iter(|| evaluator.range_equity(&game, &ranges))
+    });
+}
+
 criterion_group!(
     benches,
+    holdem_range_sample_preflop,
+    holdem_range_exact_turn,
     holdem_turn_evaluate_winners,
     holdem_turn_equity,
     holdem_flop_equity,

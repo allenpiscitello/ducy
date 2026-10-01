@@ -41,7 +41,11 @@ impl FlopGameState {
         Ok(())
     }
 
-    fn cards_needed(&self) -> usize {
+    pub(crate) fn remaining_cards(&self) -> Deck {
+        self.remaining_cards_in_deck
+    }
+
+    pub(crate) fn cards_needed(&self) -> usize {
         if self.flop.is_empty() {
             5
         } else if self.turn.is_none() {

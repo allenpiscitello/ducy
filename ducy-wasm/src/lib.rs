@@ -2,7 +2,7 @@ use wasm_bindgen::prelude::*;
 
 use ducy::deck::{Card, Deck};
 use ducy::games::flop_game::FlopGame;
-use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState};
+use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState, HoldemRange};
 use ducy::games::omaha::{OmahaGameEvaluation, OmahaGameState};
 use ducy::games::omaha_bomb_pot::{OmahaBombPotGameEvaluation, OmahaBombPotGameState};
 use ducy::games::omaha_hilo::{OmahaHiLoGameEvaluation, OmahaHiLoGameState};
@@ -86,6 +86,67 @@ struct WinnerResult {
     player_index: usize,
     pot_share: f64,
     hand: String,
+}
+
+fn parse_ranges(ranges: &[String]) -> Result<Vec<HoldemRange>, JsError> {
+    ranges
+        .iter()
+        .map(|r| HoldemRange::parse(r).map_err(to_js_err))
+        .collect()
+}
+
+#[derive(serde::Serialize)]
+struct RangeSampleResult {
+    samples: u64,
+    equity_sum: Vec<f64>,
+    equity_sq_sum: Vec<f64>,
+}
+
+/// Range-vs-range equity. Players added with `add_player` come first, then one
+/// player per entry in `ranges` (e.g. `"QQ+, AKs"`).
+#[wasm_bindgen]
+impl HoldemGame {
+    /// Exact equity over every combo combination and runout.
+    pub fn range_equity(&self, ranges: Vec<String>) -> Result<Vec<f64>, JsError> {
+        let ranges = parse_ranges(&ranges)?;
+        Ok(self
+            .eval
+            .range_equity(&self.state, &ranges)
+            .map_err(to_js_err)?
+            .into_iter()
+            .map(|d| d.try_into().unwrap_or(0.0))
+            .collect())
+    }
+
+    /// Upper bound on hand evaluations `range_equity` would run, to decide
+    /// between exact and sampled.
+    pub fn exact_range_evaluations(&self, ranges: Vec<String>) -> Result<f64, JsError> {
+        let ranges = parse_ranges(&ranges)?;
+        self.eval
+            .exact_range_evaluations(&self.state, &ranges)
+            .map(|n| n as f64)
+            .map_err(to_js_err)
+    }
+
+    /// Runs `samples` Monte Carlo deals. Returns sums over samples
+    /// (`samples`, `equity_sum`, `equity_sq_sum`) so batches can be added.
+    pub fn sample_range_equity(
+        &self,
+        ranges: Vec<String>,
+        samples: usize,
+    ) -> Result<JsValue, JsError> {
+        let ranges = parse_ranges(&ranges)?;
+        let r = self
+            .eval
+            .sample_range_equity(&self.state, &ranges, samples)
+            .map_err(to_js_err)?;
+        let result = RangeSampleResult {
+            samples: r.samples,
+            equity_sum: r.equity_sum,
+            equity_sq_sum: r.equity_sq_sum,
+        };
+        serde_wasm_bindgen::to_value(&result).map_err(|e| JsError::new(&e.to_string()))
+    }
 }
 
 #[wasm_bindgen]
