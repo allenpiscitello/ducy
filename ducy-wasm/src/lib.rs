@@ -7,6 +7,7 @@ use ducy::games::omaha::{OmahaGameEvaluation, OmahaGameState};
 use ducy::games::omaha_bomb_pot::{OmahaBombPotGameEvaluation, OmahaBombPotGameState};
 use ducy::games::omaha_hilo::{OmahaHiLoGameEvaluation, OmahaHiLoGameState};
 use ducy::games::{GameEquityEvaluation, GameEvaluation};
+use ducy::preflop::{HandClass, PreflopEquityTable, solve_heads_up_push_fold};
 
 fn to_js_err(e: ducy::error::DucyError) -> JsError {
     JsError::new(&e.to_string())
@@ -420,4 +421,43 @@ impl RandomDeck {
     pub fn remaining(&self) -> u32 {
         self.deck.num_cards()
     }
+}
+
+#[derive(serde::Serialize)]
+struct PushFoldResult {
+    classes: Vec<String>,
+    push: Vec<f64>,
+    call: Vec<f64>,
+    push_fraction: f64,
+    call_fraction: f64,
+    exploitability_bb: f64,
+}
+
+/// Heads-up push/fold equilibrium for an effective stack and per-player ante
+/// (both in big blinds). `push[i]` / `call[i]` are frequencies for
+/// `classes[i]` (e.g. "AKs"), in the 169-class index order.
+#[wasm_bindgen]
+pub fn push_fold(stack_bb: f64, ante_bb: f64) -> Result<JsValue, JsError> {
+    if !(stack_bb > 0.0 && ante_bb >= 0.0) {
+        return Err(JsError::new("stack must be positive and ante non-negative"));
+    }
+    let sol = solve_heads_up_push_fold(stack_bb, ante_bb, PreflopEquityTable::bundled(), 3000);
+    let result = PushFoldResult {
+        classes: HandClass::all().map(|c| c.to_string()).collect(),
+        push_fraction: sol.push_range_fraction(),
+        call_fraction: sol.call_range_fraction(),
+        exploitability_bb: sol.exploitability_bb,
+        push: sol.push,
+        call: sol.call,
+    };
+    serde_wasm_bindgen::to_value(&result).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Starting-hand class of two cards, e.g. "Ah Ks" -> "AKo".
+#[wasm_bindgen]
+pub fn hand_class(cards: &str) -> Result<String, JsError> {
+    let deck = Deck::parse(cards).map_err(to_js_err)?;
+    HandClass::from_hand(deck)
+        .map(|c| c.to_string())
+        .ok_or_else(|| JsError::new("expected exactly two cards"))
 }
