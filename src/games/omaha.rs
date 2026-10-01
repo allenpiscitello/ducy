@@ -149,9 +149,19 @@ impl GameEquityEvaluation<OmahaGameState, StandardHandRanks, OmahaGameEvaluation
 impl OmahaGameEvaluation {
     /// Estimates equity from `samples` random runouts instead of enumerating all of them.
     pub fn sample_equity(&self, game_state: &OmahaGameState, samples: usize) -> Vec<Decimal> {
+        self.sample_equity_seeded(game_state, samples, None)
+    }
+
+    /// Like `sample_equity`; a `seed` makes the result reproducible.
+    pub fn sample_equity_seeded(
+        &self,
+        game_state: &OmahaGameState,
+        samples: usize,
+        seed: Option<u64>,
+    ) -> Vec<Decimal> {
         let runouts = game_state
             .flop_game_state
-            .sample_runout_community_cards(samples);
+            .sample_runout_community_cards(samples, seed);
         shares_over_runouts(game_state.flop_game_state.hole_cards(), runouts).equity()
     }
 
@@ -342,7 +352,9 @@ mod test {
             .collect();
         assert_eq!(runouts.len(), 39 * 38 / 2);
         assert!(runouts.iter().all(|r| u64::from(*r) & u64::from(dead) == 0));
-        let sampled = state.flop_game_state.sample_runout_community_cards(500);
+        let sampled = state
+            .flop_game_state
+            .sample_runout_community_cards(500, None);
         assert!(sampled.iter().all(|r| u64::from(*r) & u64::from(dead) == 0));
     }
 
@@ -385,6 +397,16 @@ mod test {
         for (e, s) in exact.iter().zip(&sampled) {
             assert!((e - s).abs() < dec!(0.02), "{exact:?} vs {sampled:?}");
         }
+
+        let seeded = evaluator.sample_equity_seeded(&state, 2_000, Some(42));
+        assert_eq!(
+            seeded,
+            evaluator.sample_equity_seeded(&state, 2_000, Some(42))
+        );
+        assert_ne!(
+            seeded,
+            evaluator.sample_equity_seeded(&state, 2_000, Some(43))
+        );
     }
 
     #[test]

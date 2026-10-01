@@ -1,6 +1,8 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
+use rand::{RngExt, SeedableRng, rngs::StdRng};
+
 use crate::deck::Deck;
 use crate::ranking::hand_rank::HandRanking;
 
@@ -171,17 +173,40 @@ impl FastWinnerTracker {
 }
 
 /// Deals random cards from a fixed set using a partial Fisher-Yates shuffle.
+/// Owns its random generator so sampling can be made reproducible.
 pub(crate) struct CardDealer {
     cards: Vec<Deck>,
     dealt: usize,
+    rng: StdRng,
 }
 
 impl CardDealer {
+    /// A dealer seeded from the system's random source.
     pub fn new(deck: Deck) -> Self {
+        Self::with_rng(deck, rand::make_rng())
+    }
+
+    /// A dealer whose deals are fully determined by `seed`.
+    pub fn seeded(deck: Deck, seed: u64) -> Self {
+        Self::with_rng(deck, StdRng::seed_from_u64(seed))
+    }
+
+    /// `seeded` when a seed is given, otherwise `new`.
+    pub fn maybe_seeded(deck: Deck, seed: Option<u64>) -> Self {
+        seed.map_or_else(|| Self::new(deck), |s| Self::seeded(deck, s))
+    }
+
+    fn with_rng(deck: Deck, rng: StdRng) -> Self {
         Self {
             cards: deck.enumerate_combinations(1).collect(),
             dealt: 0,
+            rng,
         }
+    }
+
+    /// Uniform value in `0.0..below`.
+    pub fn random_f64(&mut self, below: f64) -> f64 {
+        self.rng.random_range(0.0..below)
     }
 
     pub fn available(&self) -> usize {
@@ -197,7 +222,7 @@ impl CardDealer {
     pub fn deal(&mut self, n: usize) -> Deck {
         let mut hand = Deck::empty();
         for _ in 0..n {
-            let j = rand::random_range(self.dealt..self.cards.len());
+            let j = self.rng.random_range(self.dealt..self.cards.len());
             self.cards.swap(self.dealt, j);
             hand |= self.cards[self.dealt];
             self.dealt += 1;
@@ -212,7 +237,7 @@ impl CardDealer {
         let mut hand = Deck::empty();
         let mut dealt_to_hand = 0;
         while dealt_to_hand < n {
-            let j = rand::random_range(self.dealt..self.cards.len());
+            let j = self.rng.random_range(self.dealt..self.cards.len());
             self.cards.swap(self.dealt, j);
             let card = self.cards[self.dealt];
             self.dealt += 1;

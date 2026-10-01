@@ -284,6 +284,18 @@ impl HoldemGameEvaluation {
         ranges: &[HoldemRange],
         samples: usize,
     ) -> Result<RangeEquitySamples, DucyError> {
+        self.sample_range_equity_seeded(game_state, ranges, samples, None)
+    }
+
+    /// Like `sample_range_equity`; a `seed` makes both the weighted combo
+    /// draws and the boards reproducible.
+    pub fn sample_range_equity_seeded(
+        &self,
+        game_state: &HoldemGameState,
+        ranges: &[HoldemRange],
+        samples: usize,
+        seed: Option<u64>,
+    ) -> Result<RangeEquitySamples, DucyError> {
         let combos = Self::range_combos(game_state, ranges)?;
         let cumulative: Vec<Vec<f64>> = combos
             .iter()
@@ -304,7 +316,7 @@ impl HoldemGameEvaluation {
         let num_fixed = hands.len();
         hands.resize(num_fixed + ranges.len(), Deck::empty());
 
-        let mut dealer = CardDealer::new(fs.remaining_cards());
+        let mut dealer = CardDealer::maybe_seeded(fs.remaining_cards(), seed);
         let mut result = RangeEquitySamples {
             samples: samples as u64,
             equity_sum: vec![0.0; hands.len()],
@@ -317,7 +329,7 @@ impl HoldemGameEvaluation {
                 let mut used = Deck::empty();
                 for (r, cum) in cumulative.iter().enumerate() {
                     let total = cum[cum.len() - 1];
-                    let x = rand::random_range(0.0..total);
+                    let x = dealer.random_f64(total);
                     let idx = cum.partition_point(|&c| c <= x).min(cum.len() - 1);
                     let combo = combos[r][idx].0;
                     if u64::from(used) & u64::from(combo) != 0 {
@@ -1069,6 +1081,36 @@ mod test {
         {
             let e = f64::try_from(*e).unwrap();
             assert!(se > 0.0 && se < 0.01, "se {se}");
+            assert!(
+                (e - s).abs() < 5.0 * se + 1e-3,
+                "exact {e} vs sampled {s} (se {se})"
+            );
+        }
+    }
+
+    #[test]
+    pub fn test_sample_range_equity_seeded_weighted() {
+        let state = flop_state(&["Tc Td"], "2c 7d 9h");
+        let ranges = || {
+            let mut r0 = HoldemRange::new();
+            r0.add("AsAh", dec!(3)).unwrap();
+            r0.add("KsKh", dec!(1)).unwrap();
+            [r0, HoldemRange::parse("JJ").unwrap()]
+        };
+        let eval = HoldemGameEvaluation {};
+
+        let run = |seed| {
+            eval.sample_range_equity_seeded(&state, &ranges(), 20_000, seed)
+                .unwrap()
+        };
+        let a = run(Some(7));
+        assert_eq!(a.equity_sum, run(Some(7)).equity_sum);
+        assert_ne!(a.equity_sum, run(Some(8)).equity_sum);
+
+        // Weighted draws converge on the weighted exact result.
+        let exact = eval.range_equity(&state, &ranges()).unwrap();
+        for ((e, s), se) in exact.iter().zip(a.equity()).zip(a.standard_error()) {
+            let e = f64::try_from(*e).unwrap();
             assert!(
                 (e - s).abs() < 5.0 * se + 1e-3,
                 "exact {e} vs sampled {s} (se {se})"
