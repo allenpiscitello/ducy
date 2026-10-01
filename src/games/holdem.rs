@@ -10,7 +10,8 @@ use crate::{
     },
     error::DucyError,
     games::{
-        CardDealer, GameEquityEvaluation, GameEvaluation, GameState, GameWinner, WinnerTracker,
+        CardDealer, FastWinnerTracker, GameEquityEvaluation, GameEvaluation, GameState, GameWinner,
+        WinnerTracker,
         flop_game::{FlopGame, FlopGameState},
     },
     ranking::{
@@ -114,15 +115,10 @@ impl GameEquityEvaluation<HoldemGameState, StandardHandRanks, HoldemGameEvaluati
     }
 }
 
-fn holdem_winners(community: &Deck, hands: &[Deck]) -> WinnerTracker<StandardHandRanks> {
-    let mut tracker = WinnerTracker::new();
+fn holdem_winners(community: &Deck, hands: &[Deck]) -> FastWinnerTracker {
+    let mut tracker = FastWinnerTracker::new();
     for (i, hand) in hands.iter().enumerate() {
-        let combined_deck = *hand | *community;
-        if let Some(rank) =
-            StandardHandRanker::get_rank_at_least(&combined_deck, tracker.best_hand())
-        {
-            tracker.consider(i, rank);
-        }
+        tracker.consider(i, StandardHandRanker::score(&(*hand | *community)));
     }
     tracker
 }
