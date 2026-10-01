@@ -576,6 +576,101 @@ fn rank_score_5(r1: Rank, r2: Rank, r3: Rank, r4: Rank, r5: Rank) -> u32 {
     (((rs(r1) * 13 + rs(r2)) * 13 + rs(r3)) * 13 + rs(r4)) * 13 + rs(r5)
 }
 
+// Rank masks below use one bit per rank: bit 1 = Two ... bit 13 = Ace, so a
+// rank's score (Two = 0 ... Ace = 12) is its bit index minus one.
+
+#[inline(always)]
+fn top_bit(bits: u64) -> u64 {
+    1u64 << (63 - bits.leading_zeros())
+}
+
+#[inline(always)]
+fn bit_score(bit: u64) -> u32 {
+    62 - bit.leading_zeros()
+}
+
+/// Base-13 score of the highest `n` ranks in `bits`, highest first.
+#[inline(always)]
+fn top_ranks_score(mut bits: u64, n: u32) -> u32 {
+    let mut score = 0;
+    for _ in 0..n {
+        let bit = top_bit(bits);
+        score = score * 13 + bit_score(bit);
+        bits ^= bit;
+    }
+    score
+}
+
+/// Score of the top card of the highest straight in `ranks`, counting the
+/// ace as low too.
+#[inline(always)]
+fn straight_top(ranks: u64) -> Option<u32> {
+    let r = ranks | ((ranks >> 13) & 1);
+    let runs = r & (r >> 1) & (r >> 2) & (r >> 3) & (r >> 4);
+    // Bit i of `runs` means ranks i..=i+4 are present; the top card is at
+    // bit i + 4, whose score is i + 3. The wheel is i = 0 (ace at bit 0).
+    (runs != 0).then(|| 63 - runs.leading_zeros() + 3)
+}
+
+impl StandardHandRanker {
+    /// Scores the best 5-card hand from 5 to 7 cards. Returns the same value
+    /// as `get_rank(deck).get_score()` without building a `StandardHandRanks`.
+    pub fn score(deck: &Deck) -> u32 {
+        debug_assert!((5..=7).contains(&deck.num_cards()));
+        let c = u64::from(*deck);
+        let (s0, s1, s2, s3) = (
+            c & 0x3FFE,
+            (c >> 16) & 0x3FFE,
+            (c >> 32) & 0x3FFE,
+            (c >> 48) & 0x3FFE,
+        );
+        let all = s0 | s1 | s2 | s3;
+
+        let flush = [s0, s1, s2, s3].into_iter().find(|s| s.count_ones() >= 5);
+        if let Some(top) = flush.and_then(straight_top) {
+            return STRAIGHT_FLUSH_BASE + top;
+        }
+
+        let quads = s0 & s1 & s2 & s3;
+        if quads != 0 {
+            let q = top_bit(quads);
+            return FOUR_OF_KIND_BASE + bit_score(q) * 13 + top_ranks_score(all ^ q, 1);
+        }
+
+        let two_plus = (s0 & s1) | (s0 & s2) | (s0 & s3) | (s1 & s2) | (s1 & s3) | (s2 & s3);
+        let three_plus = (s0 & s1 & s2) | (s0 & s1 & s3) | (s0 & s2 & s3) | (s1 & s2 & s3);
+        let trips = (three_plus != 0).then(|| top_bit(three_plus));
+        if let Some(t) = trips {
+            let others = two_plus ^ t;
+            if others != 0 {
+                return FULL_HOUSE_BASE + bit_score(t) * 13 + top_ranks_score(others, 1);
+            }
+        }
+
+        if let Some(f) = flush {
+            return FLUSH_BASE + top_ranks_score(f, 5);
+        }
+        if let Some(top) = straight_top(all) {
+            return STRAIGHT_BASE + top;
+        }
+        if let Some(t) = trips {
+            return TRIP_BASE + bit_score(t) * 169 + top_ranks_score(all ^ t, 2);
+        }
+        if two_plus != 0 {
+            let p1 = top_bit(two_plus);
+            let rest = two_plus ^ p1;
+            if rest != 0 {
+                let p2 = top_bit(rest);
+                return TWO_PAIR_BASE
+                    + (bit_score(p1) * 13 + bit_score(p2)) * 13
+                    + top_ranks_score(all ^ p1 ^ p2, 1);
+            }
+            return ONE_PAIR_BASE + bit_score(p1) * 2197 + top_ranks_score(all ^ p1, 3);
+        }
+        top_ranks_score(all, 5)
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -583,6 +678,55 @@ mod test {
         deck::{Deck, Rank},
         ranking::hand_rank::{StandardHandRanker, StandardHandRanks},
     };
+
+    #[test]
+    pub fn test_score_matches_get_rank_for_5_6_7_cards() {
+        for deck in Deck::all_cards().enumerate_combinations(5).step_by(5) {
+            assert_eq!(
+                StandardHandRanker::score(&deck),
+                StandardHandRanker::get_rank(&deck).get_score(),
+                "{deck:?}"
+            );
+        }
+        let mut dealer = crate::games::CardDealer::new(Deck::all_cards());
+        for n in [6, 7] {
+            for _ in 0..300_000 {
+                dealer.reset();
+                let deck = dealer.deal(n);
+                assert_eq!(
+                    StandardHandRanker::score(&deck),
+                    StandardHandRanker::get_rank(&deck).get_score(),
+                    "{deck:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    pub fn test_score_seven_card_edge_cases() {
+        for (cards, expected) in [
+            ("Ah 2c 3d 4s 5h Kd Kc", "Straight 5 high"),
+            ("Ah Kh Qh Jh Th 9h 8h", "Straight Flush A high"),
+            ("9s 9h 9d 9c Ks Kh 2c", "Four of a Kind 9, K"),
+            ("7s 7h 7d 5c 5s 5h 2c", "Full House 7 full of 5"),
+            ("Qs Qh Jd Jc 3s 3h Ac", "Two Pair Q over J, A"),
+            ("2s 3s 4s 5s 9s 6s Kc", "Straight Flush 6 high"),
+            ("2s 3s 4s 5s 9s 6d Kc", "Flush 9 5 4 3 2"),
+        ] {
+            let deck = Deck::parse(cards).unwrap();
+            let rank = StandardHandRanker::get_rank(&deck);
+            assert_eq!(
+                StandardHandRanker::score(&deck),
+                rank.get_score(),
+                "{cards}"
+            );
+            assert!(
+                rank.to_string()
+                    .starts_with(expected.split(',').next().unwrap()),
+                "{cards}: {rank}"
+            );
+        }
+    }
 
     #[test]
     pub fn test_fast_score_matches_get_rank_and_keeps_ties() {
