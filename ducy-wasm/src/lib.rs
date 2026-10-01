@@ -455,6 +455,139 @@ macro_rules! equity_chunk_bindings {
     };
 }
 
+fn winner_results<H: std::fmt::Display + ducy::ranking::hand_rank::HandRanking>(
+    winners: Vec<ducy::games::GameWinner<H>>,
+) -> Vec<WinnerResult> {
+    winners
+        .into_iter()
+        .map(|w| WinnerResult {
+            player_index: w.player_index(),
+            pot_share: w.pot_amount().try_into().unwrap_or(0.0),
+            hand: w.winning_hand().to_string(),
+        })
+        .collect()
+}
+
+/// Bindings for games where every player holds a complete hand and there are
+/// no community cards (stud and draw games after the last card or draw).
+macro_rules! dealt_game_bindings {
+    ($js:ident, $state:ty, $eval:expr, $doc:literal) => {
+        #[doc = $doc]
+        #[wasm_bindgen]
+        pub struct $js {
+            state: $state,
+        }
+
+        impl Default for $js {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
+        #[wasm_bindgen]
+        impl $js {
+            #[wasm_bindgen(constructor)]
+            pub fn new() -> Self {
+                Self {
+                    state: <$state>::new(),
+                }
+            }
+
+            pub fn add_player(&mut self, cards: &str) -> Result<(), JsError> {
+                let deck = Deck::parse(cards).map_err(to_js_err)?;
+                self.state.add_player(deck).map_err(to_js_err)
+            }
+
+            /// Winners as `[{ player_index, pot_share, hand }]`.
+            pub fn evaluate_winners(&self) -> Result<JsValue, JsError> {
+                let results = winner_results($eval.evaluate_winners(&self.state));
+                serde_wasm_bindgen::to_value(&results).map_err(|e| JsError::new(&e.to_string()))
+            }
+        }
+    };
+}
+
 equity_chunk_bindings!(HoldemGame);
 equity_chunk_bindings!(OmahaGame);
 equity_chunk_bindings!(OmahaHiLoGame);
+
+dealt_game_bindings!(
+    RazzGame,
+    ducy::games::razz::RazzGameState,
+    ducy::games::razz::RazzGameEvaluation,
+    "Razz: 7 cards per player, best ace-to-five low."
+);
+dealt_game_bindings!(
+    BadugiGame,
+    ducy::games::badugi::BadugiGameState,
+    ducy::games::badugi::BadugiGameEvaluation,
+    "Badugi: 4 cards per player."
+);
+dealt_game_bindings!(
+    DeuceToSevenGame,
+    ducy::games::deuce_to_seven::DeuceToSevenGameState,
+    ducy::games::deuce_to_seven::DeuceToSevenGameEvaluation,
+    "2-7 Triple Draw: 5 cards per player, deuce-to-seven low."
+);
+dealt_game_bindings!(
+    StudGame,
+    ducy::games::stud::StudGameState,
+    ducy::games::stud::StudGameEvaluation,
+    "Seven-Card Stud: 7 cards per player, best high hand."
+);
+dealt_game_bindings!(
+    SingleDrawA5Game,
+    ducy::games::single_draw_a5::SingleDrawA5GameState,
+    ducy::games::single_draw_a5::SingleDrawA5GameEvaluation,
+    "Single Draw A-5 Lowball: 5 cards per player."
+);
+dealt_game_bindings!(
+    SingleDraw27Game,
+    ducy::games::single_draw_27::SingleDraw27GameState,
+    ducy::games::single_draw_27::SingleDraw27GameEvaluation,
+    "Single Draw 2-7 Lowball: 5 cards per player."
+);
+
+#[derive(serde::Serialize)]
+struct HiLoWinners {
+    high: Vec<WinnerResult>,
+    low: Vec<WinnerResult>,
+}
+
+/// Seven-Card Stud Hi-Lo 8-or-Better: 7 cards per player, split pot.
+#[wasm_bindgen]
+pub struct StudHiLoGame {
+    state: ducy::games::stud_hilo::StudHiLoGameState,
+}
+
+impl Default for StudHiLoGame {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[wasm_bindgen]
+impl StudHiLoGame {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            state: ducy::games::stud_hilo::StudHiLoGameState::new(),
+        }
+    }
+
+    pub fn add_player(&mut self, cards: &str) -> Result<(), JsError> {
+        let deck = Deck::parse(cards).map_err(to_js_err)?;
+        self.state.add_player(deck).map_err(to_js_err)
+    }
+
+    /// `{ high: [...], low: [...] }`; `low` is empty when no low qualifies
+    /// (high then scoops).
+    pub fn evaluate_winners(&self) -> Result<JsValue, JsError> {
+        let r = ducy::games::stud_hilo::StudHiLoGameEvaluation.evaluate_winners(&self.state);
+        let result = HiLoWinners {
+            high: winner_results(r.high_winners),
+            low: winner_results(r.low_winners),
+        };
+        serde_wasm_bindgen::to_value(&result).map_err(|e| JsError::new(&e.to_string()))
+    }
+}
