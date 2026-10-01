@@ -31,8 +31,14 @@ impl PartialOrd for BadugiRanks {
 }
 
 impl std::fmt::Display for BadugiRanks {
+    /// e.g. "4-card Badugi 7-4-2-A".
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}-card Badugi", self.count)
+        let cards: Vec<String> = self.scores[..self.count as usize]
+            .iter()
+            .rev()
+            .map(|&s| crate::ranking::razz::ace_low_char(s).to_string())
+            .collect();
+        write!(f, "{}-card Badugi {}", self.count, cards.join("-"))
     }
 }
 
@@ -130,6 +136,14 @@ fn generate_combos(
 mod test {
     use super::*;
     use crate::test_util::deck_from_cards;
+
+    #[test]
+    fn test_display_shows_cards() {
+        let four = BadugiRanker::get_rank(&deck_from_cards("Ac 2d 4h 7s"));
+        assert_eq!(four.to_string(), "4-card Badugi 7-4-2-A");
+        let three = BadugiRanker::get_rank(&deck_from_cards("Ac 2c 4h 7s"));
+        assert_eq!(three.to_string(), "3-card Badugi 7-4-A");
+    }
 
     #[test]
     fn test_nut_badugi() {
