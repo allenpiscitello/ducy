@@ -25,16 +25,47 @@ impl PartialOrd for RazzRanks {
     }
 }
 
+/// Rank character for an ace-low score (A = 0, 2 = 1, ... K = 12).
+pub(crate) fn ace_low_char(score: u32) -> char {
+    b"A23456789TJQK"[score as usize] as char
+}
+
 impl std::fmt::Display for RazzRanks {
+    /// e.g. "Low 7-5-4-3-A" or "One Pair K-K-4-3-A".
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Razz Low")
+        let (kind, c1, c2, c3, c4, c5) = self.score;
+        let label = match kind {
+            0 => "Low",
+            1 => "One Pair",
+            2 => "Two Pair",
+            3 => "Three of a Kind",
+            4 => "Full House",
+            _ => "Four of a Kind",
+        };
+        let cards: Vec<String> = [c1, c2, c3, c4, c5]
+            .iter()
+            .map(|&s| ace_low_char(s).to_string())
+            .collect();
+        write!(f, "{label} {}", cards.join("-"))
     }
 }
 
 pub struct RazzRanker;
 
 impl RazzRanker {
+    /// Best ace-to-five low from any number of cards (5-card subsets are
+    /// compared when more than five are given).
     pub fn get_rank(deck: &Deck) -> RazzRanks {
+        if deck.num_cards() <= 5 {
+            return Self::rank_five(deck);
+        }
+        deck.enumerate_combinations(5)
+            .map(|combo| Self::rank_five(&combo))
+            .max()
+            .unwrap()
+    }
+
+    fn rank_five(deck: &Deck) -> RazzRanks {
         let ace_low = RankOrder::AceIsLow;
         let mut scores: Vec<u32> = deck
             .iter(false)
@@ -79,20 +110,9 @@ impl RazzRanker {
         }
     }
 
+    /// Same as [`Self::get_rank`].
     pub fn get_best_from(deck: &Deck) -> RazzRanks {
-        if deck.num_cards() <= 5 {
-            return Self::get_rank(deck);
-        }
-        let mut best: Option<RazzRanks> = None;
-        for combo in deck.enumerate_combinations(5) {
-            let rank = Self::get_rank(&combo);
-            match &best {
-                Some(b) if rank > *b => best = Some(rank),
-                None => best = Some(rank),
-                _ => {}
-            }
-        }
-        best.unwrap()
+        Self::get_rank(deck)
     }
 }
 
@@ -148,6 +168,27 @@ mod test {
         let best = RazzRanker::get_best_from(&hand);
         let wheel = deck_from_cards("Ac 2d 3h 4s 5c");
         assert_eq!(best, RazzRanker::get_rank(&wheel));
+    }
+
+    #[test]
+    fn test_get_rank_seven_cards_avoids_pairs() {
+        let hand = deck_from_cards("Ac Ad 2h 3s 4c 5d Kh");
+        let wheel = deck_from_cards("Ac 2h 3s 4c 5d");
+        assert_eq!(RazzRanker::get_rank(&hand), RazzRanker::get_rank(&wheel));
+        let seven_low = deck_from_cards("2c 3d 4h 5s 7c 8d 9h");
+        assert!(RazzRanker::get_rank(&hand) > RazzRanker::get_rank(&seven_low));
+    }
+
+    #[test]
+    fn test_display_shows_cards() {
+        assert_eq!(
+            RazzRanker::get_rank(&deck_from_cards("Ac 3d 4h 5s 7c Kd Kh")).to_string(),
+            "Low 7-5-4-3-A"
+        );
+        assert_eq!(
+            RazzRanker::get_rank(&deck_from_cards("Ac Ad 3h 4s Kc")).to_string(),
+            "One Pair K-4-3-A-A"
+        );
     }
 
     #[test]
