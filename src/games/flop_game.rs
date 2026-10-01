@@ -57,6 +57,21 @@ impl FlopGameState {
         }
     }
 
+    /// Number of boards `enumerate_runout_community_cards` yields.
+    pub fn runout_count(&self) -> u64 {
+        let n = self.remaining_cards_in_deck.num_cards() as u64;
+        let k = self.cards_needed() as u64;
+        (0..k).fold(1, |acc, i| acc * (n - i) / (i + 1))
+    }
+
+    /// Runouts `start..start + count` in enumeration order (fewer at the end).
+    pub fn runout_chunk(&self, start: u64, count: u64) -> Vec<Deck> {
+        self.enumerate_runout_community_cards()
+            .skip(start as usize)
+            .take(count as usize)
+            .collect()
+    }
+
     /// Returns `samples` random complete boards drawn from the remaining deck.
     pub fn sample_runout_community_cards(&self, samples: usize) -> Vec<Deck> {
         let cards_needed = self.cards_needed();

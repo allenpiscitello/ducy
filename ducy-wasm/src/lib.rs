@@ -421,3 +421,40 @@ impl RandomDeck {
         self.deck.num_cards()
     }
 }
+
+#[derive(serde::Serialize)]
+struct EquityChunkResult {
+    runouts: u64,
+    equity_sum: Vec<f64>,
+}
+
+/// Exact equity split into chunks of runouts, e.g. one chunk per Web Worker.
+/// Sum `equity_sum` and `runouts` across all chunks, then divide.
+macro_rules! equity_chunk_bindings {
+    ($game:ty) => {
+        #[wasm_bindgen]
+        impl $game {
+            /// Number of runouts exact equity enumerates.
+            pub fn runout_count(&self) -> f64 {
+                self.eval.runout_count(&self.state) as f64
+            }
+
+            /// Equity totals for runouts `start..start + count`
+            /// (`{ runouts, equity_sum }`).
+            pub fn equity_chunk(&self, start: f64, count: f64) -> Result<JsValue, JsError> {
+                let r = self
+                    .eval
+                    .evaluate_equity_chunk(&self.state, start as u64, count as u64);
+                let result = EquityChunkResult {
+                    runouts: r.runouts,
+                    equity_sum: r.equity_sum(),
+                };
+                serde_wasm_bindgen::to_value(&result).map_err(|e| JsError::new(&e.to_string()))
+            }
+        }
+    };
+}
+
+equity_chunk_bindings!(HoldemGame);
+equity_chunk_bindings!(OmahaGame);
+equity_chunk_bindings!(OmahaHiLoGame);
