@@ -8,6 +8,8 @@ pub mod deck;
 pub mod error;
 /// Game state, evaluation, and equity calculation for poker variants.
 pub mod games;
+/// Preflop starting-hand classes, equity table, and push/fold solver.
+pub mod preflop;
 /// Hand ranking systems for poker hands.
 pub mod ranking;
 
