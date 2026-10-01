@@ -231,11 +231,69 @@ pub(crate) const EQUITY_SCALE: u64 = 2520;
 #[cfg(feature = "parallel")]
 const PARALLEL_THRESHOLD: usize = 100;
 
+/// Unnormalized equity totals over a set of runouts. Results for separate
+/// chunks of runouts (e.g. computed on different threads or Web Workers)
+/// combine with [`EquityShares::merge`]; [`EquityShares::equity`] finishes.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EquityShares {
+    /// Number of runouts evaluated.
+    pub runouts: u64,
+    /// Per player, pot shares won in units of [`EquityShares::SCALE`] per runout.
+    pub shares: Vec<u64>,
+}
+
+impl EquityShares {
+    /// Units per whole pot: every split among up to 10 winners divides evenly.
+    pub const SCALE: u64 = EQUITY_SCALE;
+
+    /// Adds another chunk's totals into this one.
+    pub fn merge(&mut self, other: &EquityShares) {
+        if self.shares.len() < other.shares.len() {
+            self.shares.resize(other.shares.len(), 0);
+        }
+        for (s, o) in self.shares.iter_mut().zip(&other.shares) {
+            *s += o;
+        }
+        self.runouts += other.runouts;
+    }
+
+    /// Each player's equity; all zeros when no runouts were evaluated.
+    pub fn equity(&self) -> Vec<Decimal> {
+        if self.runouts == 0 {
+            return vec![Decimal::ZERO; self.shares.len()];
+        }
+        let divisor = Decimal::from(Self::SCALE) * Decimal::from(self.runouts);
+        self.shares
+            .iter()
+            .map(|&s| Decimal::from(s) / divisor)
+            .collect()
+    }
+
+    /// Each player's summed equity over the runouts (shares / SCALE).
+    pub fn equity_sum(&self) -> Vec<f64> {
+        self.shares
+            .iter()
+            .map(|&s| s as f64 / Self::SCALE as f64)
+            .collect()
+    }
+}
+
 pub(crate) fn accumulate_equity<F>(
     runouts: Vec<crate::deck::Deck>,
     num_players: usize,
     eval: F,
 ) -> Vec<Decimal>
+where
+    F: Fn(&crate::deck::Deck, &mut [u64]) + Send + Sync,
+{
+    accumulate_shares(runouts, num_players, eval).equity()
+}
+
+pub(crate) fn accumulate_shares<F>(
+    runouts: Vec<crate::deck::Deck>,
+    num_players: usize,
+    eval: F,
+) -> EquityShares
 where
     F: Fn(&crate::deck::Deck, &mut [u64]) + Send + Sync,
 {
@@ -281,11 +339,10 @@ where
         }
     };
 
-    let divisor = Decimal::from(EQUITY_SCALE) * Decimal::from(hand_count);
-    win_shares
-        .iter()
-        .map(|&s| Decimal::from(s) / divisor)
-        .collect()
+    EquityShares {
+        runouts: hand_count,
+        shares: win_shares,
+    }
 }
 
 /// Evaluates a game state to determine winners.

@@ -10,8 +10,8 @@ use crate::{
     },
     error::DucyError,
     games::{
-        CardDealer, FastWinnerTracker, GameEquityEvaluation, GameEvaluation, GameState, GameWinner,
-        WinnerTracker,
+        CardDealer, EquityShares, FastWinnerTracker, GameEquityEvaluation, GameEvaluation,
+        GameState, GameWinner, WinnerTracker,
         flop_game::{FlopGame, FlopGameState},
     },
     ranking::{
@@ -102,17 +102,38 @@ impl GameEquityEvaluation<HoldemGameState, StandardHandRanks, HoldemGameEvaluati
     for HoldemGameEvaluation
 {
     fn evaluate_equity(&self, game_state: &HoldemGameState) -> Vec<Decimal> {
-        let hole_cards = game_state.flop_game_state.hole_cards();
-        let num_players = hole_cards.len();
-        let runouts: Vec<Deck> = game_state
+        let runouts = game_state
             .flop_game_state
             .enumerate_runout_community_cards()
             .collect();
-
-        crate::games::accumulate_equity(runouts, num_players, |community, shares| {
-            holdem_winners(community, hole_cards).distribute(shares);
-        })
+        holdem_shares(game_state.flop_game_state.hole_cards(), runouts).equity()
     }
+}
+
+impl HoldemGameEvaluation {
+    /// Number of runouts exact equity enumerates.
+    pub fn runout_count(&self, game_state: &HoldemGameState) -> u64 {
+        game_state.flop_game_state.runout_count()
+    }
+
+    /// Equity totals for runouts `start..start + count` of the exact
+    /// enumeration. Merging every chunk gives the same result as
+    /// `evaluate_equity`, so chunks can run on separate threads or workers.
+    pub fn evaluate_equity_chunk(
+        &self,
+        game_state: &HoldemGameState,
+        start: u64,
+        count: u64,
+    ) -> EquityShares {
+        let runouts = game_state.flop_game_state.runout_chunk(start, count);
+        holdem_shares(game_state.flop_game_state.hole_cards(), runouts)
+    }
+}
+
+fn holdem_shares(hole_cards: &[Deck], runouts: Vec<Deck>) -> EquityShares {
+    crate::games::accumulate_shares(runouts, hole_cards.len(), |community, shares| {
+        holdem_winners(community, hole_cards).distribute(shares);
+    })
 }
 
 fn holdem_winners(community: &Deck, hands: &[Deck]) -> FastWinnerTracker {
@@ -1114,6 +1135,24 @@ mod test {
             eval.exact_range_evaluations(&state, &ranges()),
             Ok(43 * 2 * 3)
         );
+    }
+
+    #[test]
+    pub fn test_equity_chunks_merge_to_exact() {
+        let state = flop_state(&["As Ac", "Ks Kd", "7h 6h"], "Kc Qd Js");
+        let eval = HoldemGameEvaluation {};
+        let total = eval.runout_count(&state);
+        assert_eq!(total, 43 * 42 / 2);
+
+        let mut merged = crate::games::EquityShares::default();
+        let mut start = 0;
+        while start < total {
+            merged.merge(&eval.evaluate_equity_chunk(&state, start, 137));
+            start += 137;
+        }
+        assert_eq!(merged.runouts, total);
+        assert_eq!(merged.equity(), eval.evaluate_equity(&state));
+        assert_eq!(eval.evaluate_equity_chunk(&state, total, 10).runouts, 0);
     }
 
     #[test]

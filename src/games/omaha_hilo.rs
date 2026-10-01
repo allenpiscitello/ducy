@@ -5,7 +5,7 @@ use crate::{
     deck::{Card, Deck},
     error::DucyError,
     games::{
-        EQUITY_SCALE, FastWinnerTracker, GameState, GameWinner, WinnerTracker,
+        EQUITY_SCALE, EquityShares, FastWinnerTracker, GameState, GameWinner, WinnerTracker,
         flop_game::{FlopGame, FlopGameState},
     },
     ranking::{
@@ -146,7 +146,7 @@ impl OmahaHiLoGameEvaluation {
             .flop_game_state
             .enumerate_runout_community_cards()
             .collect();
-        Self::equity_over_runouts(game_state.flop_game_state.hole_cards(), runouts)
+        Self::shares_over_runouts(game_state.flop_game_state.hole_cards(), runouts).equity()
     }
 
     /// Estimates equity from `samples` random runouts instead of enumerating all of them.
@@ -154,10 +154,28 @@ impl OmahaHiLoGameEvaluation {
         let runouts = game_state
             .flop_game_state
             .sample_runout_community_cards(samples);
-        Self::equity_over_runouts(game_state.flop_game_state.hole_cards(), runouts)
+        Self::shares_over_runouts(game_state.flop_game_state.hole_cards(), runouts).equity()
     }
 
-    fn equity_over_runouts(hole_cards: &[Deck], runouts: Vec<Deck>) -> Vec<Decimal> {
+    /// Number of runouts exact equity enumerates.
+    pub fn runout_count(&self, game_state: &OmahaHiLoGameState) -> u64 {
+        game_state.flop_game_state.runout_count()
+    }
+
+    /// Equity totals for runouts `start..start + count` of the exact
+    /// enumeration. Merging every chunk gives the same result as
+    /// `evaluate_equity`, so chunks can run on separate threads or workers.
+    pub fn evaluate_equity_chunk(
+        &self,
+        game_state: &OmahaHiLoGameState,
+        start: u64,
+        count: u64,
+    ) -> EquityShares {
+        let runouts = game_state.flop_game_state.runout_chunk(start, count);
+        Self::shares_over_runouts(game_state.flop_game_state.hole_cards(), runouts)
+    }
+
+    fn shares_over_runouts(hole_cards: &[Deck], runouts: Vec<Deck>) -> EquityShares {
         let num_players = hole_cards.len();
 
         // Low masks are kept only when they could be part of a qualifying low:
@@ -175,7 +193,7 @@ impl OmahaHiLoGameEvaluation {
             })
             .collect();
 
-        crate::games::accumulate_equity(runouts, num_players, |community, shares| {
+        crate::games::accumulate_shares(runouts, num_players, |community, shares| {
             let mut high_tracker = FastWinnerTracker::new();
             let mut low_tracker = FastWinnerTracker::new();
 
@@ -353,6 +371,27 @@ mod test {
         for (e, s) in equity.iter().zip(&sampled) {
             assert!((e - s).abs() < dec!(0.02), "{equity:?} vs {sampled:?}");
         }
+    }
+
+    #[test]
+    fn test_hilo_equity_chunks_merge_to_exact() {
+        let mut state = OmahaHiLoGameState::new(4);
+        state
+            .add_player(Deck::parse("As 2d Kc Kd").unwrap())
+            .unwrap();
+        state
+            .add_player(Deck::parse("Ah 3h 4c Qs").unwrap())
+            .unwrap();
+        state.set_flop(Deck::parse("5h 6c Jd").unwrap()).unwrap();
+
+        let eval = OmahaHiLoGameEvaluation {};
+        let total = eval.runout_count(&state);
+        let mut merged = crate::games::EquityShares::default();
+        for start in (0..total).step_by(250) {
+            merged.merge(&eval.evaluate_equity_chunk(&state, start, 250));
+        }
+        assert_eq!(merged.runouts, total);
+        assert_eq!(merged.equity(), eval.evaluate_equity(&state));
     }
 
     #[test]
