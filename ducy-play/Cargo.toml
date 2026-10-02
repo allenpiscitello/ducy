@@ -1,0 +1,14 @@
+[package]
+name = "ducy-play"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+license = "MIT"
+description = "Play out poker hands: blinds, betting, side pots and showdown, built on ducy."
+repository = "https://github.com/allenpiscitello/ducy"
+categories = ["game-engines"]
+keywords = ["poker", "holdem", "omaha", "simulation"]
+
+[dependencies]
+ducy = { path = "..", default-features = false }
+rand = "0.10.2"
