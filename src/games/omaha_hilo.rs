@@ -20,6 +20,11 @@ pub struct OmahaHiLoGameState {
 }
 
 impl OmahaHiLoGameState {
+    /// Hole cards per player.
+    pub fn cards_per_player(&self) -> usize {
+        self.flop_game_state.cards_per_player()
+    }
+
     /// Creates a new Omaha Hi-Lo game state with the given number of hole cards per player.
     pub fn new(cards_per_player: u32) -> Self {
         Self {
@@ -186,66 +191,72 @@ impl OmahaHiLoGameEvaluation {
     }
 
     fn shares_over_runouts(hole_cards: &[Deck], runouts: Vec<Deck>) -> EquityShares {
-        let num_players = hole_cards.len();
+        let player_combos: Vec<HiLoCombos> = hole_cards.iter().map(hilo_combos).collect();
+        crate::games::accumulate_shares(runouts, hole_cards.len(), |community, shares| {
+            hilo_distribute(community, &player_combos, shares);
+        })
+    }
+}
 
-        // Low masks are kept only when they could be part of a qualifying low:
-        // 2 distinct low ranks from the hand, 3 from the board.
-        let player_combos: Vec<Vec<(Deck, Option<usize>, u32)>> = hole_cards
-            .iter()
-            .map(|h| {
-                h.enumerate_combinations(2)
-                    .map(|d| {
-                        let low = LowHandRanker::low_rank_mask(&d);
-                        let low = if low.count_ones() == 2 { low } else { 0 };
-                        (d, d.single_suit_index(), low)
-                    })
-                    .collect()
-            })
-            .collect();
+/// Each 2-card combo of a hand with its suit (if suited) and low-rank mask.
+/// The mask is kept only when the two cards are distinct low ranks, since
+/// only then can they make a qualifying low.
+pub(crate) type HiLoCombos = Vec<(Deck, Option<usize>, u32)>;
 
-        crate::games::accumulate_shares(runouts, num_players, |community, shares| {
-            let mut high_tracker = FastWinnerTracker::new();
-            let mut low_tracker = FastWinnerTracker::new();
+pub(crate) fn hilo_combos(hand: &Deck) -> HiLoCombos {
+    hand.enumerate_combinations(2)
+        .map(|d| {
+            let low = LowHandRanker::low_rank_mask(&d);
+            let low = if low.count_ones() == 2 { low } else { 0 };
+            (d, d.single_suit_index(), low)
+        })
+        .collect()
+}
 
-            for community_cards_of_3 in community.enumerate_combinations(3) {
-                let board_suit = community_cards_of_3.single_suit_index();
-                let board_paired = community_cards_of_3.has_rank_pair();
-                let board_low = LowHandRanker::low_rank_mask(&community_cards_of_3);
-                let board_low = if board_low.count_ones() == 3 {
-                    board_low
-                } else {
-                    0
-                };
-                for (i, combos) in player_combos.iter().enumerate() {
-                    for &(player_deck, player_suit, player_low) in combos {
-                        let flush_possible = board_suit.is_some() && board_suit == player_suit;
-                        let combined = community_cards_of_3 | player_deck;
-                        if let Some(score) = StandardHandRanker::fast_score_at_least(
-                            &combined,
-                            high_tracker.best_score(),
-                            flush_possible,
-                            board_paired,
-                        ) {
-                            high_tracker.consider(i, score);
-                        }
-                        if board_low != 0 && player_low != 0 {
-                            let low_score = LowHandRanker::score_from_mask(board_low | player_low);
-                            if low_score != 0 {
-                                low_tracker.consider(i, low_score);
-                            }
-                        }
+/// Adds one complete board's pot shares (in `EQUITY_SCALE` units) to `shares`:
+/// half to the best high and half to the best qualifying low, or the whole
+/// pot to the best high when no low qualifies.
+pub(crate) fn hilo_distribute(community: &Deck, player_combos: &[HiLoCombos], shares: &mut [u64]) {
+    let mut high_tracker = FastWinnerTracker::new();
+    let mut low_tracker = FastWinnerTracker::new();
+
+    for community_cards_of_3 in community.enumerate_combinations(3) {
+        let board_suit = community_cards_of_3.single_suit_index();
+        let board_paired = community_cards_of_3.has_rank_pair();
+        let board_low = LowHandRanker::low_rank_mask(&community_cards_of_3);
+        let board_low = if board_low.count_ones() == 3 {
+            board_low
+        } else {
+            0
+        };
+        for (i, combos) in player_combos.iter().enumerate() {
+            for &(player_deck, player_suit, player_low) in combos {
+                let flush_possible = board_suit.is_some() && board_suit == player_suit;
+                let combined = community_cards_of_3 | player_deck;
+                if let Some(score) = StandardHandRanker::fast_score_at_least(
+                    &combined,
+                    high_tracker.best_score(),
+                    flush_possible,
+                    board_paired,
+                ) {
+                    high_tracker.consider(i, score);
+                }
+                if board_low != 0 && player_low != 0 {
+                    let low_score = LowHandRanker::score_from_mask(board_low | player_low);
+                    if low_score != 0 {
+                        low_tracker.consider(i, low_score);
                     }
                 }
             }
+        }
+    }
 
-            if low_tracker.best_score() > 0 {
-                let half_scale = EQUITY_SCALE / 2;
-                high_tracker.distribute_scaled(shares, half_scale);
-                low_tracker.distribute_scaled(shares, half_scale);
-            } else {
-                high_tracker.distribute(shares);
-            }
-        })
+    if low_tracker.best_score() > 0 {
+        let half_scale = EQUITY_SCALE / 2;
+        high_tracker.distribute_scaled(shares, half_scale);
+        low_tracker.distribute_scaled(shares, half_scale);
+    } else {
+        high_tracker.distribute(shares);
     }
 }
 

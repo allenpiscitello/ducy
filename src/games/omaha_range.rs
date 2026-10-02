@@ -156,14 +156,16 @@ impl Qualifier {
 }
 
 /// One parsed range term, e.g. `AAxx$ds`.
-struct Term {
-    cards: Deck,
-    ranks: [u8; 13],
+pub(crate) struct Term {
+    /// Specific cards the hand must hold.
+    pub(crate) cards: Deck,
+    /// How many more cards of each rank it needs (beyond `cards`).
+    pub(crate) ranks: [u8; 13],
     qualifiers: Vec<Qualifier>,
 }
 
 impl Term {
-    fn parse(term: &str, cards_per_player: usize) -> Result<Self, DucyError> {
+    pub(crate) fn parse(term: &str, cards_per_player: usize) -> Result<Self, DucyError> {
         let mut parts = term.split('$');
         let body: Vec<char> = parts.next().unwrap_or_default().chars().collect();
         let qualifiers: Vec<Qualifier> = parts
@@ -210,7 +212,7 @@ impl Term {
         })
     }
 
-    fn matches(&self, hand: Deck) -> bool {
+    pub(crate) fn matches(&self, hand: Deck) -> bool {
         if !hand.has_cards(&self.cards) {
             return false;
         }
@@ -233,7 +235,7 @@ impl Term {
 }
 
 /// Number of `k`-card hands from a 52-card deck.
-fn total_hands(k: usize) -> u64 {
+pub(crate) fn total_hands(k: usize) -> u64 {
     (0..k as u64).fold(1, |acc, i| acc * (52 - i) / (i + 1))
 }
 

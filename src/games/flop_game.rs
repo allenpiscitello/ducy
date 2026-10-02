@@ -41,6 +41,10 @@ impl FlopGameState {
         Ok(())
     }
 
+    pub(crate) fn cards_per_player(&self) -> usize {
+        self.num_hole_cards_per_player as usize
+    }
+
     pub(crate) fn remaining_cards(&self) -> Deck {
         self.remaining_cards_in_deck
     }
