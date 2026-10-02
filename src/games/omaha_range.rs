@@ -6,6 +6,7 @@ use crate::{
         range::{Range, RangeBase, RangeItem},
     },
     error::DucyError,
+    games::CardDealer,
 };
 
 /// A hand property written after `$` in a term.
@@ -315,6 +316,7 @@ pub(crate) fn total_hands(k: usize) -> u64 {
 /// | `TT$3rd` | a pair of tens alongside a three-card rundown, e.g. `TT98` |
 /// | `$2p, $rd` | any two-pair hand or any rundown |
 /// | `$ts` | triple-suited PLO6 hands |
+#[derive(Clone)]
 pub struct OmahaRange {
     cards_per_player: usize,
     range_base: RangeBase,
@@ -353,6 +355,11 @@ impl OmahaRange {
         Ok(())
     }
 
+    /// Hole cards per hand.
+    pub fn cards_per_player(&self) -> usize {
+        self.cards_per_player
+    }
+
     /// Number of distinct hands in the range with a positive weight.
     pub fn combos(&self) -> u64 {
         self.iter()
@@ -375,6 +382,56 @@ impl OmahaRange {
     pub fn weighted_coverage(&self) -> f64 {
         let total: Decimal = self.iter().map(|item| item.get_weight()).sum();
         f64::try_from(total).unwrap_or(0.0) / self.total_hands() as f64
+    }
+}
+
+/// Draws hands from an [`OmahaRange`] in proportion to their weights,
+/// skipping hands that use cards outside `available`.
+pub(crate) struct RangeSampler {
+    combos: Vec<Deck>,
+    cumulative: Vec<f64>,
+}
+
+impl RangeSampler {
+    /// Errors with `InvalidRange` if no hand with positive weight fits
+    /// `available`.
+    pub(crate) fn new(range: &OmahaRange, available: Deck) -> Result<Self, DucyError> {
+        let mut combos: Vec<(Deck, f64)> = range
+            .iter()
+            .map(|item| {
+                (
+                    item.get_deck(),
+                    f64::try_from(item.get_weight()).unwrap_or(0.0),
+                )
+            })
+            .filter(|&(deck, w)| w > 0.0 && available.has_cards(&deck))
+            .collect();
+        if combos.is_empty() {
+            return Err(DucyError::InvalidRange);
+        }
+        // The range is a hash map; sort so seeded draws are reproducible.
+        combos.sort_unstable_by_key(|&(deck, _)| u64::from(deck));
+        let cumulative = combos
+            .iter()
+            .scan(0.0, |total, &(_, w)| {
+                *total += w;
+                Some(*total)
+            })
+            .collect();
+        Ok(Self {
+            combos: combos.into_iter().map(|(deck, _)| deck).collect(),
+            cumulative,
+        })
+    }
+
+    pub(crate) fn draw(&self, dealer: &mut CardDealer) -> Deck {
+        let total = self.cumulative[self.cumulative.len() - 1];
+        let x = dealer.random_f64(total);
+        let i = self
+            .cumulative
+            .partition_point(|&c| c <= x)
+            .min(self.combos.len() - 1);
+        self.combos[i]
     }
 }
 

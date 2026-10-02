@@ -7,11 +7,26 @@ use crate::{
     games::{
         CardDealer, EQUITY_SCALE, GameState, GameWinner, WinnerTracker,
         omaha::{HoleCombos, high_winners, hole_card_combos},
+        omaha_range::{OmahaRange, RangeSampler},
     },
     ranking::hand_rank::{StandardHandRanker, StandardHandRanks},
 };
 
 const MAX_PLAYERS: usize = 10;
+
+/// Redraws allowed per sample when range hands collide before giving up.
+const MAX_CONFLICT_REDRAWS: u32 = 100_000;
+
+/// How [`OmahaBombPotGameEvaluation::sample_seats_seeded`] deals a seat whose
+/// cards are unknown.
+#[derive(Clone, Copy)]
+pub enum SeatHand<'a> {
+    /// Any hand, uniformly at random.
+    Random,
+    /// A hand from the range, in proportion to its weight. Use this for
+    /// realistic opponents, e.g. hands likely to see the flop.
+    Range(&'a OmahaRange),
+}
 
 /// Omaha bomb pot game state with multiple boards sharing the same hole cards.
 pub struct OmahaBombPotGameState {
@@ -261,17 +276,54 @@ impl OmahaBombPotGameEvaluation {
         samples: usize,
         seed: Option<u64>,
     ) -> Result<BombPotSamples, DucyError> {
-        let num_players = game_state.hole_cards.len() + random_seats.len();
+        let seats: Vec<(usize, SeatHand)> = random_seats
+            .iter()
+            .map(|&seat| (seat, SeatHand::Random))
+            .collect();
+        self.sample_seats_seeded(game_state, &seats, samples, seed)
+    }
+
+    /// Like `sample_seeded`, but each unknown seat is dealt either a random
+    /// hand or a hand from an [`OmahaRange`] (weighted, never sharing a card
+    /// with known cards or other seats). Errors with `InvalidRange` if a
+    /// range has the wrong hole-card count, has no hand that fits the known
+    /// cards, or the ranges keep colliding.
+    pub fn sample_seats_seeded(
+        &self,
+        game_state: &OmahaBombPotGameState,
+        seats: &[(usize, SeatHand)],
+        samples: usize,
+        seed: Option<u64>,
+    ) -> Result<BombPotSamples, DucyError> {
+        let num_players = game_state.hole_cards.len() + seats.len();
         if num_players > MAX_PLAYERS {
             return Err(DucyError::TooManyPlayers);
         }
         let mut is_random = vec![false; num_players];
-        for &seat in random_seats {
+        for &(seat, _) in seats {
             if seat >= num_players || is_random[seat] {
                 return Err(DucyError::TooManyPlayers);
             }
             is_random[seat] = true;
         }
+        let random_seats: Vec<usize> = seats
+            .iter()
+            .filter(|(_, hand)| matches!(hand, SeatHand::Random))
+            .map(|&(seat, _)| seat)
+            .collect();
+        let range_seats: Vec<(usize, RangeSampler)> = seats
+            .iter()
+            .filter_map(|&(seat, hand)| match hand {
+                SeatHand::Random => None,
+                SeatHand::Range(range) => Some((seat, range)),
+            })
+            .map(|(seat, range)| {
+                if range.cards_per_player() != game_state.num_hole_cards_per_player as usize {
+                    return Err(DucyError::InvalidRange);
+                }
+                Ok((seat, RangeSampler::new(range, game_state.remaining_cards)?))
+            })
+            .collect::<Result<_, _>>()?;
 
         let cards_per_player = game_state.num_hole_cards_per_player as usize;
         let board_cards_needed: Vec<usize> = game_state
@@ -281,7 +333,7 @@ impl OmahaBombPotGameEvaluation {
             .collect();
         let mut dealer = CardDealer::maybe_seeded(game_state.remaining_cards, seed);
         let cards_needed =
-            random_seats.len() * cards_per_player + board_cards_needed.iter().sum::<usize>();
+            seats.len() * cards_per_player + board_cards_needed.iter().sum::<usize>();
         if cards_needed > dealer.available() {
             return Err(DucyError::NotEnoughCards);
         }
@@ -310,13 +362,33 @@ impl OmahaBombPotGameEvaluation {
 
         for _ in 0..samples {
             dealer.reset();
-            for &seat in random_seats {
-                player_combos[seat] = hole_card_combos(&dealer.deal(cards_per_player));
+            let mut redraws = 0;
+            let mut used = 'draw: loop {
+                let mut used = Deck::empty();
+                for (seat, sampler) in &range_seats {
+                    let hand = sampler.draw(&mut dealer);
+                    if u64::from(used) & u64::from(hand) != 0 {
+                        redraws += 1;
+                        if redraws > MAX_CONFLICT_REDRAWS {
+                            return Err(DucyError::InvalidRange);
+                        }
+                        continue 'draw;
+                    }
+                    used |= hand;
+                    player_combos[*seat] = hole_card_combos(&hand);
+                }
+                break used;
+            };
+            for &seat in &random_seats {
+                let hand = dealer.deal_excluding(cards_per_player, used);
+                used |= hand;
+                player_combos[seat] = hole_card_combos(&hand);
             }
 
             let mut scooper = None;
             for (b, board) in game_state.boards.iter().enumerate() {
-                let community = board.community_cards | dealer.deal(board_cards_needed[b]);
+                let community =
+                    board.community_cards | dealer.deal_excluding(board_cards_needed[b], used);
                 let tracker = high_winners(&community, &player_combos);
                 tracker.distribute(&mut shares);
                 for &w in tracker.winners() {
@@ -369,7 +441,11 @@ mod test {
     use rust_decimal_macros::dec;
 
     use crate::deck::{Card, Deck};
-    use crate::games::omaha_bomb_pot::{OmahaBombPotGameEvaluation, OmahaBombPotGameState};
+    use crate::error::DucyError;
+    use crate::games::omaha_bomb_pot::{
+        OmahaBombPotGameEvaluation, OmahaBombPotGameState, SeatHand,
+    };
+    use crate::games::omaha_range::OmahaRange;
 
     fn complete_board(state: &mut OmahaBombPotGameState, b: usize, cards: &str) {
         let cards: Vec<&str> = cards.split(' ').collect();
@@ -449,6 +525,88 @@ mod test {
 
         assert!(eval.sample(&state, &[3], 1).is_err());
         assert!(eval.sample(&state, &[1, 1], 1).is_err());
+    }
+
+    fn heads_up(hero: &str) -> OmahaBombPotGameState {
+        let mut state = OmahaBombPotGameState::new(1, 4);
+        state.add_player(Deck::parse(hero).unwrap()).unwrap();
+        state
+    }
+
+    #[test]
+    fn test_range_seat_matches_known_hand() {
+        let eval = OmahaBombPotGameEvaluation {};
+        let villain = OmahaRange::parse("AsAhKsKh", 4).unwrap();
+        let ranged = eval
+            .sample_seats_seeded(
+                &heads_up("Qd Qc Jd Jc"),
+                &[(1, SeatHand::Range(&villain))],
+                20_000,
+                Some(1),
+            )
+            .unwrap();
+
+        let mut known = heads_up("Qd Qc Jd Jc");
+        known
+            .add_player(Deck::parse("As Ah Ks Kh").unwrap())
+            .unwrap();
+        let fixed = eval.sample_seeded(&known, &[], 20_000, Some(2)).unwrap();
+        for (a, b) in ranged.equity_sum.iter().zip(&fixed.equity_sum) {
+            assert!((a - b).abs() / 20_000.0 < 0.02, "{a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn test_range_seats() {
+        let eval = OmahaBombPotGameEvaluation {};
+        let state = heads_up("As Ac 7d 2h");
+        // Only Ah Ad remain, so every villain hand holds both.
+        let aces = OmahaRange::parse("AA", 4).unwrap();
+        let r = eval
+            .sample_seats_seeded(&state, &[(1, SeatHand::Range(&aces))], 2_000, Some(3))
+            .unwrap();
+        assert!((r.equity_sum.iter().sum::<f64>() - 2_000.0).abs() < 1e-6);
+
+        // Range and random seats together, reproducible with a seed.
+        let rundowns = OmahaRange::parse("$rd0-1$!r", 4).unwrap();
+        let seats = [
+            (1, SeatHand::Range(&rundowns)),
+            (2, SeatHand::Random),
+            (3, SeatHand::Range(&aces)),
+        ];
+        let run = |seed| {
+            eval.sample_seats_seeded(&state, &seats, 500, Some(seed))
+                .unwrap()
+        };
+        let (a, b) = (run(4), run(4));
+        assert_eq!(a.equity_sum, b.equity_sum);
+        assert_eq!(a.equity_sum.len(), 4);
+        // Both remaining aces can't go to two players at once.
+        assert!(matches!(
+            eval.sample_seats_seeded(
+                &state,
+                &[(1, SeatHand::Range(&aces)), (2, SeatHand::Range(&aces))],
+                10,
+                Some(5)
+            ),
+            Err(DucyError::InvalidRange)
+        ));
+    }
+
+    #[test]
+    fn test_range_seat_errors() {
+        let eval = OmahaBombPotGameEvaluation {};
+        let all_aces = heads_up("As Ac Ad Ah");
+        let aces = OmahaRange::parse("AA", 4).unwrap();
+        assert!(matches!(
+            eval.sample_seats_seeded(&all_aces, &[(1, SeatHand::Range(&aces))], 10, None),
+            Err(DucyError::InvalidRange)
+        ));
+        let plo5 = OmahaRange::parse("KK", 5).unwrap();
+        assert!(matches!(
+            eval.sample_seats_seeded(&all_aces, &[(1, SeatHand::Range(&plo5))], 10, None),
+            Err(DucyError::InvalidRange)
+        ));
     }
 
     #[test]

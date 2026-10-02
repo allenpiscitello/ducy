@@ -27,6 +27,7 @@ pub trait Range {
 }
 
 /// Stores deck-to-weight mappings for building ranges.
+#[derive(Clone)]
 pub struct RangeBase {
     weights: HashMap<Deck, Decimal>,
 }

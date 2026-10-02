@@ -4,7 +4,7 @@ use ducy::deck::{Card, Deck};
 use ducy::games::flop_game::FlopGame;
 use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState, HoldemRange};
 use ducy::games::omaha::{OmahaGameEvaluation, OmahaGameState};
-use ducy::games::omaha_bomb_pot::{OmahaBombPotGameEvaluation, OmahaBombPotGameState};
+use ducy::games::omaha_bomb_pot::{OmahaBombPotGameEvaluation, OmahaBombPotGameState, SeatHand};
 use ducy::games::omaha_hilo::{OmahaHiLoGameEvaluation, OmahaHiLoGameState};
 use ducy::games::{GameEquityEvaluation, GameEvaluation};
 use ducy::games::{omaha_range, omaha_range_equity};
@@ -303,6 +303,7 @@ struct BombPotSampleResult {
 pub struct OmahaBombPotGame {
     state: OmahaBombPotGameState,
     eval: OmahaBombPotGameEvaluation,
+    range_seats: Vec<(usize, omaha_range::OmahaRange)>,
 }
 
 #[wasm_bindgen]
@@ -312,6 +313,7 @@ impl OmahaBombPotGame {
         Self {
             state: OmahaBombPotGameState::new(num_boards, cards_per_player),
             eval: OmahaBombPotGameEvaluation {},
+            range_seats: Vec::new(),
         }
     }
 
@@ -348,8 +350,23 @@ impl OmahaBombPotGame {
             .collect()
     }
 
+    /// Deals seat `seat` (a position in the final player order) a hand
+    /// from `range` in every later `sample` call, instead of a random hand,
+    /// e.g. to sample against hands likely to see the flop. Replaces any
+    /// range already set for that seat.
+    pub fn set_seat_range(&mut self, seat: usize, range: &OmahaRange) {
+        self.range_seats.retain(|(s, _)| *s != seat);
+        self.range_seats.push((seat, range.range.clone()));
+    }
+
+    /// Removes every range set with `set_seat_range`.
+    pub fn clear_seat_ranges(&mut self) {
+        self.range_seats.clear();
+    }
+
     /// Runs `samples` Monte Carlo deals. `random_seats` are the final player
     /// positions dealt random hands; added players fill the rest in order.
+    /// Seats set with `set_seat_range` are dealt from their range.
     /// Returns sums over samples, so batches can be added together.
     /// Passing a `seed` makes the result reproducible.
     pub fn sample(
@@ -358,9 +375,18 @@ impl OmahaBombPotGame {
         random_seats: Vec<usize>,
         seed: Option<f64>,
     ) -> Result<JsValue, JsError> {
+        let seats: Vec<(usize, SeatHand)> = random_seats
+            .iter()
+            .map(|&seat| (seat, SeatHand::Random))
+            .chain(
+                self.range_seats
+                    .iter()
+                    .map(|(seat, range)| (*seat, SeatHand::Range(range))),
+            )
+            .collect();
         let r = self
             .eval
-            .sample_seeded(&self.state, &random_seats, samples, to_seed(seed))
+            .sample_seats_seeded(&self.state, &seats, samples, to_seed(seed))
             .map_err(to_js_err)?;
         let result = BombPotSampleResult {
             samples: r.samples,
