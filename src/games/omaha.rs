@@ -17,6 +17,11 @@ pub struct OmahaGameState {
 }
 
 impl OmahaGameState {
+    /// Hole cards per player.
+    pub fn cards_per_player(&self) -> usize {
+        self.flop_game_state.cards_per_player()
+    }
+
     /// Creates a new Omaha game state with the given number of hole cards per player.
     pub fn new(cards_per_player: u32) -> Self {
         Self {

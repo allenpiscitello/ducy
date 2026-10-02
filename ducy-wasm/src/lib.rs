@@ -6,8 +6,8 @@ use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState, HoldemRange};
 use ducy::games::omaha::{OmahaGameEvaluation, OmahaGameState};
 use ducy::games::omaha_bomb_pot::{OmahaBombPotGameEvaluation, OmahaBombPotGameState};
 use ducy::games::omaha_hilo::{OmahaHiLoGameEvaluation, OmahaHiLoGameState};
-use ducy::games::omaha_range;
 use ducy::games::{GameEquityEvaluation, GameEvaluation};
+use ducy::games::{omaha_range, omaha_range_equity};
 
 fn to_js_err(e: ducy::error::DucyError) -> JsError {
     JsError::new(&e.to_string())
@@ -658,5 +658,127 @@ impl OmahaRange {
     /// Like `coverage`, counting each hand by its weight.
     pub fn weighted_coverage(&self) -> f64 {
         self.range.weighted_coverage()
+    }
+}
+
+thread_local! {
+    // Prepared Omaha ranges by (hole cards, text). Building one can take a
+    // moment (an explicit hand list for narrow ranges), and the site samples
+    // in many small batches, so each worker keeps recent ranges around.
+    static OMAHA_RANGES: std::cell::RefCell<std::collections::HashMap<(usize, String), std::rc::Rc<omaha_range_equity::OmahaRangeSampler>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+const OMAHA_RANGE_CACHE: usize = 32;
+
+fn omaha_ranges(
+    ranges: &[String],
+    cards: usize,
+) -> Result<Vec<std::rc::Rc<omaha_range_equity::OmahaRangeSampler>>, JsError> {
+    OMAHA_RANGES.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        ranges
+            .iter()
+            .map(|text| {
+                let key = (cards, text.clone());
+                if let Some(r) = cache.get(&key) {
+                    return Ok(r.clone());
+                }
+                let r = std::rc::Rc::new(
+                    omaha_range_equity::OmahaRangeSampler::parse(text, cards).map_err(to_js_err)?,
+                );
+                if cache.len() >= OMAHA_RANGE_CACHE {
+                    cache.clear();
+                }
+                cache.insert(key, r.clone());
+                Ok(r)
+            })
+            .collect()
+    })
+}
+
+fn range_result(r: ducy::games::holdem::RangeEquitySamples) -> Result<JsValue, JsError> {
+    let result = RangeSampleResult {
+        samples: r.samples,
+        equity_sum: r.equity_sum,
+        equity_sq_sum: r.equity_sq_sum,
+    };
+    serde_wasm_bindgen::to_value(&result).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Omaha range equity. Players added with `add_player` come first, then one
+/// player per entry in `ranges`, each in Omaha shorthand (e.g. `"AAxx$ds, $rd$ds"`).
+#[wasm_bindgen]
+impl OmahaGame {
+    /// Runs `samples` Monte Carlo deals. Returns sums over samples
+    /// (`samples`, `equity_sum`, `equity_sq_sum`) so batches can be added.
+    pub fn sample_range_equity(
+        &self,
+        ranges: Vec<String>,
+        samples: usize,
+        seed: Option<f64>,
+    ) -> Result<JsValue, JsError> {
+        let rs = omaha_ranges(&ranges, self.state.cards_per_player())?;
+        let refs: Vec<&omaha_range_equity::OmahaRangeSampler> =
+            rs.iter().map(|r| r.as_ref()).collect();
+        range_result(
+            self.eval
+                .sample_range_equity_seeded(&self.state, &refs, samples, to_seed(seed))
+                .map_err(to_js_err)?,
+        )
+    }
+}
+
+/// Omaha Hi-Lo range equity; see `OmahaGame.sample_range_equity`.
+#[wasm_bindgen]
+impl OmahaHiLoGame {
+    pub fn sample_range_equity(
+        &self,
+        ranges: Vec<String>,
+        samples: usize,
+        seed: Option<f64>,
+    ) -> Result<JsValue, JsError> {
+        let rs = omaha_ranges(&ranges, self.state.cards_per_player())?;
+        let refs: Vec<&omaha_range_equity::OmahaRangeSampler> =
+            rs.iter().map(|r| r.as_ref()).collect();
+        range_result(
+            self.eval
+                .sample_range_equity_seeded(&self.state, &refs, samples, to_seed(seed))
+                .map_err(to_js_err)?,
+        )
+    }
+}
+
+/// An Omaha shorthand range for checking what it covers, usable for any hole
+/// card count including PLO6 (narrow ranges are counted exactly, broad ones
+/// estimated by sampling).
+#[wasm_bindgen]
+pub struct OmahaRangeSampler {
+    range: std::rc::Rc<omaha_range_equity::OmahaRangeSampler>,
+}
+
+#[wasm_bindgen]
+impl OmahaRangeSampler {
+    /// Parses `ranges` (terms separated by commas or spaces) for hands of
+    /// `cards_per_player` cards. Errors on invalid syntax.
+    #[wasm_bindgen(constructor)]
+    pub fn new(cards_per_player: usize, ranges: &str) -> Result<OmahaRangeSampler, JsError> {
+        let range = omaha_ranges(&[ranges.to_string()], cards_per_player)?.remove(0);
+        Ok(Self { range })
+    }
+
+    /// Fraction of all starting hands in the range (0 to 1).
+    pub fn coverage(&self) -> f64 {
+        self.range.coverage().0
+    }
+
+    /// Whether `coverage` is exact (true) or a sampled estimate (false).
+    pub fn coverage_exact(&self) -> bool {
+        self.range.coverage().1
+    }
+
+    /// Whether a hand such as `"As Ah Ks Kh"` is in the range.
+    pub fn contains(&self, hand: &str) -> Result<bool, JsError> {
+        Ok(self.range.contains(Deck::parse(hand).map_err(to_js_err)?))
     }
 }
