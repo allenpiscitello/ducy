@@ -42,3 +42,11 @@ harness = false
 [[bench]]
 name = "deck_iteration"
 harness = false
+
+[[example]]
+name = "omaha_equity_dataset"
+required-features = ["parallel"]
+
+[[example]]
+name = "omaha_flop_quality"
+required-features = ["parallel"]
