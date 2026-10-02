@@ -241,6 +241,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ducy-play"
+version = "0.1.0"
+dependencies = [
+ "ducy",
+ "rand 0.10.3",
+]
+
+[[package]]
 name = "ducy-wasm"
 version = "0.1.0"
 dependencies = [
