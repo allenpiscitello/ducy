@@ -22,6 +22,9 @@ pub mod omaha;
 pub mod omaha_bomb_pot;
 /// Omaha Hi-Lo 8-or-Better game state and split-pot evaluation.
 pub mod omaha_hilo;
+/// Omaha starting-hand ranges (PPT-style syntax) and preflop coverage.
+/// See [`omaha_range::OmahaRange`] for the full syntax.
+pub mod omaha_range;
 /// Razz (Seven-Card Stud Low) game state and evaluation.
 pub mod razz;
 /// Single Draw Deuce-to-Seven Lowball (Kansas City Lowball) game state and evaluation.

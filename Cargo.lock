@@ -246,6 +246,7 @@ version = "0.1.0"
 dependencies = [
  "ducy",
  "getrandom 0.4.3",
+ "rust_decimal",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
