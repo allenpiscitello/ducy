@@ -12,6 +12,11 @@ fn to_js_err(e: ducy::error::DucyError) -> JsError {
     JsError::new(&e.to_string())
 }
 
+/// JS numbers are f64; seeds are whole numbers up to 2^53.
+fn to_seed(seed: Option<f64>) -> Option<u64> {
+    seed.map(|s| s as u64)
+}
+
 #[wasm_bindgen]
 pub struct HoldemGame {
     state: HoldemGameState,
@@ -130,15 +135,17 @@ impl HoldemGame {
 
     /// Runs `samples` Monte Carlo deals. Returns sums over samples
     /// (`samples`, `equity_sum`, `equity_sq_sum`) so batches can be added.
+    /// Passing a `seed` makes the result reproducible.
     pub fn sample_range_equity(
         &self,
         ranges: Vec<String>,
         samples: usize,
+        seed: Option<f64>,
     ) -> Result<JsValue, JsError> {
         let ranges = parse_ranges(&ranges)?;
         let r = self
             .eval
-            .sample_range_equity(&self.state, &ranges, samples)
+            .sample_range_equity_seeded(&self.state, &ranges, samples, to_seed(seed))
             .map_err(to_js_err)?;
         let result = RangeSampleResult {
             samples: r.samples,
@@ -211,10 +218,11 @@ impl OmahaGame {
         serde_wasm_bindgen::to_value(&results).map_err(|e| JsError::new(&e.to_string()))
     }
 
-    /// Average equity over `samples` random runouts.
-    pub fn sample_equity(&self, samples: usize) -> Vec<f64> {
+    /// Average equity over `samples` random runouts. Passing a `seed` makes
+    /// the result reproducible.
+    pub fn sample_equity(&self, samples: usize, seed: Option<f64>) -> Vec<f64> {
         self.eval
-            .sample_equity(&self.state, samples)
+            .sample_equity_seeded(&self.state, samples, to_seed(seed))
             .into_iter()
             .map(|d| d.try_into().unwrap_or(0.0))
             .collect()
@@ -270,10 +278,11 @@ impl OmahaHiLoGame {
             .collect()
     }
 
-    /// Average equity over `samples` random runouts.
-    pub fn sample_equity(&self, samples: usize) -> Vec<f64> {
+    /// Average equity over `samples` random runouts. Passing a `seed` makes
+    /// the result reproducible.
+    pub fn sample_equity(&self, samples: usize, seed: Option<f64>) -> Vec<f64> {
         self.eval
-            .sample_equity(&self.state, samples)
+            .sample_equity_seeded(&self.state, samples, to_seed(seed))
             .into_iter()
             .map(|d| d.try_into().unwrap_or(0.0))
             .collect()
@@ -341,10 +350,16 @@ impl OmahaBombPotGame {
     /// Runs `samples` Monte Carlo deals. `random_seats` are the final player
     /// positions dealt random hands; added players fill the rest in order.
     /// Returns sums over samples, so batches can be added together.
-    pub fn sample(&self, samples: usize, random_seats: Vec<usize>) -> Result<JsValue, JsError> {
+    /// Passing a `seed` makes the result reproducible.
+    pub fn sample(
+        &self,
+        samples: usize,
+        random_seats: Vec<usize>,
+        seed: Option<f64>,
+    ) -> Result<JsValue, JsError> {
         let r = self
             .eval
-            .sample(&self.state, &random_seats, samples)
+            .sample_seeded(&self.state, &random_seats, samples, to_seed(seed))
             .map_err(to_js_err)?;
         let result = BombPotSampleResult {
             samples: r.samples,

@@ -250,6 +250,17 @@ impl OmahaBombPotGameEvaluation {
         random_seats: &[usize],
         samples: usize,
     ) -> Result<BombPotSamples, DucyError> {
+        self.sample_seeded(game_state, random_seats, samples, None)
+    }
+
+    /// Like `sample`; a `seed` makes the deals reproducible.
+    pub fn sample_seeded(
+        &self,
+        game_state: &OmahaBombPotGameState,
+        random_seats: &[usize],
+        samples: usize,
+        seed: Option<u64>,
+    ) -> Result<BombPotSamples, DucyError> {
         let num_players = game_state.hole_cards.len() + random_seats.len();
         if num_players > MAX_PLAYERS {
             return Err(DucyError::TooManyPlayers);
@@ -268,7 +279,7 @@ impl OmahaBombPotGameEvaluation {
             .iter()
             .map(|b| b.cards_needed() as usize)
             .collect();
-        let mut dealer = CardDealer::new(game_state.remaining_cards);
+        let mut dealer = CardDealer::maybe_seeded(game_state.remaining_cards, seed);
         let cards_needed =
             random_seats.len() * cards_per_player + board_cards_needed.iter().sum::<usize>();
         if cards_needed > dealer.available() {
@@ -429,6 +440,12 @@ mod test {
             assert!(board.iter().sum::<u64>() >= 2_000);
         }
         assert!(r.equity_sum.iter().all(|&e| e > 0.0));
+
+        let seeded = |seed| eval.sample_seeded(&state, &[1], 500, Some(seed)).unwrap();
+        let (a, b, c) = (seeded(1), seeded(1), seeded(2));
+        assert_eq!(a.equity_sum, b.equity_sum);
+        assert_eq!(a.board_wins, b.board_wins);
+        assert_ne!(a.equity_sum, c.equity_sum);
 
         assert!(eval.sample(&state, &[3], 1).is_err());
         assert!(eval.sample(&state, &[1, 1], 1).is_err());

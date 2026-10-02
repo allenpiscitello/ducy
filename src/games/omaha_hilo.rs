@@ -151,9 +151,19 @@ impl OmahaHiLoGameEvaluation {
 
     /// Estimates equity from `samples` random runouts instead of enumerating all of them.
     pub fn sample_equity(&self, game_state: &OmahaHiLoGameState, samples: usize) -> Vec<Decimal> {
+        self.sample_equity_seeded(game_state, samples, None)
+    }
+
+    /// Like `sample_equity`; a `seed` makes the result reproducible.
+    pub fn sample_equity_seeded(
+        &self,
+        game_state: &OmahaHiLoGameState,
+        samples: usize,
+        seed: Option<u64>,
+    ) -> Vec<Decimal> {
         let runouts = game_state
             .flop_game_state
-            .sample_runout_community_cards(samples);
+            .sample_runout_community_cards(samples, seed);
         Self::shares_over_runouts(game_state.flop_game_state.hole_cards(), runouts).equity()
     }
 

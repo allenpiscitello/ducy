@@ -73,9 +73,10 @@ impl FlopGameState {
     }
 
     /// Returns `samples` random complete boards drawn from the remaining deck.
-    pub fn sample_runout_community_cards(&self, samples: usize) -> Vec<Deck> {
+    /// Passing a `seed` makes the boards reproducible.
+    pub fn sample_runout_community_cards(&self, samples: usize, seed: Option<u64>) -> Vec<Deck> {
         let cards_needed = self.cards_needed();
-        let mut dealer = CardDealer::new(self.remaining_cards_in_deck);
+        let mut dealer = CardDealer::maybe_seeded(self.remaining_cards_in_deck, seed);
         (0..samples)
             .map(|_| {
                 dealer.reset();
