@@ -608,8 +608,9 @@ impl StudHiLoGame {
     }
 }
 
-/// Omaha starting-hand range (PPT-style terms such as `AAxx$ds`, `KK$ss`,
-/// `JT98$np`), for measuring what share of all starting hands it covers.
+/// Omaha starting-hand range (PPT-style terms such as `AAxx$ds`, `$rd0-1`,
+/// `TT$3rd`, `$ts`), for measuring what share of all starting hands it
+/// covers. The full syntax is documented on `ducy::games::omaha_range::OmahaRange`.
 #[wasm_bindgen]
 pub struct OmahaRange {
     range: omaha_range::OmahaRange,
