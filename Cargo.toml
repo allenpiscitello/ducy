@@ -50,3 +50,7 @@ required-features = ["parallel"]
 [[example]]
 name = "omaha_flop_quality"
 required-features = ["parallel"]
+
+[[example]]
+name = "holdem_hand_quality"
+required-features = ["parallel"]
