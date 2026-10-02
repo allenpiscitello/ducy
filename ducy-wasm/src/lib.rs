@@ -6,6 +6,7 @@ use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState, HoldemRange};
 use ducy::games::omaha::{OmahaGameEvaluation, OmahaGameState};
 use ducy::games::omaha_bomb_pot::{OmahaBombPotGameEvaluation, OmahaBombPotGameState};
 use ducy::games::omaha_hilo::{OmahaHiLoGameEvaluation, OmahaHiLoGameState};
+use ducy::games::omaha_range;
 use ducy::games::{GameEquityEvaluation, GameEvaluation};
 
 fn to_js_err(e: ducy::error::DucyError) -> JsError {
@@ -604,5 +605,57 @@ impl StudHiLoGame {
             low: winner_results(r.low_winners),
         };
         serde_wasm_bindgen::to_value(&result).map_err(|e| JsError::new(&e.to_string()))
+    }
+}
+
+/// Omaha starting-hand range (PPT-style terms such as `AAxx$ds`, `KK$ss`,
+/// `JT98$np`), for measuring what share of all starting hands it covers.
+#[wasm_bindgen]
+pub struct OmahaRange {
+    range: omaha_range::OmahaRange,
+}
+
+#[wasm_bindgen]
+impl OmahaRange {
+    /// An empty range for hands of `cards_per_player` cards (4 for PLO).
+    #[wasm_bindgen(constructor)]
+    pub fn new(cards_per_player: usize) -> Self {
+        Self {
+            range: omaha_range::OmahaRange::new(cards_per_player),
+        }
+    }
+
+    /// Adds every hand matching `terms` (separated by commas or spaces).
+    /// `weight` defaults to 1; a hand already in the range takes the new weight.
+    pub fn add(&mut self, terms: &str, weight: Option<f64>) -> Result<(), JsError> {
+        let weight = rust_decimal::Decimal::try_from(weight.unwrap_or(1.0))
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        for term in terms
+            .split([',', ' ', '\t', '\n'])
+            .filter(|t| !t.is_empty())
+        {
+            self.range.add(term, weight).map_err(to_js_err)?;
+        }
+        Ok(())
+    }
+
+    /// Number of distinct hands in the range.
+    pub fn combos(&self) -> f64 {
+        self.range.combos() as f64
+    }
+
+    /// Number of possible starting hands (270,725 for 4 cards).
+    pub fn total_hands(&self) -> f64 {
+        self.range.total_hands() as f64
+    }
+
+    /// Share of all starting hands in the range, 0 to 1.
+    pub fn coverage(&self) -> f64 {
+        self.range.coverage()
+    }
+
+    /// Like `coverage`, counting each hand by its weight.
+    pub fn weighted_coverage(&self) -> f64 {
+        self.range.weighted_coverage()
     }
 }
