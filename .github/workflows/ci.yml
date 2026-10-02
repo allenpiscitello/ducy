@@ -29,3 +29,4 @@ jobs:
           targets: wasm32-unknown-unknown
       - run: cargo install wasm-pack
       - run: cd ducy-wasm && wasm-pack build --target web
+      - run: cd ducy-play-wasm && wasm-pack build --target web
