@@ -1,15 +1,14 @@
 //! Simple built-in bots, mostly as opponents and baselines.
 
-use ducy::deck::{Card, Deck};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     bot::{Bot, Observation},
     hand::{Action, LegalActions},
-    showdown::best_hands,
+    strength::observation_equity,
 };
 
-fn rng(seed: Option<u64>) -> StdRng {
+pub(crate) fn rng(seed: Option<u64>) -> StdRng {
     match seed {
         Some(seed) => StdRng::seed_from_u64(seed),
         None => rand::make_rng(),
@@ -118,59 +117,7 @@ impl EquityBot {
 
     /// Share of the pot this seat wins on average against random hands.
     pub fn equity(&mut self, obs: &Observation) -> f64 {
-        let opponents: Vec<usize> = (0..obs.seats.len())
-            .filter(|&s| s != obs.seat && !obs.seats[s].folded)
-            .collect();
-        let per_player = obs.rules.variant.hole_cards();
-        let mut known = obs.hole_cards;
-        for &card in &obs.board {
-            known |= card;
-        }
-        let mut unknown: Vec<Card> = (Deck::all_cards() - known).iter(false).collect();
-        let board_needed = 5 - obs.board.len();
-        let needed = opponents.len() * per_player + board_needed;
-        if needed > unknown.len() {
-            return 0.0;
-        }
-
-        let mut contenders = opponents.clone();
-        contenders.push(obs.seat);
-        let mut hole_cards = vec![Deck::empty(); obs.seats.len()];
-        hole_cards[obs.seat] = obs.hole_cards;
-        let mut won = 0.0;
-        let mut counted = 0;
-        for _ in 0..self.samples {
-            for i in 0..needed {
-                let j = self.rng.random_range(i..unknown.len());
-                unknown.swap(i, j);
-            }
-            let mut next = unknown.iter().copied();
-            for &opp in &opponents {
-                let mut hand = Deck::empty();
-                for card in next.by_ref().take(per_player) {
-                    hand |= card;
-                }
-                hole_cards[opp] = hand;
-            }
-            let mut board = obs.board.clone();
-            board.extend(next.take(board_needed));
-            let Ok(board) = <[Card; 5]>::try_from(board) else {
-                continue;
-            };
-            if let Ok((winners, _)) =
-                best_hands(obs.rules.variant, &hole_cards, &board, &contenders)
-            {
-                counted += 1;
-                if winners.contains(&obs.seat) {
-                    won += 1.0 / winners.len() as f64;
-                }
-            }
-        }
-        if counted == 0 {
-            0.0
-        } else {
-            won / counted as f64
-        }
+        observation_equity(obs, self.samples, &mut self.rng)
     }
 }
 

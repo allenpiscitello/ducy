@@ -30,16 +30,20 @@ mod deal;
 mod error;
 mod hand;
 mod matchup;
+pub mod personality;
 #[cfg(feature = "process")]
 mod process;
 mod rules;
 mod showdown;
+pub mod stats;
+pub mod strength;
 
 pub use bot::{Bot, HandOutcome, HandSummary, Observation, SeatView, fallback_action, play_hand};
 pub use deal::Deal;
 pub use error::PlayError;
 pub use hand::{Action, Event, Hand, HandResult, LegalActions, MAX_PLAYERS, RaiseRange, Street};
 pub use matchup::{MatchConfig, MatchResult, run_match};
+pub use personality::{Personality, PersonalityBot, Style};
 #[cfg(feature = "process")]
 pub use process::ProcessBot;
 pub use rules::{BettingStructure, TableRules, Variant};
