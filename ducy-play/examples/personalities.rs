@@ -16,44 +16,45 @@ fn main() {
     ] {
         println!("{label}");
 
-        // Fixed seats, so per-seat stats are per-bot stats.
-        let mut bots: Vec<Box<dyn Bot>> = Personality::ALL
-            .iter()
-            .enumerate()
-            .map(|(i, p)| Box::new(p.bot(Some(i as u64))) as Box<dyn Bot>)
-            .collect();
-        let n = bots.len();
-        let mut model = OpponentModel::new();
-        for h in 0..hands {
-            let deal = Deal::random(rules.variant, n, Some(h as u64)).unwrap();
-            let mut hand = Hand::new(rules, &vec![200; n], h % n, deal).unwrap();
-            let mut seated: Vec<&mut dyn Bot> = Vec::new();
-            for bot in bots.iter_mut() {
-                seated.push(&mut **bot);
-            }
-            play_hand(&mut hand, &mut seated).unwrap();
-            model.record(hand.events(), n);
-        }
-
-        // Duplicate match for win rates.
-        let config = MatchConfig::new(rules, hands / n, 99).duplicate();
-        let result = run_match(&config, &mut bots).unwrap();
-
         println!(
-            "  {:16} {:>6} {:>6} {:>12} {:>11} {:>10}",
+            "  {:18} {:>6} {:>6} {:>12} {:>11} {:>10}",
             "", "VPIP", "PFR", "fold to bet", "aggression", "bb/100"
         );
-        for (i, p) in Personality::ALL.iter().enumerate() {
-            let s = model.seat(i);
-            println!(
-                "  {:16} {:>5.0}% {:>5.0}% {:>11.0}% {:>11.2} {:>+10.1}",
-                p.name(),
-                100.0 * s.vpip_hands as f64 / s.hands as f64,
-                100.0 * s.pfr_hands as f64 / s.hands as f64,
-                100.0 * s.folds_to_bets as f64 / s.faced_bets.max(1) as f64,
-                s.aggressive as f64 / s.calls.max(1) as f64,
-                result.bb_per_100(i),
-            );
+        // Tables of up to 5 with fixed seats, so per-seat stats are per-bot
+        // stats; win rates come from a duplicate match at the same table.
+        for table in Personality::ALL.chunks(5) {
+            let mut bots: Vec<Box<dyn Bot>> = table
+                .iter()
+                .enumerate()
+                .map(|(i, p)| Box::new(p.bot(Some(i as u64))) as Box<dyn Bot>)
+                .collect();
+            let n = bots.len();
+            let mut model = OpponentModel::new();
+            for h in 0..hands {
+                let deal = Deal::random(rules.variant, n, Some(h as u64)).unwrap();
+                let mut hand = Hand::new(rules, &vec![200; n], h % n, deal).unwrap();
+                let mut seated: Vec<&mut dyn Bot> = Vec::new();
+                for bot in bots.iter_mut() {
+                    seated.push(&mut **bot);
+                }
+                play_hand(&mut hand, &mut seated).unwrap();
+                model.record(hand.events(), n);
+            }
+            let config = MatchConfig::new(rules, hands / n, 99).duplicate();
+            let result = run_match(&config, &mut bots).unwrap();
+            for (i, p) in table.iter().enumerate() {
+                let s = model.seat(i);
+                println!(
+                    "  {:18} {:>5.0}% {:>5.0}% {:>11.0}% {:>11.2} {:>+10.1}",
+                    p.name(),
+                    100.0 * s.vpip_hands as f64 / s.hands as f64,
+                    100.0 * s.pfr_hands as f64 / s.hands as f64,
+                    100.0 * s.folds_to_bets as f64 / s.faced_bets.max(1) as f64,
+                    s.aggressive as f64 / s.calls.max(1) as f64,
+                    result.bb_per_100(i),
+                );
+            }
+            println!();
         }
     }
 }
