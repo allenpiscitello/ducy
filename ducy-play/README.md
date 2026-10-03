@@ -7,7 +7,7 @@ rounds, side pots and the showdown.
 - **Betting:** no-limit or pot-limit for either game
 - **Cards:** shuffled from a seed (reproducible) or supplied exactly, e.g. to replay a hand
 - **History:** every post, action, board card and award is recorded as an `Event`
-- **Bots:** a `Bot` trait, simple built-in bots, 19 personality bots (Doug Poker, Phil Bigmouth, Tom Swan, Milk King, ...), a match runner with stack resets and duplicate deals, and `ProcessBot` for bots written in any language
+- **Bots:** a `Bot` trait, simple built-in bots, 16 personality bots (Doug Poker, Phil Bigmouth, Rampart, Milk King, ...), a match runner with stack resets and duplicate deals, and `ProcessBot` for bots written in any language
 
 ## Example
 
@@ -69,30 +69,27 @@ counted so you can spot broken bots.
 
 Ready-made characters, each a `PersonalityBot` playing a `Style`. Any
 resemblance to real players is purely coincidental. Measured over 1,500
-hands at 4–5-handed tables (VPIP = hands played, PFR = hands raised
+hands at 4-handed tables (VPIP = hands played, PFR = hands raised
 preflop):
 
 | Personality | Plays | NLHE VPIP / PFR | PLO VPIP / PFR | Folds to bets |
 |---|---|---|---|---|
-| **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, pot-odds defense. An approximation, not a solver. | 29% / 22% | 23% / 17% | 24% |
-| **Old Man Coffee** | Nit: premium hands only, folds to pressure, almost never bluffs. | 8% / 5% | 7% / 5% | 57–76% |
-| **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, bold plays, adapts to each opponent's leaks. | 48% / 36% | 45% / 34% | 23–28% |
-| **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | 59% / 1% | 66% / 2% | 5–7% |
-| **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 20% / 14% | 13% / 9% | 34–39% |
-| **Tom Swan** | Fearless maniac: wide 3-bets, overbet bluffs, never backs down. | 57% / 45% | 59% / 46% | 14% |
-| **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 38% / 17% | 35% / 16% | 28% |
-| **Doyle Brunchson** | Old-school aggression, and always raises ten-deuce. | 34% / 27% | 32% / 25% | 23% |
-| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 59% / 9% | 66% / 7% | 6–8% |
-| **Johnny Champagne** | Slow-plays monsters and check-raises. | 21% / 14% | 16% / 11% | 25% |
-| **Ivey League** | Solid base that reads opponents after 5 hands and exploits them. | 28% / 21% | 24% / 16% | 32–44% |
-| **Uncle Gary** | Loose-passive, and never folds a pair. | 43% / 2% | 46% / 2% | 8–14% |
-| **Captain Overbet** | Every bet is three times the pot (all-in when that's more). | 36% / 30% | 35% / 28% | 22–30% |
-| **The Accountant** | Strict pot odds: no bluffs, no slow-plays, no caution. | 20% / 15% | 19% / 12% | 22–26% |
-| **Bluff Daddy** | Bets his air and checks his monsters. | 33% / 21% | 29% / 17% | 25–38% |
-| **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 35% / 6% | 82% / 4% | 21–30% |
-| **xX_GTO_Wizard_Xx** | Light 3-bets and solver sizings, but folds to 4-bets. | 29% / 25% | 28% / 24% | 18–30% |
-| **ShortStack Steve** | All-in or fold preflop, every hand. | 17% / 17% | 14% / 14% | 25–29% |
-| **The Grinder** | Disciplined, unexciting, quietly profitable. | 24% / 18% | 22% / 17% | 26–33% |
+| **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, pot-odds defense. An approximation, not a solver. | 28% / 22% | 22% / 16% | 25–31% |
+| **Old Man Coffee** | Nit: premium hands only, folds to pressure, almost never bluffs. | 8% / 5% | 7% / 5% | 58–64% |
+| **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, bold plays, adapts to each opponent's leaks. | 47% / 36% | 45% / 35% | 26–31% |
+| **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | 59% / 2% | 62% / 2% | 4–7% |
+| **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 19% / 14% | 14% / 9% | 25–42% |
+| **Rampart** | Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero calls, bolder on a heater. | 50% / 36% | 48% / 33% | 4–9% |
+| **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 39% / 22% | 39% / 20% | 22–27% |
+| **Doyle Brunchson** | Old-school aggression, and always raises ten-deuce. | 33% / 27% | 38% / 31% | 16–20% |
+| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 55% / 11% | 54% / 9% | 7–13% |
+| **Johnny Champagne** | Slow-plays monsters and check-raises. | 23% / 17% | 19% / 13% | 28–34% |
+| **Ivey League** | Solid base that reads opponents after 5 hands and exploits them. | 33% / 28% | 27% / 20% | 30–39% |
+| **Uncle Gary** | Loose-passive, and never folds a pair. | 40% / 3% | 43% / 3% | 6–16% |
+| **Captain Overbet** | Every bet is three times the pot (all-in when that's more). | 37% / 30% | 36% / 30% | 25% |
+| **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 34% / 22% | 33% / 20% | 26–38% |
+| **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 40% / 6% | 86% / 3% | 37–46% |
+| **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 26% / 22% | 23% / 18% | 36–38% |
 
 ```rust
 use ducy_play::{Bot, MatchConfig, Personality, TableRules, run_match};

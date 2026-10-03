@@ -63,8 +63,8 @@ fn personalities_play_legal_full_matches() {
         TableRules::no_limit_holdem(1, 2),
         TableRules::pot_limit_omaha(1, 2).with_ante(1),
     ] {
-        // Tables of up to 5 (19 = 5 + 5 + 5 + 4), so every personality plays.
-        for (t, table) in Personality::ALL.chunks(5).enumerate() {
+        // Tables of 4, so every personality plays.
+        for (t, table) in Personality::ALL.chunks(4).enumerate() {
             let config = MatchConfig::new(rules, 6, t as u64).duplicate();
             let mut bots: Vec<Box<dyn Bot>> = table
                 .iter()
@@ -284,9 +284,13 @@ fn favorite_and_pretty_hands_get_played() {
 }
 
 #[test]
-fn shortstack_steve_only_shoves_or_folds_preflop() {
+fn push_fold_style_only_shoves_or_folds_preflop() {
     let rules = TableRules::no_limit_holdem(1, 2);
-    let mut steve = quick(Personality::ShortStackSteve, 1);
+    let mut style = Personality::DougPoker.style();
+    style.samples = 40;
+    style.push_fold_bb = f64::INFINITY;
+    style.vpip = 0.14;
+    let mut steve = PersonalityBot::new("Shover", style, Some(1));
     let mut doug = quick(Personality::DougPoker, 2);
     let mut shoves = 0;
     for h in 0..60 {
@@ -332,14 +336,14 @@ fn trappers_check_monsters_then_raise() {
     let facing = hand.observation(1).unwrap();
     assert!(matches!(johnny.act(&facing), Some(Action::Raise(_))));
 
-    // The Accountant never slow-plays: he bets it.
-    let mut accountant = with(Personality::TheAccountant, |_| {});
-    assert!(matches!(accountant.act(&first), Some(Action::Bet(_))));
+    // Without trapping, an aggressive style just bets it.
+    let mut bettor = with(Personality::DougPoker, |s| s.aggression = 1.0);
+    assert!(matches!(bettor.act(&first), Some(Action::Bet(_))));
 }
 
 #[test]
-fn bluff_daddy_bets_air_and_checks_monsters() {
-    let mut daddy = with(Personality::BluffDaddy, |s| {
+fn gus_bluffsen_bets_air_and_checks_monsters() {
+    let mut daddy = with(Personality::GusBluffsen, |s| {
         s.bluff = 0.0;
         s.aggression = 1.0;
     });
@@ -385,14 +389,14 @@ fn uncle_gary_will_not_fold_a_pair() {
 }
 
 #[test]
-fn gto_wizard_folds_to_four_bets() {
+fn tiny_four_bet_range_folds_to_four_bets() {
     let spot = |holes: &[&str]| {
         let mut hand = nlhe(holes, "2c 7d 9h Jc 3s");
         hand.act(Action::Raise(6)).unwrap(); // seat 0 opens
         hand.act(Action::Raise(18)).unwrap(); // seat 1 re-raises
         hand.observation(0).unwrap()
     };
-    let mut wizard = with(Personality::GtoWizard, |_| {});
+    let mut wizard = with(Personality::DougPoker, |s| s.four_bet = 0.015);
     assert_eq!(wizard.act(&spot(&["Ts 9s", "Kd Kh"])), Some(Action::Fold));
     assert!(matches!(
         wizard.act(&spot(&["As Ah", "Kd Kh"])),

@@ -164,8 +164,9 @@ pub enum Personality {
     MilkKing,
     /// Tight and proud until he loses a big pot, then badly on tilt.
     PhilBigmouth,
-    /// Fearless maniac: wide 3-bets, overbet bluffs, never backs down.
-    TomSwan,
+    /// Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero
+    /// calls, and bolder still when he's running hot.
+    Rampart,
     /// Small ball: plays lots of hands in small pots with small bets.
     DannySmallball,
     /// Old-school aggression, and always plays ten-deuce.
@@ -180,29 +181,23 @@ pub enum Personality {
     UncleGary,
     /// Every bet is the pot or more.
     CaptainOverbet,
-    /// Strict pot odds, no bluffs, no tricks.
-    TheAccountant,
-    /// Bets his air and checks his monsters.
-    BluffDaddy,
+    /// Fearless bluffer who bets his air and checks his monsters.
+    GusBluffsen,
     /// Plays any suited hand and any ace, because they're pretty.
     LadyLuckLinda,
-    /// Online regular: light 3-bets, solver sizings, folds to 4-bets.
-    GtoWizard,
-    /// Shoves or folds preflop, every single hand.
-    ShortStackSteve,
-    /// Disciplined, unexciting, profitable.
-    TheGrinder,
+    /// Disciplined, relentless grinder who never looks happy about it.
+    MichaelMiserable,
 }
 
 impl Personality {
     /// Every personality.
-    pub const ALL: [Personality; 19] = [
+    pub const ALL: [Personality; 16] = [
         Self::DougPoker,
         Self::OldManCoffee,
         Self::MisterCheating,
         Self::MilkKing,
         Self::PhilBigmouth,
-        Self::TomSwan,
+        Self::Rampart,
         Self::DannySmallball,
         Self::DoyleBrunchson,
         Self::ChrisMoneybags,
@@ -210,12 +205,9 @@ impl Personality {
         Self::IveyLeague,
         Self::UncleGary,
         Self::CaptainOverbet,
-        Self::TheAccountant,
-        Self::BluffDaddy,
+        Self::GusBluffsen,
         Self::LadyLuckLinda,
-        Self::GtoWizard,
-        Self::ShortStackSteve,
-        Self::TheGrinder,
+        Self::MichaelMiserable,
     ];
 
     /// Display name, e.g. "Doug Poker".
@@ -226,7 +218,7 @@ impl Personality {
             Self::MisterCheating => "Mister Cheating",
             Self::MilkKing => "Milk King",
             Self::PhilBigmouth => "Phil Bigmouth",
-            Self::TomSwan => "Tom Swan",
+            Self::Rampart => "Rampart",
             Self::DannySmallball => "Danny Smallball",
             Self::DoyleBrunchson => "Doyle Brunchson",
             Self::ChrisMoneybags => "Chris Moneybags",
@@ -234,12 +226,9 @@ impl Personality {
             Self::IveyLeague => "Ivey League",
             Self::UncleGary => "Uncle Gary",
             Self::CaptainOverbet => "Captain Overbet",
-            Self::TheAccountant => "The Accountant",
-            Self::BluffDaddy => "Bluff Daddy",
+            Self::GusBluffsen => "Gus Bluffsen",
             Self::LadyLuckLinda => "Lady Luck Linda",
-            Self::GtoWizard => "xX_GTO_Wizard_Xx",
-            Self::ShortStackSteve => "ShortStack Steve",
-            Self::TheGrinder => "The Grinder",
+            Self::MichaelMiserable => "Michael Miserable",
         }
     }
 
@@ -251,7 +240,7 @@ impl Personality {
             Self::MisterCheating => "mister_cheating",
             Self::MilkKing => "milk_king",
             Self::PhilBigmouth => "phil_bigmouth",
-            Self::TomSwan => "tom_swan",
+            Self::Rampart => "rampart",
             Self::DannySmallball => "danny_smallball",
             Self::DoyleBrunchson => "doyle_brunchson",
             Self::ChrisMoneybags => "chris_moneybags",
@@ -259,12 +248,9 @@ impl Personality {
             Self::IveyLeague => "ivey_league",
             Self::UncleGary => "uncle_gary",
             Self::CaptainOverbet => "captain_overbet",
-            Self::TheAccountant => "the_accountant",
-            Self::BluffDaddy => "bluff_daddy",
+            Self::GusBluffsen => "gus_bluffsen",
             Self::LadyLuckLinda => "lady_luck_linda",
-            Self::GtoWizard => "gto_wizard",
-            Self::ShortStackSteve => "shortstack_steve",
-            Self::TheGrinder => "the_grinder",
+            Self::MichaelMiserable => "michael_miserable",
         }
     }
 
@@ -278,7 +264,9 @@ impl Personality {
             }
             Self::MilkKing => "Loose-passive: plays almost anything and calls a lot.",
             Self::PhilBigmouth => "Tight and proud, until a bad beat sends him on monumental tilt.",
-            Self::TomSwan => "Fearless maniac: light 3-bets, overbet bluffs, huge pots.",
+            Self::Rampart => {
+                "Splashy LAG: lots of hands, big bluffs, hero calls, rides his heaters."
+            }
             Self::DannySmallball => "Small ball: many hands, small pots, small bets, tricky calls.",
             Self::DoyleBrunchson => "Old-school aggression, and never folds ten-deuce.",
             Self::ChrisMoneybags => "Lucky amateur who gets braver with every pot he drags.",
@@ -286,12 +274,11 @@ impl Personality {
             Self::IveyLeague => "Solid base, reads you in five hands, then exploits you.",
             Self::UncleGary => "Calls with any pair to keep you honest.",
             Self::CaptainOverbet => "Pot or more, every single time.",
-            Self::TheAccountant => "Pure pot odds: no bluffs, no slow-plays, no fun.",
-            Self::BluffDaddy => "Bets his air, checks his monsters. Exactly backwards.",
+            Self::GusBluffsen => "Fearless bluffer: bets his air, checks his monsters.",
             Self::LadyLuckLinda => "Plays any suited hand and any ace, because they're pretty.",
-            Self::GtoWizard => "Twenty tables open: light 3-bets, folds to 4-bets.",
-            Self::ShortStackSteve => "All-in or fold, every hand, no exceptions.",
-            Self::TheGrinder => "Disciplined, unexciting, quietly profitable.",
+            Self::MichaelMiserable => {
+                "Disciplined, relentless grinder who never looks happy about it."
+            }
         }
     }
 
@@ -303,7 +290,7 @@ impl Personality {
             Self::MisterCheating => "I've seen how you play.",
             Self::MilkKing => "I call. What did you have?",
             Self::PhilBigmouth => "If it weren't for luck, I'd win every hand.",
-            Self::TomSwan => "Let's play for a million.",
+            Self::Rampart => "I had to see it.",
             Self::DannySmallball => "I put you on exactly king-jack.",
             Self::DoyleBrunchson => "Ten-deuce, baby.",
             Self::ChrisMoneybags => "Wait, I won again?",
@@ -311,12 +298,9 @@ impl Personality {
             Self::IveyLeague => "...",
             Self::UncleGary => "Gotta keep you honest.",
             Self::CaptainOverbet => "Pot.",
-            Self::TheAccountant => "The math says call.",
-            Self::BluffDaddy => "Trust me, I've got it.",
+            Self::GusBluffsen => "Every hand is a bluff. Except this one.",
             Self::LadyLuckLinda => "They're suited!",
-            Self::GtoWizard => "Solver says 3-bet.",
-            Self::ShortStackSteve => "All in.",
-            Self::TheGrinder => "Just another session.",
+            Self::MichaelMiserable => "Another day at the office. Ugh.",
         }
     }
 
@@ -396,20 +380,25 @@ impl Personality {
                 recovery: 0.12,
                 ..base
             },
-            Self::TomSwan => Style {
-                vpip: 0.55,
-                pfr: 0.45,
-                three_bet: 0.25,
+            Self::Rampart => Style {
+                vpip: 0.38,
+                pfr: 0.28,
+                three_bet: 0.18,
                 four_bet: 0.12,
                 defend: 0.8,
                 value_margin: 0.06,
                 aggression: 0.95,
                 bluff: 0.55,
                 bluff_raise: 0.25,
-                call_factor: 0.9,
+                // Hero calls.
+                call_factor: 0.8,
                 caution: 0.02,
-                bet_size: 1.4,
+                bet_size: 1.1,
                 open_size: 3.0,
+                // Bolder on a heater, a little tilty after big losses.
+                heater: 0.3,
+                tilt: 0.2,
+                recovery: 0.2,
                 ..base
             },
             Self::DannySmallball => Style {
@@ -503,17 +492,7 @@ impl Personality {
                 caution: 0.1,
                 ..base
             },
-            Self::TheAccountant => Style {
-                aggression: 1.0,
-                bluff: 0.0,
-                bluff_raise: 0.0,
-                trap: 0.0,
-                call_factor: 1.0,
-                caution: 0.0,
-                position_bonus: 0.0,
-                ..base
-            },
-            Self::BluffDaddy => Style {
+            Self::GusBluffsen => Style {
                 vpip: 0.35,
                 pfr: 0.25,
                 backwards: true,
@@ -534,24 +513,7 @@ impl Personality {
                 call_factor: 0.9,
                 ..base
             },
-            Self::GtoWizard => Style {
-                vpip: 0.26,
-                pfr: 0.22,
-                three_bet: 0.14,
-                four_bet: 0.015,
-                position_bonus: 0.5,
-                bluff: 0.3,
-                bet_size: 0.75,
-                ..base
-            },
-            Self::ShortStackSteve => Style {
-                vpip: 0.14,
-                pfr: 0.14,
-                defend: 0.7,
-                push_fold_bb: f64::INFINITY,
-                ..base
-            },
-            Self::TheGrinder => Style {
+            Self::MichaelMiserable => Style {
                 vpip: 0.22,
                 pfr: 0.18,
                 bluff: 0.15,

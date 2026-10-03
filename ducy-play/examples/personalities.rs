@@ -20,9 +20,9 @@ fn main() {
             "  {:18} {:>6} {:>6} {:>12} {:>11} {:>10}",
             "", "VPIP", "PFR", "fold to bet", "aggression", "bb/100"
         );
-        // Tables of up to 5 with fixed seats, so per-seat stats are per-bot
+        // Tables of 4 with fixed seats, so per-seat stats are per-bot
         // stats; win rates come from a duplicate match at the same table.
-        for table in Personality::ALL.chunks(5) {
+        for table in Personality::ALL.chunks(4) {
             let mut bots: Vec<Box<dyn Bot>> = table
                 .iter()
                 .enumerate()
