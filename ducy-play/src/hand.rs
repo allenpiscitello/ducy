@@ -12,6 +12,8 @@ pub const MAX_PLAYERS: usize = 10;
 
 /// A betting round.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
 pub enum Street {
     /// Hole cards dealt, blinds posted.
     Preflop,
@@ -65,6 +67,7 @@ pub enum Action {
 
 /// The smallest and largest legal street totals for a bet or raise.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RaiseRange {
     /// Smallest legal total. Below a full raise only when it puts the player
     /// all-in.
@@ -75,6 +78,7 @@ pub struct RaiseRange {
 
 /// What the player to act may do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LegalActions {
     /// The seat to act.
     pub seat: usize,
@@ -95,6 +99,8 @@ pub struct LegalActions {
 
 /// Something that happened in the hand, in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", rename_all = "snake_case"))]
 pub enum Event {
     /// A seat posted an ante.
     Ante { seat: usize, amount: u64 },
@@ -128,6 +134,7 @@ pub enum Event {
 
 /// The outcome of a finished hand.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HandResult {
     /// Main pot first, then side pots.
     pub pots: Vec<Pot>,
@@ -531,12 +538,12 @@ impl Hand {
             } else {
                 split(amount, &winners, self.button, n)
             };
-            for &(seat, chips) in &awards {
-                payouts[seat] += chips;
+            for award in &awards {
+                payouts[award.seat] += award.amount;
                 self.events.push(Event::Award {
-                    seat,
+                    seat: award.seat,
                     pot: index,
-                    amount: chips,
+                    amount: award.amount,
                 });
             }
             pots.push(Pot {

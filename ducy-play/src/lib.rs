@@ -24,14 +24,23 @@
 #[cfg(doctest)]
 pub struct ReadmeDoctests;
 
+mod bot;
+pub mod bots;
 mod deal;
 mod error;
 mod hand;
+mod matchup;
+#[cfg(feature = "process")]
+mod process;
 mod rules;
 mod showdown;
 
+pub use bot::{Bot, HandOutcome, HandSummary, Observation, SeatView, fallback_action, play_hand};
 pub use deal::Deal;
 pub use error::PlayError;
 pub use hand::{Action, Event, Hand, HandResult, LegalActions, MAX_PLAYERS, RaiseRange, Street};
+pub use matchup::{MatchConfig, MatchResult, run_match};
+#[cfg(feature = "process")]
+pub use process::ProcessBot;
 pub use rules::{BettingStructure, TableRules, Variant};
-pub use showdown::Pot;
+pub use showdown::{Award, Pot};
