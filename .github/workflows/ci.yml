@@ -30,3 +30,8 @@ jobs:
       - run: cargo install wasm-pack
       - run: cd ducy-wasm && wasm-pack build --target web
       - run: cd ducy-play-wasm && wasm-pack build --target web
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: cd ducy-play-wasm && wasm-pack build --target nodejs --out-dir pkg-node
+      - run: node ducy-play-wasm/tests/smoke.cjs

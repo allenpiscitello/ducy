@@ -1,2 +1,4 @@
 /target
 /ducy-wasm/pkg
+/ducy-play-wasm/pkg
+/ducy-play-wasm/pkg-node
