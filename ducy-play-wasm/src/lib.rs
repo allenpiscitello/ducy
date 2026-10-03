@@ -420,7 +420,10 @@ impl PokerHand {
                 awards: p
                     .awards
                     .iter()
-                    .map(|&(seat, amount)| AwardJs { seat, amount })
+                    .map(|a| AwardJs {
+                        seat: a.seat,
+                        amount: a.amount,
+                    })
                     .collect(),
                 winning_hand: p.winning_hand.clone(),
             })

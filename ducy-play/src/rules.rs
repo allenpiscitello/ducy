@@ -2,6 +2,8 @@ use crate::error::PlayError;
 
 /// The poker game being played, which decides hole cards and showdown rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum Variant {
     /// Texas Hold'em: two hole cards, best five from any seven.
     Holdem,
@@ -25,6 +27,8 @@ impl Variant {
 
 /// How much a player may bet or raise.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum BettingStructure {
     /// Any amount up to the player's stack.
     NoLimit,
@@ -35,6 +39,7 @@ pub enum BettingStructure {
 /// The rules for a hand: game, betting structure and forced bets. Amounts are
 /// whole chips.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TableRules {
     /// The game being played.
     pub variant: Variant,

@@ -9,6 +9,26 @@ repository = "https://github.com/allenpiscitello/ducy"
 categories = ["game-engines"]
 keywords = ["poker", "holdem", "omaha", "simulation"]
 
+[features]
+default = ["process"]
+# Serialize rules, observations, events and results (JSON for external bots).
+serde = ["dep:serde", "ducy/serde"]
+# Run bots as separate programs that talk JSON over stdin/stdout.
+process = ["serde", "dep:serde_json"]
+
 [dependencies]
 ducy = { path = "..", default-features = false }
 rand = "0.10.2"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+
+[[test]]
+name = "bots"
+required-features = ["process"]
+
+[[example]]
+name = "bot_match"
+required-features = ["process"]

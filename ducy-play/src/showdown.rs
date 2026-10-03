@@ -10,8 +10,19 @@ use ducy::{
 
 use crate::{error::PlayError, rules::Variant};
 
+/// Chips one seat won from a pot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Award {
+    /// The winning seat.
+    pub seat: usize,
+    /// Chips won.
+    pub amount: u64,
+}
+
 /// One pot (main or side) and who won it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Pot {
     /// Chips in the pot.
     pub amount: u64,
@@ -19,9 +30,9 @@ pub struct Pot {
     /// least this pot's level. A pot with a single eligible seat is an
     /// uncalled bet being returned, or a pot won without a showdown.
     pub eligible: Vec<usize>,
-    /// `(seat, chips)` for each winner. Split pots divide evenly; leftover
-    /// chips go one at a time to winners starting left of the button.
-    pub awards: Vec<(usize, u64)>,
+    /// Chips for each winner. Split pots divide evenly; leftover chips go
+    /// one at a time to winners starting left of the button.
+    pub awards: Vec<Award>,
     /// The winning hand, e.g. "Flush, Ace high", when the pot went to showdown.
     pub winning_hand: Option<String>,
 }
@@ -117,12 +128,7 @@ fn setup(
 
 /// Splits `amount` evenly among `winners`, giving leftover chips one at a
 /// time starting with the first winner left of the button.
-pub(crate) fn split(
-    amount: u64,
-    winners: &[usize],
-    button: usize,
-    seats: usize,
-) -> Vec<(usize, u64)> {
+pub(crate) fn split(amount: u64, winners: &[usize], button: usize, seats: usize) -> Vec<Award> {
     let mut order = winners.to_vec();
     order.sort_by_key(|&s| (s + seats - button - 1) % seats);
     let share = amount / order.len() as u64;
@@ -130,7 +136,10 @@ pub(crate) fn split(
     order
         .iter()
         .enumerate()
-        .map(|(i, &s)| (s, share + u64::from((i as u64) < extra)))
+        .map(|(i, &seat)| Award {
+            seat,
+            amount: share + u64::from((i as u64) < extra),
+        })
         .collect()
 }
 
@@ -162,11 +171,18 @@ mod test {
         );
     }
 
+    fn awards(a: Vec<Award>) -> Vec<(usize, u64)> {
+        a.into_iter().map(|a| (a.seat, a.amount)).collect()
+    }
+
     #[test]
     fn test_split() {
-        assert_eq!(split(10, &[1, 2], 0, 4), vec![(1, 5), (2, 5)]);
+        assert_eq!(awards(split(10, &[1, 2], 0, 4)), vec![(1, 5), (2, 5)]);
         // Leftover chips go to the winners closest to the left of the button.
-        assert_eq!(split(11, &[0, 2], 1, 4), vec![(2, 6), (0, 5)]);
-        assert_eq!(split(5, &[3, 0, 1], 3, 4), vec![(0, 2), (1, 2), (3, 1)]);
+        assert_eq!(awards(split(11, &[0, 2], 1, 4)), vec![(2, 6), (0, 5)]);
+        assert_eq!(
+            awards(split(5, &[3, 0, 1], 3, 4)),
+            vec![(0, 2), (1, 2), (3, 1)]
+        );
     }
 }
