@@ -10,10 +10,8 @@ fn main() {
     let hands: usize = std::env::args()
         .nth(1)
         .map_or(2_000, |s| s.parse().expect("hands"));
-    for (label, rules) in [
-        ("No-limit Hold'em", TableRules::no_limit_holdem(1, 2)),
-        ("Pot-limit Omaha", TableRules::pot_limit_omaha(1, 2)),
-    ] {
+    // The personalities are tuned for no-limit Hold'em.
+    for (label, rules) in [("No-limit Hold'em", TableRules::no_limit_holdem(1, 2))] {
         println!("{label}");
 
         println!(
