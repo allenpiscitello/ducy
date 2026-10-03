@@ -257,8 +257,17 @@ fn favorite_and_pretty_hands_get_played() {
     let ten_deuce = nlhe(&["Tc 2d", "8s 3h"], "As 7c 9d Jh 3s")
         .observation(0)
         .unwrap();
-    let mut doyle = with(Personality::DoyleBrunchson, |_| {});
-    assert!(matches!(doyle.act(&ten_deuce), Some(Action::Raise(_))));
+    // A test-only style: the balanced default plus "always raise T2".
+    let style = ducy_play::Style {
+        always_play: "T2",
+        samples: 300,
+        ..ducy_play::Style::default()
+    };
+    let mut ten_deuce_fan = PersonalityBot::new("Ten-deuce tester", style, Some(9));
+    assert!(matches!(
+        ten_deuce_fan.act(&ten_deuce),
+        Some(Action::Raise(_))
+    ));
     let mut coffee = with(Personality::OldManCoffee, |_| {});
     assert_eq!(coffee.act(&ten_deuce), Some(Action::Fold));
 
@@ -272,7 +281,7 @@ fn favorite_and_pretty_hands_get_played() {
     )
     .observation(0)
     .unwrap();
-    assert!(matches!(doyle.act(&omaha), Some(Action::Raise(_))));
+    assert!(matches!(ten_deuce_fan.act(&omaha), Some(Action::Raise(_))));
 
     let mut linda = with(Personality::LadyLuckLinda, |_| {});
     let suited_junk = nlhe(&["7s 2s", "8d 3h"], board).observation(0).unwrap();

@@ -78,18 +78,17 @@ preflop):
 | **Old Man Coffee** | Nit: premium hands only, folds to pressure, almost never bluffs. | 8% / 5% | 7% / 5% | 58–64% |
 | **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, bold plays, adapts to each opponent's leaks. | 47% / 36% | 45% / 35% | 26–31% |
 | **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | 59% / 2% | 62% / 2% | 4–7% |
-| **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 19% / 14% | 14% / 9% | 25–42% |
-| **Rampart** | Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero calls, bolder on a heater. | 50% / 36% | 48% / 33% | 4–9% |
-| **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 39% / 22% | 39% / 20% | 22–27% |
-| **Doyle Brunchson** | Old-school aggression, and always raises ten-deuce. | 33% / 27% | 38% / 31% | 16–20% |
-| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 55% / 11% | 54% / 9% | 7–13% |
-| **Johnny Champagne** | Slow-plays monsters and check-raises. | 23% / 17% | 19% / 13% | 28–34% |
-| **Ivey League** | Solid base that reads opponents after 5 hands and exploits them. | 33% / 28% | 27% / 20% | 30–39% |
-| **Uncle Gary** | Loose-passive, and never folds a pair. | 40% / 3% | 43% / 3% | 6–16% |
-| **Captain Overbet** | Every bet is three times the pot (all-in when that's more). | 37% / 30% | 36% / 30% | 25% |
-| **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 34% / 22% | 33% / 20% | 26–38% |
-| **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 40% / 6% | 86% / 3% | 37–46% |
-| **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 26% / 22% | 23% / 18% | 36–38% |
+| **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 20% / 15% | 16% / 11% | 28–34% |
+| **Rampart** | Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero calls, bolder on a heater. | 58% / 41% | 59% / 41% | 9–11% |
+| **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 40% / 21% | 38% / 21% | 29–36% |
+| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 63% / 9% | 67% / 8% | 5% |
+| **Johnny Champagne** | Slow-plays monsters and check-raises. | 23% / 16% | 19% / 13% | 32–35% |
+| **Ivey League** | Solid base that reads opponents after 5 hands and exploits them. | 28% / 22% | 25% / 18% | 37–41% |
+| **Uncle Gary** | Loose-passive, and never folds a pair. | 42% / 3% | 43% / 2% | 8–19% |
+| **Captain Overbet** | Every bet is three times the pot (all-in when that's more). | 35% / 30% | 36% / 31% | 19–25% |
+| **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 31% / 22% | 33% / 24% | 16–19% |
+| **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 34% / 5% | 74% / 2% | 23–28% |
+| **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 25% / 21% | 20% / 17% | 36–38% |
 
 ```rust
 use ducy_play::{Bot, MatchConfig, Personality, TableRules, run_match};

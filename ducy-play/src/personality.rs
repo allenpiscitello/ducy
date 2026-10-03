@@ -169,8 +169,6 @@ pub enum Personality {
     Rampart,
     /// Small ball: plays lots of hands in small pots with small bets.
     DannySmallball,
-    /// Old-school aggression, and always plays ten-deuce.
-    DoyleBrunchson,
     /// Lucky amateur who gets bolder with every pot he wins.
     ChrisMoneybags,
     /// Slow-plays monsters and check-raises.
@@ -191,7 +189,7 @@ pub enum Personality {
 
 impl Personality {
     /// Every personality.
-    pub const ALL: [Personality; 16] = [
+    pub const ALL: [Personality; 15] = [
         Self::DougPoker,
         Self::OldManCoffee,
         Self::MisterCheating,
@@ -199,7 +197,6 @@ impl Personality {
         Self::PhilBigmouth,
         Self::Rampart,
         Self::DannySmallball,
-        Self::DoyleBrunchson,
         Self::ChrisMoneybags,
         Self::JohnnyChampagne,
         Self::IveyLeague,
@@ -220,7 +217,6 @@ impl Personality {
             Self::PhilBigmouth => "Phil Bigmouth",
             Self::Rampart => "Rampart",
             Self::DannySmallball => "Danny Smallball",
-            Self::DoyleBrunchson => "Doyle Brunchson",
             Self::ChrisMoneybags => "Chris Moneybags",
             Self::JohnnyChampagne => "Johnny Champagne",
             Self::IveyLeague => "Ivey League",
@@ -242,7 +238,6 @@ impl Personality {
             Self::PhilBigmouth => "phil_bigmouth",
             Self::Rampart => "rampart",
             Self::DannySmallball => "danny_smallball",
-            Self::DoyleBrunchson => "doyle_brunchson",
             Self::ChrisMoneybags => "chris_moneybags",
             Self::JohnnyChampagne => "johnny_champagne",
             Self::IveyLeague => "ivey_league",
@@ -268,7 +263,6 @@ impl Personality {
                 "Splashy LAG: lots of hands, big bluffs, hero calls, rides his heaters."
             }
             Self::DannySmallball => "Small ball: many hands, small pots, small bets, tricky calls.",
-            Self::DoyleBrunchson => "Old-school aggression, and never folds ten-deuce.",
             Self::ChrisMoneybags => "Lucky amateur who gets braver with every pot he drags.",
             Self::JohnnyChampagne => "Slow-plays the nuts and check-raises you.",
             Self::IveyLeague => "Solid base, reads you in five hands, then exploits you.",
@@ -292,7 +286,6 @@ impl Personality {
             Self::PhilBigmouth => "If it weren't for luck, I'd win every hand.",
             Self::Rampart => "I had to see it.",
             Self::DannySmallball => "I put you on exactly king-jack.",
-            Self::DoyleBrunchson => "Ten-deuce, baby.",
             Self::ChrisMoneybags => "Wait, I won again?",
             Self::JohnnyChampagne => "Check.",
             Self::IveyLeague => "...",
@@ -415,21 +408,6 @@ impl Personality {
                 caution: 0.1,
                 bet_size: 0.33,
                 open_size: 2.2,
-                ..base
-            },
-            Self::DoyleBrunchson => Style {
-                vpip: 0.35,
-                pfr: 0.3,
-                three_bet: 0.12,
-                four_bet: 0.05,
-                value_margin: 0.08,
-                aggression: 0.9,
-                bluff: 0.35,
-                bluff_raise: 0.1,
-                caution: 0.08,
-                bet_size: 0.9,
-                open_size: 3.0,
-                always_play: "T2",
                 ..base
             },
             Self::ChrisMoneybags => Style {
