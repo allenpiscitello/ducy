@@ -58,6 +58,8 @@ pub struct Observation {
 pub struct HandSummary {
     /// The seat this bot played.
     pub seat: usize,
+    /// Game, betting structure, blinds and ante.
+    pub rules: TableRules,
     /// Pots, payouts and net results.
     pub result: HandResult,
     /// Hole cards revealed at showdown, by seat (`None` for seats that folded
@@ -133,6 +135,7 @@ impl Hand {
             .collect();
         Some(HandSummary {
             seat,
+            rules: *self.rules(),
             result,
             shown,
             board: self.board().to_vec(),

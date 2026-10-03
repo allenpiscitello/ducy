@@ -7,7 +7,7 @@ rounds, side pots and the showdown.
 - **Betting:** no-limit or pot-limit for either game
 - **Cards:** shuffled from a seed (reproducible) or supplied exactly, e.g. to replay a hand
 - **History:** every post, action, board card and award is recorded as an `Event`
-- **Bots:** a `Bot` trait, simple built-in bots, personality bots (Doug Poker, Old Man Coffee, Mister Cheating, Milk King), a match runner with stack resets and duplicate deals, and `ProcessBot` for bots written in any language
+- **Bots:** a `Bot` trait, simple built-in bots, 16 personality bots (Doug Poker, Phil Bigmouth, Rampart, Milk King, ...), a match runner with stack resets and duplicate deals, and `ProcessBot` for bots written in any language
 
 ## Example
 
@@ -67,14 +67,28 @@ counted so you can spot broken bots.
 
 ### Personalities
 
-Ready-made characters, each a `PersonalityBot` playing a `Style`:
+Ready-made characters, each a `PersonalityBot` playing a `Style`. Any
+resemblance to real players is purely coincidental. Measured over 1,500
+hands at 4-handed tables (VPIP = hands played, PFR = hands raised
+preflop):
 
-| Personality | Plays | Measured (NLHE / PLO, 4-handed) |
-|---|---|---|
-| **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, defends by pot odds. An approximation, not a solver. | VPIP 28% / 24%, PFR 22% / 18%, folds to 25–29% of bets |
-| **Old Man Coffee** | Nit: premium hands only, folds to pressure, needs a clear edge to call, almost never bluffs. | VPIP 9% / 7%, folds to 52–58% of bets |
-| **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, raises and bluffs often, and adapts to each opponent. Sees only what every player sees. | VPIP 46% / 44%, PFR 35% / 34%, most aggressive |
-| **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | VPIP 61% / 62%, PFR 2%, folds to 4–6% of bets |
+| Personality | Plays | NLHE VPIP / PFR | PLO VPIP / PFR | Folds to bets |
+|---|---|---|---|---|
+| **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, pot-odds defense. An approximation, not a solver. | 28% / 22% | 22% / 16% | 25–31% |
+| **Old Man Coffee** | Nit: premium hands only, folds to pressure, almost never bluffs. | 8% / 5% | 7% / 5% | 58–64% |
+| **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, bold plays, adapts to each opponent's leaks. | 47% / 36% | 45% / 35% | 26–31% |
+| **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | 59% / 2% | 62% / 2% | 4–7% |
+| **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 20% / 15% | 16% / 11% | 28–34% |
+| **Rampart** | Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero calls, bolder on a heater. | 58% / 41% | 59% / 41% | 9–11% |
+| **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 40% / 21% | 38% / 21% | 29–36% |
+| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 63% / 9% | 67% / 8% | 5% |
+| **Johnny Champagne** | Slow-plays monsters and check-raises. | 23% / 16% | 19% / 13% | 32–35% |
+| **Ivey League** | Solid base that reads opponents after 5 hands and exploits them. | 28% / 22% | 25% / 18% | 37–41% |
+| **Uncle Gary** | Loose-passive, and never folds a pair. | 42% / 3% | 43% / 2% | 8–19% |
+| **Captain Overbet** | Every bet is three times the pot (all-in when that's more). | 35% / 30% | 36% / 31% | 19–25% |
+| **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 31% / 22% | 33% / 24% | 16–19% |
+| **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 34% / 5% | 74% / 2% | 23–28% |
+| **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 25% / 21% | 20% / 17% | 36–38% |
 
 ```rust
 use ducy_play::{Bot, MatchConfig, Personality, TableRules, run_match};
@@ -87,7 +101,7 @@ let mut bots: Vec<Box<dyn Bot>> = vec![
 let result = run_match(&config, &mut bots).unwrap();
 ```
 
-`Personality::ALL`, `name()`, `id()` (e.g. `"old_man_coffee"`), `description()`
+`Personality::ALL`, `name()`, `id()` (e.g. `"old_man_coffee"`), `description()`, `catchphrase()`
 and `from_name()` make it easy to list them in an app.
 
 **How they decide.**
@@ -108,10 +122,29 @@ and `from_name()` make it easy to list them in an app.
   `style_for(observation)` shows the adjusted style for a spot. Stats follow
   seats, since observations don't name players.
 
-**Your own personality.** Every trait is a field on `Style`: `vpip`, `pfr`,
-`three_bet`, `defend`, `position_bonus`, `value_margin`, `aggression`,
-`bluff`, `bluff_raise`, `call_factor`, `caution`, `bet_size`, `open_size`,
-`exploit` and `samples`. Start from a preset and change what you like:
+**Your own personality.** Every trait is a field on `Style`;
+`Style::default()` is a solid, balanced regular:
+
+| Trait | Effect |
+|---|---|
+| `vpip`, `pfr`, `three_bet`, `four_bet` | Share of starting hands it plays, opens with a raise, re-raises, and raises again against a re-raise. It calls a re-raise with up to 2.5 × `four_bet`, so a tiny value folds to 4-bets. |
+| `defend` | Share of its playing range that calls a single raise. |
+| `position_bonus` | Plays this much wider on the button and cutoff. |
+| `any_suited`, `any_ace` | Also plays every suited hand or every hand with an ace. |
+| `always_play` | Hands it always raises, in range syntax (`"T2"`, `"AAxx"`); works for Hold'em and Omaha. |
+| `push_fold_bb` | At or below this many big blinds it only shoves or folds preflop (`f64::INFINITY` for every hand). |
+| `open_size` | Opening raise in big blinds. |
+| `value_margin`, `aggression` | How strong a hand must be to bet for value, and how often it then bets rather than checks or calls. |
+| `trap` | Chance it slow-plays a monster: checks to check-raise. |
+| `backwards` | Bets weak hands and checks strong ones (calls still use real strength). |
+| `bluff`, `bluff_raise` | How often it bets or raises with a weak hand. |
+| `call_factor`, `caution`, `pair_call_factor` | How much equity it wants to call: a multiple of the pot odds, extra per pot-sized bet faced, and a multiplier when it holds any pair. |
+| `bet_size` | Bets as a fraction of the pot (above 1 overbets in no-limit). |
+| `tilt`, `heater`, `recovery` | How much big losses or wins loosen it up, and how fast that wears off. `mood()` shows the current level. |
+| `exploit`, `exploit_after` | Whether it adapts to opponents, and after how many hands. |
+| `samples` | Monte Carlo deals per equity estimate. |
+
+Start from a preset or the default and change what you like:
 
 ```rust
 use ducy_play::{Personality, PersonalityBot, Style};

@@ -63,27 +63,35 @@ fn personalities_play_legal_full_matches() {
         TableRules::no_limit_holdem(1, 2),
         TableRules::pot_limit_omaha(1, 2).with_ante(1),
     ] {
-        let config = MatchConfig::new(rules, 15, 4).duplicate();
-        let mut bots: Vec<Box<dyn Bot>> = Personality::ALL
-            .iter()
-            .enumerate()
-            .map(|(i, &p)| Box::new(quick(p, i as u64)) as Box<dyn Bot>)
-            .collect();
-        let result = run_match(&config, &mut bots).unwrap();
-        assert_eq!(result.hands, 60);
-        assert_eq!(result.net.iter().sum::<i64>(), 0);
-        assert_eq!(result.fallbacks, vec![0; 4]);
+        // Tables of 4, so every personality plays.
+        for (t, table) in Personality::ALL.chunks(4).enumerate() {
+            let config = MatchConfig::new(rules, 6, t as u64).duplicate();
+            let mut bots: Vec<Box<dyn Bot>> = table
+                .iter()
+                .enumerate()
+                .map(|(i, &p)| Box::new(quick(p, i as u64)) as Box<dyn Bot>)
+                .collect();
+            let result = run_match(&config, &mut bots).unwrap();
+            assert_eq!(result.hands, 6 * table.len());
+            assert_eq!(result.net.iter().sum::<i64>(), 0);
+            assert_eq!(result.fallbacks, vec![0; table.len()], "{table:?}");
+        }
     }
 }
 
 #[test]
 fn personalities_play_their_styles() {
     let rules = TableRules::no_limit_holdem(1, 2);
-    let mut bots: Vec<PersonalityBot> = Personality::ALL
-        .iter()
-        .enumerate()
-        .map(|(i, &p)| quick(p, 10 + i as u64))
-        .collect();
+    let mut bots: Vec<PersonalityBot> = [
+        Personality::DougPoker,
+        Personality::OldManCoffee,
+        Personality::MisterCheating,
+        Personality::MilkKing,
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, &p)| quick(p, 10 + i as u64))
+    .collect();
     let n = bots.len();
     let mut model = OpponentModel::new();
     for h in 0..400 {
@@ -161,4 +169,246 @@ fn mister_cheating_exploits_opponents() {
     }
     let doug_style = doug.style_for(&spot().observation(0).unwrap());
     assert_eq!(doug_style.bluff, Personality::DougPoker.style().bluff);
+}
+
+// --- Individual traits ---
+
+fn exact(variant: Variant, rules: TableRules, holes: &[&str], board: &str) -> Hand {
+    let holes = holes.iter().map(|h| Deck::parse(h).unwrap()).collect();
+    let board: Vec<ducy::deck::Card> = board
+        .split(' ')
+        .map(|c| ducy::deck::Card::parse(c).unwrap())
+        .collect();
+    let deal = Deal::new(variant, holes, board.try_into().unwrap()).unwrap();
+    Hand::new(rules, &[1000, 1000], 0, deal).unwrap()
+}
+
+fn nlhe(holes: &[&str], board: &str) -> Hand {
+    exact(
+        Variant::Holdem,
+        TableRules::no_limit_holdem(1, 2),
+        holes,
+        board,
+    )
+}
+
+/// A bot with a custom style built from a personality, for testing a trait.
+fn with(p: Personality, f: impl FnOnce(&mut ducy_play::Style)) -> PersonalityBot {
+    let mut style = p.style();
+    style.samples = 300;
+    f(&mut style);
+    PersonalityBot::new(p.name(), style, Some(9))
+}
+
+fn summary_with_net(seat: usize, net: i64) -> ducy_play::HandSummary {
+    let rules = TableRules::no_limit_holdem(1, 2);
+    ducy_play::HandSummary {
+        seat,
+        rules,
+        result: ducy_play::HandResult {
+            pots: Vec::new(),
+            showdown: false,
+            payouts: vec![0, 0],
+            final_stacks: vec![0, 0],
+            net: if seat == 0 {
+                vec![net, -net]
+            } else {
+                vec![-net, net]
+            },
+        },
+        shown: vec![None, None],
+        board: Vec::new(),
+        history: Vec::new(),
+    }
+}
+
+#[test]
+fn tilt_and_heater_loosen_play_then_wear_off() {
+    let obs = nlhe(&["7c 2d", "8s 3h"], "2c 7d 9h Jc 3s")
+        .observation(0)
+        .unwrap();
+
+    let mut phil = Personality::PhilBigmouth.bot(Some(1));
+    let calm = phil.style_for(&obs);
+    phil.hand_over(&summary_with_net(0, -100)); // loses 50 big blinds
+    assert!(phil.mood() > 0.8, "{}", phil.mood());
+    let tilted = phil.style_for(&obs);
+    assert!(tilted.vpip > calm.vpip && tilted.bluff > calm.bluff);
+    assert!(tilted.call_factor < calm.call_factor);
+    for _ in 0..30 {
+        phil.hand_over(&summary_with_net(0, 0));
+    }
+    assert!(phil.mood() < 0.05);
+
+    // Winning doesn't tilt Phil, but it fires up Chris Moneybags.
+    let mut phil = Personality::PhilBigmouth.bot(Some(1));
+    phil.hand_over(&summary_with_net(0, 100));
+    assert_eq!(phil.mood(), 0.0);
+    let mut chris = Personality::ChrisMoneybags.bot(Some(2));
+    chris.hand_over(&summary_with_net(0, 100));
+    assert!(chris.mood() > 0.8);
+    assert!(chris.style_for(&obs).bluff > Personality::ChrisMoneybags.style().bluff);
+}
+
+#[test]
+fn favorite_and_pretty_hands_get_played() {
+    // Seat 0 (button, small blind) acts first heads-up.
+    let board = "2c 7d 9h Jc 3s";
+    let ten_deuce = nlhe(&["Tc 2d", "8s 3h"], "As 7c 9d Jh 3s")
+        .observation(0)
+        .unwrap();
+    // A test-only style: the balanced default plus "always raise T2".
+    let style = ducy_play::Style {
+        always_play: "T2",
+        samples: 300,
+        ..ducy_play::Style::default()
+    };
+    let mut ten_deuce_fan = PersonalityBot::new("Ten-deuce tester", style, Some(9));
+    assert!(matches!(
+        ten_deuce_fan.act(&ten_deuce),
+        Some(Action::Raise(_))
+    ));
+    let mut coffee = with(Personality::OldManCoffee, |_| {});
+    assert_eq!(coffee.act(&ten_deuce), Some(Action::Fold));
+
+    // In Omaha the same "T2" means any hand holding a ten and a deuce.
+    let plo = TableRules::pot_limit_omaha(1, 2);
+    let omaha = exact(
+        plo.variant,
+        plo,
+        &["Tc 2d 7h 4s", "8s 3h 5c 6d"],
+        "As Kc 9d Jh Qs",
+    )
+    .observation(0)
+    .unwrap();
+    assert!(matches!(ten_deuce_fan.act(&omaha), Some(Action::Raise(_))));
+
+    let mut linda = with(Personality::LadyLuckLinda, |_| {});
+    let suited_junk = nlhe(&["7s 2s", "8d 3h"], board).observation(0).unwrap();
+    assert_eq!(linda.act(&suited_junk), Some(Action::Call));
+    let weak_ace = nlhe(&["Ah 3d", "8d 4h"], board).observation(0).unwrap();
+    assert_eq!(linda.act(&weak_ace), Some(Action::Call));
+    let offsuit_junk = nlhe(&["7c 2d", "8d 3h"], board).observation(0).unwrap();
+    assert_eq!(linda.act(&offsuit_junk), Some(Action::Fold));
+}
+
+#[test]
+fn push_fold_style_only_shoves_or_folds_preflop() {
+    let rules = TableRules::no_limit_holdem(1, 2);
+    let mut style = Personality::DougPoker.style();
+    style.samples = 40;
+    style.push_fold_bb = f64::INFINITY;
+    style.vpip = 0.14;
+    let mut steve = PersonalityBot::new("Shover", style, Some(1));
+    let mut doug = quick(Personality::DougPoker, 2);
+    let mut shoves = 0;
+    for h in 0..60 {
+        let deal = Deal::random(rules.variant, 2, Some(h)).unwrap();
+        let mut hand = Hand::new(rules, &[200, 200], h as usize % 2, deal).unwrap();
+        play_hand(&mut hand, &mut [&mut steve as &mut dyn Bot, &mut doug]).unwrap();
+        for event in hand.events() {
+            match *event {
+                ducy_play::Event::Board { .. } => break,
+                ducy_play::Event::Raise {
+                    seat: 0, all_in, ..
+                }
+                | ducy_play::Event::Bet {
+                    seat: 0, all_in, ..
+                } => {
+                    assert!(all_in, "{:?}", hand.events());
+                    shoves += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(shoves > 3, "{shoves}");
+}
+
+/// Plays both seats to the flop with a call and a check.
+fn to_flop(hand: &mut Hand) {
+    hand.act(Action::Call).unwrap();
+    hand.act(Action::Check).unwrap();
+    assert_eq!(hand.street(), Street::Flop);
+}
+
+#[test]
+fn trappers_check_monsters_then_raise() {
+    // Seat 1 (big blind) flops quad aces and acts first after the flop.
+    let mut hand = nlhe(&["Kc Qd", "As Ah"], "Ad Ac 7h 2s 3d");
+    to_flop(&mut hand);
+    let mut johnny = with(Personality::JohnnyChampagne, |s| s.trap = 1.0);
+    let first = hand.observation(1).unwrap();
+    assert_eq!(johnny.act(&first), Some(Action::Check));
+    hand.act(Action::Check).unwrap();
+    hand.act(Action::Bet(4)).unwrap();
+    let facing = hand.observation(1).unwrap();
+    assert!(matches!(johnny.act(&facing), Some(Action::Raise(_))));
+
+    // Without trapping, an aggressive style just bets it.
+    let mut bettor = with(Personality::DougPoker, |s| s.aggression = 1.0);
+    assert!(matches!(bettor.act(&first), Some(Action::Bet(_))));
+}
+
+#[test]
+fn gus_bluffsen_bets_air_and_checks_monsters() {
+    let mut daddy = with(Personality::GusBluffsen, |s| {
+        s.bluff = 0.0;
+        s.aggression = 1.0;
+    });
+    let mut monster = nlhe(&["Kc Qd", "As Ah"], "Ad Ac 7h 2s 3d");
+    to_flop(&mut monster);
+    assert_eq!(
+        daddy.act(&monster.observation(1).unwrap()),
+        Some(Action::Check)
+    );
+
+    let mut air = nlhe(&["As Ah", "7c 2d"], "Kd Qc Jh 9s 8d");
+    to_flop(&mut air);
+    assert!(matches!(
+        daddy.act(&air.observation(1).unwrap()),
+        Some(Action::Bet(_))
+    ));
+}
+
+#[test]
+fn uncle_gary_will_not_fold_a_pair() {
+    // River: seat 1 holds bottom pair and faces a 5x pot overbet.
+    let mut hand = nlhe(&["Ac Ad", "3c 2d"], "Kd Qd Jc 9h 3s");
+    to_flop(&mut hand);
+    for _ in 0..3 {
+        hand.act(Action::Check).unwrap();
+        if hand.street() == Street::River {
+            break;
+        }
+        hand.act(Action::Check).unwrap();
+    }
+    assert_eq!(hand.street(), Street::River);
+    hand.act(Action::Bet(20)).unwrap();
+    let obs = hand.observation(1).unwrap();
+
+    let mut gary = with(Personality::UncleGary, |s| s.caution = 0.0);
+    assert_eq!(gary.act(&obs), Some(Action::Call));
+    let mut not_gary = with(Personality::UncleGary, |s| {
+        s.caution = 0.0;
+        s.pair_call_factor = 1.0;
+        s.call_factor = 1.0;
+    });
+    assert_eq!(not_gary.act(&obs), Some(Action::Fold));
+}
+
+#[test]
+fn tiny_four_bet_range_folds_to_four_bets() {
+    let spot = |holes: &[&str]| {
+        let mut hand = nlhe(holes, "2c 7d 9h Jc 3s");
+        hand.act(Action::Raise(6)).unwrap(); // seat 0 opens
+        hand.act(Action::Raise(18)).unwrap(); // seat 1 re-raises
+        hand.observation(0).unwrap()
+    };
+    let mut wizard = with(Personality::DougPoker, |s| s.four_bet = 0.015);
+    assert_eq!(wizard.act(&spot(&["Ts 9s", "Kd Kh"])), Some(Action::Fold));
+    assert!(matches!(
+        wizard.act(&spot(&["As Ah", "Kd Kh"])),
+        Some(Action::Raise(_))
+    ));
 }
