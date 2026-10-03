@@ -59,3 +59,17 @@ console.log(hand.result());
 
 Betting rules (min raises, short all-ins, pot limit, side pots) are listed in
 the [ducy-play README](../ducy-play/README.md#rules).
+
+## Testing
+
+`tests/smoke.cjs` drives the JS API through a few complete hands. It needs
+only Node (no `npm install`) and loads a Node.js build from `pkg-node/`:
+
+```sh
+cd ducy-play-wasm
+wasm-pack build --target nodejs --out-dir pkg-node
+node tests/smoke.cjs
+```
+
+Node 18+ runs it as is; Node 16 needs
+`node --experimental-wasm-reftypes tests/smoke.cjs`. CI runs it on Node 20.
