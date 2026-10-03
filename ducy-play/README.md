@@ -7,7 +7,7 @@ rounds, side pots and the showdown.
 - **Betting:** no-limit or pot-limit for either game
 - **Cards:** shuffled from a seed (reproducible) or supplied exactly, e.g. to replay a hand
 - **History:** every post, action, board card and award is recorded as an `Event`
-- **Bots:** a `Bot` trait, simple built-in bots, a match runner with stack resets and duplicate deals, and `ProcessBot` for bots written in any language
+- **Bots:** a `Bot` trait, simple built-in bots, personality bots (Doug Poker, Old Man Coffee, Mister Cheating, Milk King), a match runner with stack resets and duplicate deals, and `ProcessBot` for bots written in any language
 
 ## Example
 
@@ -64,6 +64,67 @@ counted so you can spot broken bots.
 | `Raiser` | bets or raises the minimum whenever it can |
 | `RandomBot` | random legal actions |
 | `EquityBot` | estimates equity against random hands; bets about the pot when strong, calls with pot odds, otherwise checks or folds |
+
+### Personalities
+
+Ready-made characters, each a `PersonalityBot` playing a `Style`:
+
+| Personality | Plays | Measured (NLHE / PLO, 4-handed) |
+|---|---|---|
+| **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, defends by pot odds. An approximation, not a solver. | VPIP 28% / 24%, PFR 22% / 18%, folds to 25–29% of bets |
+| **Old Man Coffee** | Nit: premium hands only, folds to pressure, needs a clear edge to call, almost never bluffs. | VPIP 9% / 7%, folds to 52–58% of bets |
+| **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, raises and bluffs often, and adapts to each opponent. Sees only what every player sees. | VPIP 46% / 44%, PFR 35% / 34%, most aggressive |
+| **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | VPIP 61% / 62%, PFR 2%, folds to 4–6% of bets |
+
+```rust
+use ducy_play::{Bot, MatchConfig, Personality, TableRules, run_match};
+
+let config = MatchConfig::new(TableRules::no_limit_holdem(1, 2), 5, 1).duplicate();
+let mut bots: Vec<Box<dyn Bot>> = vec![
+    Box::new(Personality::DougPoker.bot(Some(1))),
+    Box::new(Personality::from_name("milk_king").unwrap().bot(Some(2))),
+];
+let result = run_match(&config, &mut bots).unwrap();
+```
+
+`Personality::ALL`, `name()`, `id()` (e.g. `"old_man_coffee"`), `description()`
+and `from_name()` make it easy to list them in an app.
+
+**How they decide.**
+- *Preflop:* each bot ranks its hand among all starting hands of the game
+  (`strength::preflop_percentile`, by heads-up equity against a random hand)
+  and plays, raises or re-raises the top shares its style allows, wider on the
+  button and cutoff.
+- *After the flop:* it estimates its equity against random hands for the
+  opponents still in (`strength::equity_vs_random`), bets for value above a
+  margin, bluffs weak hands at its bluff rate, and calls when its equity
+  beats the pot odds times its call factor plus some caution about the bet's
+  size.
+- *Exploiting:* with `exploit` on (Mister Cheating), it tracks every seat's
+  VPIP, PFR, fold-to-bet and aggression from hand histories
+  (`stats::OpponentModel`). After 10 hands it bluffs more into players who
+  fold a lot, stops bluffing and bets bigger into calling stations, steals
+  more from tight players, and calls aggressive players down lighter.
+  `style_for(observation)` shows the adjusted style for a spot. Stats follow
+  seats, since observations don't name players.
+
+**Your own personality.** Every trait is a field on `Style`: `vpip`, `pfr`,
+`three_bet`, `defend`, `position_bonus`, `value_margin`, `aggression`,
+`bluff`, `bluff_raise`, `call_factor`, `caution`, `bet_size`, `open_size`,
+`exploit` and `samples`. Start from a preset and change what you like:
+
+```rust
+use ducy_play::{Personality, PersonalityBot, Style};
+
+let maniac = PersonalityBot::new(
+    "Maniac",
+    Style { vpip: 0.8, pfr: 0.6, bluff: 0.7, ..Personality::MisterCheating.style() },
+    Some(5),
+);
+```
+
+`cargo run --release -p ducy-play --example personalities` measures every
+personality's stats and win rate.
 
 ### Running hands and matches
 
