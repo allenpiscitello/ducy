@@ -155,7 +155,8 @@ pub enum Personality {
     /// bluff per two value bets, pot-odds defense. Near-GTO in spirit, not a
     /// solver.
     DougPoker,
-    /// A nit: premium hands only, folds to pressure, almost never bluffs.
+    /// A rock: tight and passive. Plays few hands, limps and check-calls
+    /// rather than raising, folds to pressure, almost never bluffs.
     OldManCoffee,
     /// Loose-aggressive and exploitative: lots of hands, bold plays, and
     /// adjusts to every opponent's leaks.
@@ -171,14 +172,8 @@ pub enum Personality {
     DannySmallball,
     /// Lucky amateur who gets bolder with every pot he wins.
     ChrisMoneybags,
-    /// Slow-plays monsters and check-raises.
-    JohnnyChampagne,
-    /// Elite: solid base, reads opponents fast and exploits them.
-    IveyLeague,
     /// Never folds a pair, to keep you honest.
     UncleGary,
-    /// Every bet is the pot or more.
-    CaptainOverbet,
     /// Fearless bluffer who bets his air and checks his monsters.
     GusBluffsen,
     /// Plays any suited hand and any ace, because they're pretty.
@@ -189,7 +184,7 @@ pub enum Personality {
 
 impl Personality {
     /// Every personality.
-    pub const ALL: [Personality; 15] = [
+    pub const ALL: [Personality; 12] = [
         Self::DougPoker,
         Self::OldManCoffee,
         Self::MisterCheating,
@@ -198,10 +193,7 @@ impl Personality {
         Self::Rampart,
         Self::DannySmallball,
         Self::ChrisMoneybags,
-        Self::JohnnyChampagne,
-        Self::IveyLeague,
         Self::UncleGary,
-        Self::CaptainOverbet,
         Self::GusBluffsen,
         Self::LadyLuckLinda,
         Self::MichaelMiserable,
@@ -218,10 +210,7 @@ impl Personality {
             Self::Rampart => "Rampart",
             Self::DannySmallball => "Danny Smallball",
             Self::ChrisMoneybags => "Chris Moneybags",
-            Self::JohnnyChampagne => "Johnny Champagne",
-            Self::IveyLeague => "Ivey League",
             Self::UncleGary => "Uncle Gary",
-            Self::CaptainOverbet => "Captain Overbet",
             Self::GusBluffsen => "Gus Bluffsen",
             Self::LadyLuckLinda => "Lady Luck Linda",
             Self::MichaelMiserable => "Michael Miserable",
@@ -239,10 +228,7 @@ impl Personality {
             Self::Rampart => "rampart",
             Self::DannySmallball => "danny_smallball",
             Self::ChrisMoneybags => "chris_moneybags",
-            Self::JohnnyChampagne => "johnny_champagne",
-            Self::IveyLeague => "ivey_league",
             Self::UncleGary => "uncle_gary",
-            Self::CaptainOverbet => "captain_overbet",
             Self::GusBluffsen => "gus_bluffsen",
             Self::LadyLuckLinda => "lady_luck_linda",
             Self::MichaelMiserable => "michael_miserable",
@@ -253,7 +239,9 @@ impl Personality {
     pub fn description(self) -> &'static str {
         match self {
             Self::DougPoker => "Balanced, near-GTO: solid ranges, mixed bluffs, pot-odds defense.",
-            Self::OldManCoffee => "Nitty: very few hands, folds easily, rarely bluffs.",
+            Self::OldManCoffee => {
+                "A rock: few hands, limps and check-calls, folds to pressure, never bluffs."
+            }
             Self::MisterCheating => {
                 "Loose-aggressive: lots of hands, bold plays, exploits each opponent's leaks."
             }
@@ -264,10 +252,7 @@ impl Personality {
             }
             Self::DannySmallball => "Small ball: many hands, small pots, small bets, tricky calls.",
             Self::ChrisMoneybags => "Lucky amateur who gets braver with every pot he drags.",
-            Self::JohnnyChampagne => "Slow-plays the nuts and check-raises you.",
-            Self::IveyLeague => "Solid base, reads you in five hands, then exploits you.",
             Self::UncleGary => "Calls with any pair to keep you honest.",
-            Self::CaptainOverbet => "Pot or more, every single time.",
             Self::GusBluffsen => "Fearless bluffer: bets his air, checks his monsters.",
             Self::LadyLuckLinda => "Plays any suited hand and any ace, because they're pretty.",
             Self::MichaelMiserable => {
@@ -287,10 +272,7 @@ impl Personality {
             Self::Rampart => "I had to see it.",
             Self::DannySmallball => "I put you on exactly king-jack.",
             Self::ChrisMoneybags => "Wait, I won again?",
-            Self::JohnnyChampagne => "Check.",
-            Self::IveyLeague => "...",
             Self::UncleGary => "Gotta keep you honest.",
-            Self::CaptainOverbet => "Pot.",
             Self::GusBluffsen => "Every hand is a bluff. Except this one.",
             Self::LadyLuckLinda => "They're suited!",
             Self::MichaelMiserable => "Another day at the office. Ugh.",
@@ -310,17 +292,21 @@ impl Personality {
         match self {
             Self::DougPoker => base,
             Self::OldManCoffee => Style {
-                vpip: 0.10,
-                pfr: 0.08,
-                three_bet: 0.03,
-                four_bet: 0.015,
+                // Tight preflop, but limps most of what he plays.
+                vpip: 0.14,
+                pfr: 0.05,
+                three_bet: 0.02,
+                four_bet: 0.01,
                 defend: 0.5,
                 position_bonus: 0.0,
-                value_margin: 0.2,
-                aggression: 0.6,
-                bluff: 0.02,
+                // Passive after the flop: bets only strong hands, and not
+                // often; mostly checks and calls.
+                value_margin: 0.25,
+                aggression: 0.3,
+                bluff: 0.01,
                 bluff_raise: 0.0,
-                call_factor: 1.5,
+                // Folds to pressure without a clear edge.
+                call_factor: 1.3,
                 caution: 0.3,
                 bet_size: 0.5,
                 open_size: 3.0,
@@ -426,23 +412,6 @@ impl Personality {
                 recovery: 0.1,
                 ..base
             },
-            Self::JohnnyChampagne => Style {
-                vpip: 0.2,
-                pfr: 0.15,
-                aggression: 0.5,
-                trap: 0.75,
-                bluff: 0.1,
-                ..base
-            },
-            Self::IveyLeague => Style {
-                vpip: 0.28,
-                pfr: 0.22,
-                three_bet: 0.09,
-                bluff: 0.3,
-                exploit: true,
-                exploit_after: 5,
-                ..base
-            },
             Self::UncleGary => Style {
                 vpip: 0.5,
                 pfr: 0.05,
@@ -457,17 +426,6 @@ impl Personality {
                 pair_call_factor: 0.15,
                 caution: 0.05,
                 bet_size: 0.5,
-                ..base
-            },
-            Self::CaptainOverbet => Style {
-                vpip: 0.35,
-                pfr: 0.3,
-                three_bet: 0.1,
-                aggression: 0.9,
-                bluff: 0.3,
-                bet_size: 3.0,
-                open_size: 5.0,
-                caution: 0.1,
                 ..base
             },
             Self::GusBluffsen => Style {
