@@ -337,13 +337,13 @@ fn trappers_check_monsters_then_raise() {
     // Seat 1 (big blind) flops quad aces and acts first after the flop.
     let mut hand = nlhe(&["Kc Qd", "As Ah"], "Ad Ac 7h 2s 3d");
     to_flop(&mut hand);
-    let mut johnny = with(Personality::JohnnyChampagne, |s| s.trap = 1.0);
+    let mut trapper = with(Personality::DougPoker, |s| s.trap = 1.0);
     let first = hand.observation(1).unwrap();
-    assert_eq!(johnny.act(&first), Some(Action::Check));
+    assert_eq!(trapper.act(&first), Some(Action::Check));
     hand.act(Action::Check).unwrap();
     hand.act(Action::Bet(4)).unwrap();
     let facing = hand.observation(1).unwrap();
-    assert!(matches!(johnny.act(&facing), Some(Action::Raise(_))));
+    assert!(matches!(trapper.act(&facing), Some(Action::Raise(_))));
 
     // Without trapping, an aggressive style just bets it.
     let mut bettor = with(Personality::DougPoker, |s| s.aggression = 1.0);
