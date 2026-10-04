@@ -177,6 +177,8 @@ struct Message<'a> {
 /// player should act next, and the messages to send to each player.
 #[derive(Serialize)]
 struct HostResult<'a> {
+    /// Goes up whenever anything changes, so the page can drop late results.
+    seq: u64,
     state: ducy_play::TableView,
     #[serde(rename = "botToAct")]
     bot_to_act: bool,
@@ -190,7 +192,7 @@ struct HostResult<'a> {
 /// A table hosted for people on other devices: the host in seat 0, bots in
 /// the other seats, and some of those seats open for people to take. Every
 /// call takes the time in milliseconds (e.g. `Date.now()`) and returns
-/// `{state, botToAct, turnMsLeft, openSeats, out}`, where `out` lists
+/// `{seq, state, botToAct, turnMsLeft, openSeats, out}`, where `out` lists
 /// `{to, data}` messages for the page to send to each player.
 #[wasm_bindgen]
 pub struct MultiTable {
@@ -237,6 +239,7 @@ impl MultiTable {
 
     fn result(&self, out: &[Outgoing], now: u64) -> Result<JsValue, JsError> {
         to_js(&HostResult {
+            seq: self.host.seq(),
             state: self.host.host_view(),
             bot_to_act: self.host.auto_to_act(),
             turn_ms_left: self.host.turn_ms_left(now),
