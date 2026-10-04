@@ -22,6 +22,18 @@
 //!
 //! A fixed set of `flops` is shared across hands so the continuing ranges are
 //! computed once per flop. Everything is seeded and reproducible.
+//!
+//! 3-bet pressure (off unless `threebet` > 0; options and defaults:
+//! threebet=0 threebet_share=0.3 threebet_pot=3 threebet_realize=0.85): the
+//! strongest `threebet` share of the range re-raises preflop. `range.txt`
+//! must then list hands best first. A `threebet_share` of flops are played in
+//! a 3-bet pot: the opponent comes from that narrower range and stays in
+//! whatever the flop (the pot is too big to fold), the hero is out of
+//! position and realizes only `threebet_realize` of its equity, and the flop
+//! counts `threebet_pot` times as much toward `favorable` and `surplus`
+//! because the pot is that much bigger. Hands that are only good in small
+//! pots against weak ranges score worse. An extra `threebet_equity` column
+//! gives the hero's mean (unadjusted) equity in those pots.
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -111,6 +123,10 @@ fn main() {
     let runouts = opt("runouts", 12.0) as usize;
     let favorable = opt("favorable", 0.55);
     let seed = opt("seed", 1.0) as u64;
+    let threebet = opt("threebet", 0.0);
+    let tb_share = opt("threebet_share", 0.3);
+    let tb_pot = opt("threebet_pot", 3.0);
+    let tb_realize = opt("threebet_realize", 0.85);
 
     let hands: Vec<String> = read_lines(&args[2])
         .into_iter()
@@ -119,6 +135,9 @@ fn main() {
         .collect();
     let mut rng = seed;
     let mut range: Vec<Vec<usize>> = read_lines(&args[3]).iter().map(|h| parse_hand(h)).collect();
+    // The 3-bet range is the top of the file, taken before sampling shuffles it.
+    let tb_range: Vec<Vec<usize>> =
+        range[..(range.len() as f64 * threebet).round() as usize].to_vec();
     for i in 0..range.len().min(range_sample) {
         let j = i + (next(&mut rng) % (range.len() - i) as u64) as usize;
         range.swap(i, j);
@@ -169,7 +188,8 @@ fn main() {
         .map(|(i, hand)| {
             let hero = parse_hand(hand);
             let mut rng = seed ^ (i as u64 + 7).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-            let (mut played, mut good, mut surplus, mut eq_total) = (0, 0, 0.0, 0.0);
+            let (mut played, mut good, mut surplus, mut eq_total) = (0, 0.0, 0.0, 0.0);
+            let (mut weight, mut tb_eq, mut tb_n) = (0.0, 0.0, 0);
             let mut tries = 0;
             while played < hand_flops && tries < hand_flops * 4 {
                 tries += 1;
@@ -177,17 +197,27 @@ fn main() {
                 if overlaps(&flops[f], &hero) {
                     continue;
                 }
-                let pool: Vec<usize> = continuing[f]
-                    .iter()
-                    .copied()
-                    .filter(|&o| !overlaps(&range[o], &hero))
-                    .collect();
+                // Draws only when 3-bet pressure is on, so default runs reproduce.
+                let three_bet_pot =
+                    !tb_range.is_empty() && (next(&mut rng) % 1_000_000) as f64 / 1e6 < tb_share;
+                let pool: Vec<&Vec<usize>> = if three_bet_pot {
+                    tb_range
+                        .iter()
+                        .filter(|o| !overlaps(o, &hero) && !overlaps(o, &flops[f]))
+                        .collect()
+                } else {
+                    continuing[f]
+                        .iter()
+                        .map(|&o| &range[o])
+                        .filter(|o| !overlaps(o, &hero))
+                        .collect()
+                };
                 if pool.is_empty() {
                     continue;
                 }
                 let mut eq = 0.0;
                 for _ in 0..opponents {
-                    let opp = &range[pool[(next(&mut rng) % pool.len() as u64) as usize]];
+                    let opp = pool[(next(&mut rng) % pool.len() as u64) as usize];
                     let mut s = OmahaGameState::new(cards as u32);
                     s.add_player(to_deck(&hero)).unwrap();
                     s.add_player(to_deck(opp)).unwrap();
@@ -196,26 +226,45 @@ fn main() {
                         .to_f64()
                         .unwrap_or(0.0);
                 }
-                let e = eq / opponents as f64;
+                let mut e = eq / opponents as f64;
+                let mut w = 1.0;
+                if three_bet_pot {
+                    tb_eq += e;
+                    tb_n += 1;
+                    e *= tb_realize;
+                    w = tb_pot;
+                }
                 played += 1;
+                weight += w;
                 eq_total += e;
-                surplus += (e - 0.5).max(0.0);
+                surplus += w * (e - 0.5).max(0.0);
                 if e >= favorable {
-                    good += 1;
+                    good += w;
                 }
             }
             let p = played.max(1) as f64;
-            format!(
+            let wt = if weight > 0.0 { weight } else { 1.0 };
+            let row = format!(
                 "{hand},{:.4},{:.4},{:.4}",
-                good as f64 / p,
-                surplus / p,
+                good / wt,
+                surplus / wt,
                 eq_total / p
-            )
+            );
+            if tb_range.is_empty() {
+                row
+            } else {
+                format!("{row},{:.4}", tb_eq / tb_n.max(1) as f64)
+            }
         })
         .collect();
 
     let mut out = std::io::BufWriter::new(std::fs::File::create(&args[4]).expect("create output"));
-    writeln!(out, "hand,favorable,surplus,flop_equity").unwrap();
+    let extra = if tb_range.is_empty() {
+        ""
+    } else {
+        ",threebet_equity"
+    };
+    writeln!(out, "hand,favorable,surplus,flop_equity{extra}").unwrap();
     for row in rows {
         writeln!(out, "{row}").unwrap();
     }
