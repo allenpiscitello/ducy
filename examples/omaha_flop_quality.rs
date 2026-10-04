@@ -34,6 +34,18 @@
 //! because the pot is that much bigger. Hands that are only good in small
 //! pots against weak ranges score worse. An extra `threebet_equity` column
 //! gives the hero's mean (unadjusted) equity in those pots.
+//!
+//! Nut potential (off unless `nuts` = 1; option `nut_runouts`=24): on each
+//! flop the hand is played to the river `nut_runouts` times against a random
+//! continuing opponent (from the same pool as above), adding two columns:
+//! - `nut_rate`: share of rivers where the hand holds the nuts: no two unseen
+//!   cards make a better Omaha hand with that board
+//! - `big_loss`: share of rivers where the hand makes a straight or better and
+//!   still loses to the opponent (the second-nut flush, the low end of a
+//!   straight, a smaller full house), the reverse implied odds that matter
+//!   most with more hole cards, where someone usually holds the nuts
+//!
+//! It uses its own random stream, so the other columns don't change.
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -42,6 +54,7 @@ use ducy::deck::Deck;
 use ducy::games::flop_game::FlopGame;
 use ducy::games::omaha::{OmahaGameEvaluation, OmahaGameState};
 use ducy::games::omaha_bomb_pot::{OmahaBombPotGameEvaluation, OmahaBombPotGameState};
+use ducy::ranking::hand_rank::StandardHandRanker;
 use rayon::prelude::*;
 use rust_decimal::prelude::ToPrimitive;
 
@@ -73,6 +86,60 @@ fn to_deck(cards: &[usize]) -> Deck {
         .map(|&c| format!("{}{}", RANKS[c % 13] as char, SUITS[c / 13] as char))
         .collect();
     Deck::parse(&s.join(" ")).unwrap()
+}
+
+/// Deck bits for a card index (rank + 13 * suit, suits in `SUITS` order), as
+/// `Deck::parse` sets them: rank r at bit r + 1 of the suit's 16-bit lane, the
+/// ace also at bit 0, and lanes from clubs (lowest) up to spades.
+fn card_bits(c: usize) -> u64 {
+    let r = c % 13;
+    let lane = if r == 12 {
+        1 << 13 | 1
+    } else {
+        1u64 << (r + 1)
+    };
+    lane << (16 * (3 - c / 13))
+}
+
+/// Best Omaha score for `hole` on a five-card `board`: exactly two hole cards
+/// and three board cards.
+fn omaha_score(hole: &[usize], board: &[usize; 5]) -> u32 {
+    let mut best = 0;
+    for a in 0..hole.len() {
+        for b in a + 1..hole.len() {
+            let two = card_bits(hole[a]) | card_bits(hole[b]);
+            best = best.max(board_best(two, board));
+        }
+    }
+    best
+}
+
+/// Best score for two hole cards (as bits) with three of the five board cards.
+fn board_best(two: u64, board: &[usize; 5]) -> u32 {
+    let mut best = 0;
+    for i in 0..5 {
+        for j in i + 1..5 {
+            for k in j + 1..5 {
+                let d = two | card_bits(board[i]) | card_bits(board[j]) | card_bits(board[k]);
+                best = best.max(StandardHandRanker::score(&Deck::from(d)));
+            }
+        }
+    }
+    best
+}
+
+/// Whether `score` is the nuts on `board`: no two cards outside `seen` make a
+/// better Omaha hand. Stops at the first hand that does.
+fn is_nuts(score: u32, board: &[usize; 5], seen: &[usize]) -> bool {
+    let unseen: Vec<usize> = (0..52).filter(|c| !seen.contains(c)).collect();
+    for a in 0..unseen.len() {
+        for b in a + 1..unseen.len() {
+            if board_best(card_bits(unseen[a]) | card_bits(unseen[b]), board) > score {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 fn deal(n: usize, exclude: &[usize], state: &mut u64) -> Vec<usize> {
@@ -127,6 +194,11 @@ fn main() {
     let tb_share = opt("threebet_share", 0.3);
     let tb_pot = opt("threebet_pot", 3.0);
     let tb_realize = opt("threebet_realize", 0.85);
+    let nuts = opt("nuts", 0.0) > 0.0;
+    let nut_runouts = opt("nut_runouts", 24.0) as usize;
+    // The lowest straight (the wheel): anything scoring at least this is a
+    // straight or better.
+    let straight_min = StandardHandRanker::score(&Deck::parse("Ah 2d 3c 4s 5h").unwrap());
 
     let hands: Vec<String> = read_lines(&args[2])
         .into_iter()
@@ -190,6 +262,8 @@ fn main() {
             let mut rng = seed ^ (i as u64 + 7).wrapping_mul(0x9E37_79B9_7F4A_7C15);
             let (mut played, mut good, mut surplus, mut eq_total) = (0, 0.0, 0.0, 0.0);
             let (mut weight, mut tb_eq, mut tb_n) = (0.0, 0.0, 0);
+            let (mut river_n, mut nut_n, mut big_lost) = (0u64, 0u64, 0u64);
+            let mut nrng = seed ^ (i as u64 + 13).wrapping_mul(0xD1B5_4A32_D192_ED03);
             let mut tries = 0;
             while played < hand_flops && tries < hand_flops * 4 {
                 tries += 1;
@@ -226,6 +300,27 @@ fn main() {
                         .to_f64()
                         .unwrap_or(0.0);
                 }
+                if nuts {
+                    for _ in 0..nut_runouts {
+                        let opp = pool[(next(&mut nrng) % pool.len() as u64) as usize];
+                        let seen: Vec<usize> =
+                            hero.iter().chain(opp).chain(&flops[f]).copied().collect();
+                        let tr = deal(2, &seen, &mut nrng);
+                        let board = [flops[f][0], flops[f][1], flops[f][2], tr[0], tr[1]];
+                        let mine = omaha_score(&hero, &board);
+                        let theirs = omaha_score(opp, &board);
+                        river_n += 1;
+                        if mine >= straight_min && theirs > mine {
+                            big_lost += 1;
+                        }
+                        // Only the hero's cards are known to the hero, so the
+                        // nuts are judged against everything else.
+                        let known: Vec<usize> = hero.iter().chain(&board).copied().collect();
+                        if theirs <= mine && is_nuts(mine, &board, &known) {
+                            nut_n += 1;
+                        }
+                    }
+                }
                 let mut e = eq / opponents as f64;
                 let mut w = 1.0;
                 if three_bet_pot {
@@ -250,10 +345,16 @@ fn main() {
                 surplus / wt,
                 eq_total / p
             );
-            if tb_range.is_empty() {
+            let row = if tb_range.is_empty() {
                 row
             } else {
                 format!("{row},{:.4}", tb_eq / tb_n.max(1) as f64)
+            };
+            if nuts {
+                let r = river_n.max(1) as f64;
+                format!("{row},{:.4},{:.4}", nut_n as f64 / r, big_lost as f64 / r)
+            } else {
+                row
             }
         })
         .collect();
@@ -264,9 +365,62 @@ fn main() {
     } else {
         ",threebet_equity"
     };
-    writeln!(out, "hand,favorable,surplus,flop_equity{extra}").unwrap();
+    let nut_cols = if nuts { ",nut_rate,big_loss" } else { "" };
+    writeln!(out, "hand,favorable,surplus,flop_equity{extra}{nut_cols}").unwrap();
     for row in rows {
         writeln!(out, "{row}").unwrap();
     }
     eprintln!("wrote {} PLO{cards} hands to {}", hands.len(), args[4]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cards(s: &str) -> Vec<usize> {
+        s.split_whitespace().flat_map(parse_hand).collect()
+    }
+
+    #[test]
+    fn card_bits_match_deck_parse() {
+        for c in 0..52 {
+            let name = format!("{}{}", RANKS[c % 13] as char, SUITS[c / 13] as char);
+            assert_eq!(
+                card_bits(c),
+                u64::from(Deck::parse(&name).unwrap()),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn omaha_score_uses_exactly_two_hole_cards() {
+        // Four spades in hand but only one on the board: no flush in Omaha.
+        let hole = cards("As Ks Qs Js");
+        let b = cards("2s 7h 8d 9c 3h");
+        let board = [b[0], b[1], b[2], b[3], b[4]];
+        let flush_min = StandardHandRanker::score(&Deck::parse("2s 3s 4s 5s 7s").unwrap());
+        assert!(omaha_score(&hole, &board) < flush_min);
+    }
+
+    #[test]
+    fn nuts_detection() {
+        let b = cards("Ts 9s 2s 7h 3d");
+        let board = [b[0], b[1], b[2], b[3], b[4]];
+        // The ace-high flush is the nuts (no straight flush or full house possible).
+        let nut = cards("As 4s Kd Qc");
+        let s = omaha_score(&nut, &board);
+        let known: Vec<usize> = nut.iter().chain(&board).copied().collect();
+        assert!(is_nuts(s, &board, &known));
+        // The king-high flush is not: someone can hold the ace.
+        let second = cards("Ks 4s Ad Qc");
+        let s2 = omaha_score(&second, &board);
+        let known2: Vec<usize> = second.iter().chain(&board).copied().collect();
+        assert!(!is_nuts(s2, &board, &known2));
+        // With the A♠ as well, the hand makes the ace-high flush itself: the nuts.
+        let both = cards("Ks 4s As Qc");
+        let s3 = omaha_score(&both, &board);
+        let known3: Vec<usize> = both.iter().chain(&board).copied().collect();
+        assert!(s3 > s2 && is_nuts(s3, &board, &known3));
+    }
 }
