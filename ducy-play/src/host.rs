@@ -180,10 +180,21 @@ impl TableHost {
                 self.welcome_and_update(client_id, seat, now)
             }
             (Command::Join { name }, None) => {
+                let name: String = name.trim().chars().take(MAX_NAME).collect();
+                // Someone who closed their tab comes back on a new connection:
+                // a disconnected player with the same name gets their seat back.
+                if let Some(i) = self.players.iter().position(|p| {
+                    !p.connected
+                        && !p.leaving
+                        && !name.is_empty()
+                        && p.name.eq_ignore_ascii_case(&name)
+                }) {
+                    self.players[i].client_id = client_id.to_string();
+                    return self.handle(client_id, Command::Join { name }, now);
+                }
                 let Some(seat) = (0..self.open.len()).find(|&s| self.seat_free(s)) else {
                     return reject("the table is full");
                 };
-                let name: String = name.trim().chars().take(MAX_NAME).collect();
                 let name = if name.is_empty() {
                     format!("Player {seat}")
                 } else {

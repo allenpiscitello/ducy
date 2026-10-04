@@ -194,7 +194,17 @@ fn disconnect_reconnect_and_leave() {
     assert!(!h.table().seat(1).away);
     assert_eq!(h.table().seat(1).name, "Bob");
 
-    h.handle("c1", Command::Leave, 0);
+    // A new connection with the same name takes over a disconnected seat.
+    h.disconnected("c1", 0);
+    let out = h.handle("c1b", join("bob"), 0);
+    assert!(
+        out.iter()
+            .any(|o| o.to == "c1b" && o.update == Update::Welcome { seat: 1 })
+    );
+    assert!(rejected(&h.handle("c1", act(h.seq(), "check"), 0), "c1"));
+    let c1 = "c1b";
+
+    h.handle(c1, Command::Leave, 0);
     assert!(!h.table().seat(1).human);
     assert_eq!(h.table().seat(1).id, Personality::ALL[0].id());
     assert_eq!(h.open_seats(), 2);
