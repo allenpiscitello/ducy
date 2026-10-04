@@ -71,26 +71,28 @@ Ready-made characters, each a `PersonalityBot` playing a `Style`. Any
 resemblance to real players is purely coincidental. They are tuned for
 **no-limit Hold'em**: they also play Omaha legally, but Omaha needs very
 different hand selection, so their Omaha play isn't tuned yet. Measured over
-1,500 no-limit Hold'em hands at 4-handed tables (VPIP = hands played,
-PFR = hands raised preflop):
+1,500 no-limit Hold'em hands at 6-handed tables (VPIP = hands played,
+PFR = hands raised preflop). Their range traits are written for a full
+9-handed table and widen automatically at shorter tables and in position
+(see *Table size and position* below):
 
 | Personality | Plays | VPIP / PFR | Folds to bets |
 |---|---|---|---|
-| **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, pot-odds defense. An approximation, not a solver. | 28% / 23% | 23% |
-| **Old Man Coffee** | A rock: few hands, limps and check-calls rather than raising, folds to pressure, never bluffs. | 12% / 3% | 49% |
-| **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, bold plays, adapts to each opponent's leaks. | 48% / 37% | 25% |
-| **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | 58% / 2% | 5% |
-| **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 20% / 15% | 28% |
-| **Rampart** | Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero calls, bolder on a heater. | 58% / 41% | 9% |
-| **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 40% / 21% | 29% |
-| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 63% / 9% | 5% |
-| **Uncle Gary** | Loose-passive, and never folds a pair. | 40% / 3% | 15% |
-| **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 36% / 27% | 17% |
-| **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 38% / 6% | 28% |
-| **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 26% / 21% | 34% |
-| **Brad Owned** | Fit-or-fold recreational: sees lots of flops, bets what he hits, gives up when he misses. Always plays pocket jacks. | 31% / 6% | 76% |
-| **Nik Airbag** | Maniac: raises almost everything, 3-bets wide, bluffs huge. | 69% / 50% | 14% |
-| **Bungleman** | Wild card: plays any suited hand, traps one hand and fires huge bluffs the next. | 59% / 36% | 16% |
+| **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, pot-odds defense. An approximation, not a solver. | 23% / 16% | 28% |
+| **Old Man Coffee** | A rock: few hands, limps and check-calls rather than raising, folds to pressure, never bluffs. | 11% / 3% | 58% |
+| **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, bold plays, adapts to each opponent's leaks. | 44% / 33% | 21% |
+| **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | 60% / 3% | 5% |
+| **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 17% / 12% | 35% |
+| **Rampart** | Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero calls, bolder on a heater. | 44% / 34% | 9% |
+| **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 36% / 22% | 27% |
+| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 55% / 7% | 11% |
+| **Uncle Gary** | Loose-passive, and never folds a pair. | 47% / 3% | 18% |
+| **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 33% / 23% | 22% |
+| **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 37% / 6% | 33% |
+| **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 23% / 18% | 31% |
+| **Brad Owned** | Fit-or-fold recreational: sees lots of flops, bets what he hits, gives up when he misses. Always plays pocket jacks. | 33% / 5% | 70% |
+| **Nik Airbag** | Maniac: raises almost everything, 3-bets wide, bluffs huge. | 65% / 46% | 12% |
+| **Bungleman** | Wild card: plays any suited hand, traps one hand and fires huge bluffs the next. | 55% / 29% | 16% |
 
 ```rust
 use ducy_play::{Bot, MatchConfig, Personality, TableRules, run_match};
@@ -109,8 +111,15 @@ and `from_name()` make it easy to list them in an app.
 **How they decide.**
 - *Preflop:* each bot ranks its hand among all starting hands of the game
   (`strength::preflop_percentile`, by heads-up equity against a random hand)
-  and plays, raises or re-raises the top shares its style allows, wider on the
-  button and cutoff.
+  and plays, raises or re-raises the top shares its style allows.
+- *Table size and position:* the style's range shares are baselines for a
+  full 9-handed table. Shorter tables widen them with
+  `scale_for_table(share, players) = 1 - (1 - share)^(9 / players)`, so a 20%
+  9-handed range is about 28% 6-handed and 63% heads-up. Then position scales
+  them by `1 ± position_bonus`: widest on the button, narrowest in the small
+  blind (first to act after the flop), with the big blind treated as middle
+  position. Even the recreational personalities have a little positional
+  awareness (`position_bonus` 0.15).
 - *After the flop:* it estimates its equity against random hands for the
   opponents still in (`strength::equity_vs_random`), bets for value above a
   margin, bluffs weak hands at its bluff rate, and calls when its equity
@@ -129,9 +138,9 @@ and `from_name()` make it easy to list them in an app.
 
 | Trait | Effect |
 |---|---|
-| `vpip`, `pfr`, `three_bet`, `four_bet` | Share of starting hands it plays, opens with a raise, re-raises, and raises again against a re-raise. It calls a re-raise with up to 2.5 × `four_bet`, so a tiny value folds to 4-bets. |
+| `vpip`, `pfr`, `three_bet`, `four_bet` | **9-handed baselines** (see below) for the share of starting hands it plays, opens with a raise, re-raises, and raises again against a re-raise. It calls a re-raise with up to 2.5 × `four_bet`, so a tiny value folds to 4-bets. |
 | `defend` | Share of its playing range that calls a single raise. |
-| `position_bonus` | Plays this much wider on the button and cutoff. |
+| `position_bonus` | How much position moves its ranges: `1 + bonus` times as wide on the button, `1 - bonus` in the small blind, scaled in between (the big blind counts as middle position). |
 | `any_suited`, `any_ace` | Also plays every suited hand or every hand with an ace. |
 | `always_play` | Hands it always raises, in range syntax (`"T2"`, `"AAxx"`); works for Hold'em and Omaha. |
 | `push_fold_bb` | At or below this many big blinds it only shoves or folds preflop (`f64::INFINITY` for every hand). |

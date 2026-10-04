@@ -43,7 +43,7 @@ pub use deal::Deal;
 pub use error::PlayError;
 pub use hand::{Action, Event, Hand, HandResult, LegalActions, MAX_PLAYERS, RaiseRange, Street};
 pub use matchup::{MatchConfig, MatchResult, run_match};
-pub use personality::{Personality, PersonalityBot, Style};
+pub use personality::{Personality, PersonalityBot, Style, position_strength, scale_for_table};
 #[cfg(feature = "process")]
 pub use process::ProcessBot;
 pub use rules::{BettingStructure, TableRules, Variant};

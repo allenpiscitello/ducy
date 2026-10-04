@@ -18,9 +18,16 @@ fn main() {
             "  {:18} {:>6} {:>6} {:>12} {:>11} {:>10}",
             "", "VPIP", "PFR", "fold to bet", "aggression", "bb/100"
         );
-        // Tables of 4 with fixed seats, so per-seat stats are per-bot
-        // stats; win rates come from a duplicate match at the same table.
-        for table in Personality::ALL.chunks(4) {
+        // 6-handed tables with fixed seats, so per-seat stats are per-bot
+        // stats; win rates come from a duplicate match at the same table. The
+        // last table is filled out with earlier personalities, whose rows
+        // aren't printed twice.
+        let all = Personality::ALL;
+        let tables: Vec<Vec<Personality>> = (0..all.len())
+            .step_by(6)
+            .map(|start| (start..start + 6).map(|i| all[i % all.len()]).collect())
+            .collect();
+        for (t, table) in tables.iter().enumerate() {
             let mut bots: Vec<Box<dyn Bot>> = table
                 .iter()
                 .enumerate()
@@ -41,6 +48,9 @@ fn main() {
             let config = MatchConfig::new(rules, hands / n, 99).duplicate();
             let result = run_match(&config, &mut bots).unwrap();
             for (i, p) in table.iter().enumerate() {
+                if t * 6 + i >= all.len() {
+                    break;
+                }
                 let s = model.seat(i);
                 println!(
                     "  {:18} {:>5.0}% {:>5.0}% {:>11.0}% {:>11.2} {:>+10.1}",
