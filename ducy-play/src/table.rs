@@ -8,8 +8,8 @@
 use ducy::deck::{Card, Deck};
 
 use crate::{
-    Action, Bot, Deal, Event, Hand, LegalActions, PersonalityBot, PlayError, Pot, Street,
-    TableRules, fallback_action,
+    Action, BettingStructure, Bot, Deal, Event, Hand, LegalActions, PersonalityBot, PlayError, Pot,
+    Street, TableRules, fallback_action,
 };
 
 /// One seat: who sits there and the bot that plays it when no one does.
@@ -68,7 +68,12 @@ pub struct TableView {
     pub hero: usize,
     /// The viewer's real seat number at the table.
     pub seat: usize,
+    pub small_blind: u64,
     pub big_blind: u64,
+    /// Hole cards per player: 2 for Hold'em, 4 to 6 for Omaha.
+    pub hole_cards: usize,
+    /// Pot-limit betting (otherwise no-limit).
+    pub pot_limit: bool,
     /// The seat whose turn it is, if the hand is still going.
     pub to_act: Option<usize>,
     /// What the viewer may do, when it's their turn.
@@ -314,7 +319,10 @@ impl Table {
                 button: rot(self.button),
                 hero: 0,
                 seat,
+                small_blind: self.rules.small_blind,
                 big_blind: self.rules.big_blind,
+                hole_cards: self.rules.variant.hole_cards(),
+                pot_limit: self.rules.structure == BettingStructure::PotLimit,
                 to_act: None,
                 legal: None,
                 seats: order
@@ -356,7 +364,10 @@ impl Table {
             button: rot(hand.button()),
             hero: 0,
             seat,
+            small_blind: self.rules.small_blind,
             big_blind: self.rules.big_blind,
+            hole_cards: self.rules.variant.hole_cards(),
+            pot_limit: self.rules.structure == BettingStructure::PotLimit,
             to_act: hand.to_act().map(rot),
             legal: hand
                 .legal_actions()
