@@ -248,6 +248,63 @@ fn pot_limit_maximums() {
 }
 
 #[test]
+fn pot_limit_pot_sized_bets_and_raises_are_legal() {
+    let rules = TableRules::pot_limit_omaha(1, 2);
+    let holes = ["As Ah Kd Kh", "Qs Qh Jd Jh", "Ts Th 9d 9h"];
+    let d = deal(rules.variant, &holes, "2c 7d 9c Jc 3s");
+    let mut hand = Hand::new(rules, &[1000, 1000, 1000], 0, d).unwrap();
+    // Everyone limps: pot 6 on the flop.
+    hand.act(Action::Call).unwrap();
+    hand.act(Action::Call).unwrap();
+    hand.act(Action::Check).unwrap();
+    assert_eq!(hand.street(), Street::Flop);
+
+    // Small blind bets the pot.
+    assert_eq!(hand.legal_actions().unwrap().bet.unwrap().max_to, 6);
+    hand.act(Action::Bet(6)).unwrap();
+    // Big blind raises the pot: call 6, then the pot of 18. To 6 + 12 + 6 = 24.
+    assert_eq!(hand.legal_actions().unwrap().raise.unwrap().max_to, 24);
+    assert_eq!(hand.act(Action::Raise(25)), Err(PlayError::IllegalAction));
+    hand.act(Action::Raise(24)).unwrap();
+    // Button re-raises the pot: pot 36, call 24. To 24 + 36 + 24 = 84.
+    assert_eq!(hand.legal_actions().unwrap().raise.unwrap().max_to, 84);
+    hand.act(Action::Raise(84)).unwrap();
+    assert_eq!(hand.pot(), 120);
+}
+
+#[test]
+fn pot_limit_all_in_is_the_max_when_short_of_a_pot_bet() {
+    let rules = TableRules::pot_limit_omaha(1, 2);
+    let holes = ["As Ah Kd Kh", "Qs Qh Jd Jh", "Ts Th 9d 9h"];
+    let d = deal(rules.variant, &holes, "2c 7d 9c Jc 3s");
+    // The small blind has 5 behind after limping, less than the 6 pot.
+    let mut hand = Hand::new(rules, &[1000, 7, 1000], 0, d).unwrap();
+    hand.act(Action::Call).unwrap();
+    hand.act(Action::Call).unwrap();
+    hand.act(Action::Check).unwrap();
+    assert_eq!(
+        hand.legal_actions().unwrap().bet,
+        Some(RaiseRange {
+            min_to: 2,
+            max_to: 5
+        })
+    );
+    hand.act(Action::AllIn).unwrap();
+    assert!(hand.is_all_in(1));
+
+    // Facing a raise bigger than its stack, an all-in raise is the max too.
+    let d = deal(rules.variant, &holes, "2c 7d 9c Jc 3s");
+    let mut hand = Hand::new(rules, &[1000, 1000, 15], 0, d).unwrap();
+    hand.act(Action::Raise(7)).unwrap(); // button raises the pot
+    hand.act(Action::Call).unwrap();
+    // Big blind: a pot raise would be to 7 + 16 + 5 = 28, but it has 15.
+    assert_eq!(hand.legal_actions().unwrap().raise.unwrap().max_to, 15);
+    hand.act(Action::AllIn).unwrap();
+    assert!(hand.is_all_in(2));
+    assert_eq!(hand.current_bet(), 15);
+}
+
+#[test]
 fn omaha_uses_exactly_two_hole_cards() {
     // Four hearts on board; seat 0 holds one heart so has no flush, seat 1 two.
     let rules = TableRules::pot_limit_omaha(1, 2);
