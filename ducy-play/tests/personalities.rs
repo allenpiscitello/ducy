@@ -412,3 +412,54 @@ fn tiny_four_bet_range_folds_to_four_bets() {
         Some(Action::Raise(_))
     ));
 }
+
+#[test]
+fn lodge_regulars_play_their_styles() {
+    let rules = TableRules::no_limit_holdem(1, 2);
+    let lineup = [
+        Personality::BradOwned,
+        Personality::NikAirbag,
+        Personality::Bungleman,
+        Personality::MilkKing,
+    ];
+    let mut bots: Vec<PersonalityBot> = lineup
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| quick(p, 20 + i as u64))
+        .collect();
+    let n = bots.len();
+    let mut model = OpponentModel::new();
+    for h in 0..400 {
+        let deal = Deal::random(rules.variant, n, Some(500 + h)).unwrap();
+        let mut hand = Hand::new(rules, &vec![200; n], h as usize % n, deal).unwrap();
+        let mut seated: Vec<&mut dyn Bot> = bots.iter_mut().map(|b| b as &mut dyn Bot).collect();
+        play_hand(&mut hand, &mut seated).unwrap();
+        model.record(hand.events(), n);
+    }
+    let rate = |count: u32, total: u32| count as f64 / total.max(1) as f64;
+    let [brad, nik, bungle, milk] = [0, 1, 2, 3].map(|s| model.seat(s));
+    let pfr = |s: &ducy_play::stats::SeatStats| rate(s.pfr_hands, s.hands);
+    let vpip = |s: &ducy_play::stats::SeatStats| rate(s.vpip_hands, s.hands);
+
+    // Nik raises the most, Bungleman a lot, Brad rarely.
+    assert!(
+        pfr(&nik) > pfr(&bungle) && pfr(&bungle) > pfr(&brad),
+        "{nik:?} {bungle:?} {brad:?}"
+    );
+    assert!(vpip(&nik) > 0.5, "nik vpip {}", vpip(&nik));
+    // Brad sees plenty of flops but folds when bet into far more than the whale.
+    assert!(vpip(&brad) > 0.2, "brad vpip {}", vpip(&brad));
+    assert!(
+        rate(brad.folds_to_bets, brad.faced_bets) > rate(milk.folds_to_bets, milk.faced_bets) + 0.2,
+        "{brad:?} {milk:?}"
+    );
+}
+
+#[test]
+fn brad_always_plays_jacks() {
+    let jacks = nlhe(&["Jc Jd", "8s 3h"], "2c 7d 9h Qc 3s")
+        .observation(0)
+        .unwrap();
+    let mut brad = with(Personality::BradOwned, |_| {});
+    assert!(matches!(brad.act(&jacks), Some(Action::Raise(_))));
+}

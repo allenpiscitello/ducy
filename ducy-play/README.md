@@ -7,7 +7,7 @@ rounds, side pots and the showdown.
 - **Betting:** no-limit or pot-limit for either game
 - **Cards:** shuffled from a seed (reproducible) or supplied exactly, e.g. to replay a hand
 - **History:** every post, action, board card and award is recorded as an `Event`
-- **Bots:** a `Bot` trait, simple built-in bots, 12 personality bots (Doug Poker, Phil Bigmouth, Rampart, Milk King, ...), a match runner with stack resets and duplicate deals, and `ProcessBot` for bots written in any language
+- **Bots:** a `Bot` trait, simple built-in bots, 15 personality bots (Doug Poker, Phil Bigmouth, Rampart, Milk King, ...), a match runner with stack resets and duplicate deals, and `ProcessBot` for bots written in any language
 
 ## Example
 
@@ -68,24 +68,29 @@ counted so you can spot broken bots.
 ### Personalities
 
 Ready-made characters, each a `PersonalityBot` playing a `Style`. Any
-resemblance to real players is purely coincidental. Measured over 1,500
-hands at 4-handed tables (VPIP = hands played, PFR = hands raised
-preflop):
+resemblance to real players is purely coincidental. They are tuned for
+**no-limit Hold'em**: they also play Omaha legally, but Omaha needs very
+different hand selection, so their Omaha play isn't tuned yet. Measured over
+1,500 no-limit Hold'em hands at 4-handed tables (VPIP = hands played,
+PFR = hands raised preflop):
 
-| Personality | Plays | NLHE VPIP / PFR | PLO VPIP / PFR | Folds to bets |
-|---|---|---|---|---|
-| **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, pot-odds defense. An approximation, not a solver. | 28% / 23% | 22% / 16% | 23–30% |
-| **Old Man Coffee** | A rock: few hands, limps and check-calls rather than raising, folds to pressure, never bluffs. | 12% / 3% | 10% / 2% | 49–50% |
-| **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, bold plays, adapts to each opponent's leaks. | 48% / 37% | 46% / 37% | 25–29% |
-| **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | 58% / 2% | 59% / 2% | 5–7% |
-| **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 20% / 15% | 16% / 11% | 28–34% |
-| **Rampart** | Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero calls, bolder on a heater. | 58% / 41% | 59% / 41% | 9–11% |
-| **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 40% / 21% | 38% / 21% | 29–36% |
-| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 63% / 9% | 67% / 8% | 5% |
-| **Uncle Gary** | Loose-passive, and never folds a pair. | 40% / 3% | 42% / 3% | 9–15% |
-| **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 36% / 27% | 36% / 25% | 17–23% |
-| **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 38% / 6% | 80% / 4% | 28–37% |
-| **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 26% / 21% | 22% / 18% | 34–41% |
+| Personality | Plays | VPIP / PFR | Folds to bets |
+|---|---|---|---|
+| **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, pot-odds defense. An approximation, not a solver. | 28% / 23% | 23% |
+| **Old Man Coffee** | A rock: few hands, limps and check-calls rather than raising, folds to pressure, never bluffs. | 12% / 3% | 49% |
+| **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, bold plays, adapts to each opponent's leaks. | 48% / 37% | 25% |
+| **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | 58% / 2% | 5% |
+| **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 20% / 15% | 28% |
+| **Rampart** | Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero calls, bolder on a heater. | 58% / 41% | 9% |
+| **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 40% / 21% | 29% |
+| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 63% / 9% | 5% |
+| **Uncle Gary** | Loose-passive, and never folds a pair. | 40% / 3% | 15% |
+| **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 36% / 27% | 17% |
+| **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 38% / 6% | 28% |
+| **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 26% / 21% | 34% |
+| **Brad Owned** | Fit-or-fold recreational: sees lots of flops, bets what he hits, gives up when he misses. Always plays pocket jacks. | 31% / 6% | 76% |
+| **Nik Airbag** | Maniac: raises almost everything, 3-bets wide, bluffs huge. | 69% / 50% | 14% |
+| **Bungleman** | Wild card: plays any suited hand, traps one hand and fires huge bluffs the next. | 59% / 36% | 16% |
 
 ```rust
 use ducy_play::{Bot, MatchConfig, Personality, TableRules, run_match};

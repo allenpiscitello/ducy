@@ -180,11 +180,19 @@ pub enum Personality {
     LadyLuckLinda,
     /// Disciplined, relentless grinder who never looks happy about it.
     MichaelMiserable,
+    /// Sees lots of flops and gives up when he misses. Pocket jacks are
+    /// always in play.
+    BradOwned,
+    /// A true maniac: raises almost everything, bluffs huge, never slows down.
+    NikAirbag,
+    /// Wild and unpredictable: plays any suited hand, traps one hand and
+    /// fires huge bluffs the next.
+    Bungleman,
 }
 
 impl Personality {
     /// Every personality.
-    pub const ALL: [Personality; 12] = [
+    pub const ALL: [Personality; 15] = [
         Self::DougPoker,
         Self::OldManCoffee,
         Self::MisterCheating,
@@ -197,6 +205,9 @@ impl Personality {
         Self::GusBluffsen,
         Self::LadyLuckLinda,
         Self::MichaelMiserable,
+        Self::BradOwned,
+        Self::NikAirbag,
+        Self::Bungleman,
     ];
 
     /// Display name, e.g. "Doug Poker".
@@ -214,6 +225,9 @@ impl Personality {
             Self::GusBluffsen => "Gus Bluffsen",
             Self::LadyLuckLinda => "Lady Luck Linda",
             Self::MichaelMiserable => "Michael Miserable",
+            Self::BradOwned => "Brad Owned",
+            Self::NikAirbag => "Nik Airbag",
+            Self::Bungleman => "Bungleman",
         }
     }
 
@@ -232,6 +246,9 @@ impl Personality {
             Self::GusBluffsen => "gus_bluffsen",
             Self::LadyLuckLinda => "lady_luck_linda",
             Self::MichaelMiserable => "michael_miserable",
+            Self::BradOwned => "brad_owned",
+            Self::NikAirbag => "nik_airbag",
+            Self::Bungleman => "bungleman",
         }
     }
 
@@ -258,6 +275,11 @@ impl Personality {
             Self::MichaelMiserable => {
                 "Disciplined, relentless grinder who never looks happy about it."
             }
+            Self::BradOwned => {
+                "Fit-or-fold: lots of flops, gives up when he misses, always plays jacks."
+            }
+            Self::NikAirbag => "Maniac: raises almost everything and bluffs huge.",
+            Self::Bungleman => "Wild card: any suited hand, traps and huge bluffs.",
         }
     }
 
@@ -276,6 +298,9 @@ impl Personality {
             Self::GusBluffsen => "Every hand is a bluff. Except this one.",
             Self::LadyLuckLinda => "They're suited!",
             Self::MichaelMiserable => "Another day at the office. Ugh.",
+            Self::BradOwned => "Jacks again? Of course.",
+            Self::NikAirbag => "Let's gamble.",
+            Self::Bungleman => "I'm feeling it.",
         }
     }
 
@@ -454,6 +479,62 @@ impl Personality {
                 pfr: 0.18,
                 bluff: 0.15,
                 caution: 0.2,
+                ..base
+            },
+            Self::BradOwned => Style {
+                // Loose and passive preflop, sees lots of flops.
+                vpip: 0.38,
+                pfr: 0.08,
+                three_bet: 0.02,
+                four_bet: 0.01,
+                defend: 0.7,
+                position_bonus: 0.2,
+                always_play: "JJ",
+                // Honest after the flop: bets what he hits, rarely bluffs,
+                // and lets go when he misses.
+                value_margin: 0.15,
+                aggression: 0.45,
+                bluff: 0.03,
+                bluff_raise: 0.0,
+                call_factor: 1.0,
+                caution: 0.45,
+                bet_size: 0.55,
+                ..base
+            },
+            Self::NikAirbag => Style {
+                vpip: 0.7,
+                pfr: 0.55,
+                three_bet: 0.3,
+                four_bet: 0.15,
+                defend: 0.85,
+                position_bonus: 0.2,
+                value_margin: 0.05,
+                aggression: 1.0,
+                bluff: 0.6,
+                bluff_raise: 0.3,
+                call_factor: 0.85,
+                caution: 0.02,
+                bet_size: 1.5,
+                open_size: 3.5,
+                ..base
+            },
+            Self::Bungleman => Style {
+                vpip: 0.35,
+                pfr: 0.25,
+                three_bet: 0.15,
+                four_bet: 0.08,
+                defend: 0.8,
+                any_suited: true,
+                value_margin: 0.08,
+                aggression: 0.7,
+                trap: 0.35,
+                bluff: 0.45,
+                bluff_raise: 0.2,
+                call_factor: 0.85,
+                caution: 0.05,
+                bet_size: 1.0,
+                heater: 0.2,
+                tilt: 0.2,
                 ..base
             },
         }
