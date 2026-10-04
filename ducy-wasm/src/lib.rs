@@ -1,5 +1,8 @@
 use wasm_bindgen::prelude::*;
 
+mod play;
+pub use play::BotTable;
+
 use ducy::deck::{Card, Deck};
 use ducy::games::flop_game::FlopGame;
 use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState, HoldemRange};
