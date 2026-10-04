@@ -82,19 +82,22 @@ fn personalities_play_legal_full_matches() {
 #[test]
 fn personalities_play_their_styles() {
     let rules = TableRules::no_limit_holdem(1, 2);
+    // Full 9-handed table, where the style traits are baselines: the four
+    // under test in seats 0-3, Michael Miserable filling the rest.
     let mut bots: Vec<PersonalityBot> = [
         Personality::DougPoker,
         Personality::OldManCoffee,
         Personality::MisterCheating,
         Personality::MilkKing,
     ]
-    .iter()
+    .into_iter()
+    .chain([Personality::MichaelMiserable; 5])
     .enumerate()
-    .map(|(i, &p)| quick(p, 10 + i as u64))
+    .map(|(i, p)| quick(p, 10 + i as u64))
     .collect();
     let n = bots.len();
     let mut model = OpponentModel::new();
-    for h in 0..400 {
+    for h in 0..300 {
         let deal = Deal::random(rules.variant, n, Some(h)).unwrap();
         let mut hand = Hand::new(rules, &vec![200; n], h as usize % n, deal).unwrap();
         let mut seated: Vec<&mut dyn Bot> = bots.iter_mut().map(|b| b as &mut dyn Bot).collect();
@@ -109,7 +112,11 @@ fn personalities_play_their_styles() {
     // Hands played: nit < balanced < loose-aggressive, and Milk King plays most.
     assert!(vpip(&coffee) < 0.15, "coffee vpip {}", vpip(&coffee));
     assert!(vpip(&coffee) < vpip(&doug) && vpip(&doug) < vpip(&cheating));
-    assert!(vpip(&milk) > 0.5, "milk vpip {}", vpip(&milk));
+    assert!(
+        vpip(&milk) > 0.4 && vpip(&milk) > vpip(&doug),
+        "milk vpip {}",
+        vpip(&milk)
+    );
     // Raising: Mister Cheating most, Milk King almost never.
     assert!(pfr(&cheating) > pfr(&doug) && pfr(&doug) > pfr(&milk));
     assert!(pfr(&milk) < 0.06, "milk pfr {}", pfr(&milk));
@@ -462,4 +469,100 @@ fn brad_always_plays_jacks() {
         .unwrap();
     let mut brad = with(Personality::BradOwned, |_| {});
     assert!(matches!(brad.act(&jacks), Some(Action::Raise(_))));
+}
+
+// --- Table size and position ---
+
+#[test]
+fn ranges_scale_with_table_size_and_position() {
+    use ducy_play::{position_strength, scale_for_table};
+    // 9-handed is the baseline.
+    assert!((scale_for_table(0.2, 9) - 0.2).abs() < 1e-12);
+    assert!((scale_for_table(0.2, 6) - 0.284).abs() < 0.001);
+    assert!((scale_for_table(0.2, 2) - 0.634).abs() < 0.001);
+    assert!(scale_for_table(0.2, 10) < 0.2);
+    assert_eq!(scale_for_table(0.9, 2), 0.95);
+    assert_eq!(scale_for_table(0.0, 6), 0.0);
+
+    // 6-handed, button at seat 0: small blind 1, big blind 2, then 3, 4, 5.
+    assert_eq!(position_strength(0, 0, 6), 1.0);
+    assert_eq!(position_strength(1, 0, 6), 0.0);
+    assert_eq!(position_strength(2, 0, 6), 0.5);
+    assert!(position_strength(3, 0, 6) < position_strength(5, 0, 6));
+    // Heads-up the button is the small blind and acts last after the flop.
+    assert_eq!(position_strength(0, 0, 2), 1.0);
+    assert_eq!(position_strength(1, 0, 2), 0.5);
+}
+
+/// For `hands` hands of `n` copies of Doug Poker: overall VPIP, and per
+/// position (0 = small blind ... n - 1 = button) how often it raised first in
+/// when everyone before it had folded.
+fn doug_table(n: usize, hands: u64) -> (f64, Vec<f64>) {
+    let rules = TableRules::no_limit_holdem(1, 2);
+    // Enough samples that hand rankings are steady near the range cutoffs.
+    let mut style = Personality::DougPoker.style();
+    style.samples = 200;
+    let mut bots: Vec<PersonalityBot> = (0..n)
+        .map(|i| PersonalityBot::new("Doug", style, Some(50 + i as u64)))
+        .collect();
+    let mut played = 0u32;
+    // (raised first in, had the chance) per position.
+    let mut first_in = vec![(0u32, 0u32); n];
+    for h in 0..hands {
+        let deal = Deal::random(rules.variant, n, Some(h)).unwrap();
+        let button = h as usize % n;
+        let mut hand = Hand::new(rules, &vec![200; n], button, deal).unwrap();
+        let mut seated: Vec<&mut dyn Bot> = bots.iter_mut().map(|b| b as &mut dyn Bot).collect();
+        play_hand(&mut hand, &mut seated).unwrap();
+        let mut voluntary = vec![false; n];
+        let mut opened = false;
+        let mut acted = vec![false; n];
+        for event in hand.events() {
+            use ducy_play::Event::*;
+            let (seat, raise) = match *event {
+                Board { .. } => break,
+                Call { seat, .. } => (seat, false),
+                Raise { seat, .. } => (seat, true),
+                Fold { seat } | Check { seat } => (seat, false),
+                _ => continue,
+            };
+            if !acted[seat] && !opened {
+                // Everyone before folded: a raise-first-in chance.
+                let position = (seat + n - button - 1) % n;
+                first_in[position].1 += 1;
+                first_in[position].0 += u32::from(raise);
+            }
+            acted[seat] = true;
+            if matches!(*event, Call { .. } | Raise { .. }) {
+                voluntary[seat] = true;
+                opened = true;
+            }
+        }
+        played += voluntary.iter().filter(|&&v| v).count() as u32;
+    }
+    let rates = first_in
+        .iter()
+        .map(|&(r, t)| r as f64 / t.max(1) as f64)
+        .collect();
+    (played as f64 / (hands * n as u64) as f64, rates)
+}
+
+#[test]
+fn bots_loosen_at_short_tables() {
+    let (nine, _) = doug_table(9, 150);
+    let (six, _) = doug_table(6, 150);
+    let (two, _) = doug_table(2, 300);
+    assert!(nine < six && six < two, "9: {nine}, 6: {six}, 2: {two}");
+    // A solid regular plays roughly 15% of hands at a full table.
+    assert!((0.1..0.25).contains(&nine), "{nine}");
+}
+
+#[test]
+fn bots_play_wider_in_position() {
+    // Raise-first-in rate by position, 6-handed: [SB, BB, UTG, HJ, CO, BTN].
+    let (_, rfi) = doug_table(6, 600);
+    let (small_blind, early, cutoff, button) = (rfi[0], rfi[2], rfi[4], rfi[5]);
+    assert!(button > early * 1.2, "{rfi:?}");
+    assert!(cutoff > early, "{rfi:?}");
+    assert!(button > small_blind * 1.5, "{rfi:?}");
 }

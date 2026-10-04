@@ -28,8 +28,13 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Style {
     // --- Preflop ---
-    /// Share of starting hands it plays (VPIP): the top `vpip` of hands,
-    /// e.g. 0.25 for the best quarter.
+    //
+    // `vpip`, `pfr`, `three_bet` and `four_bet` are baselines for a full
+    // 9-handed table in middle position. At shorter tables they widen (see
+    // `scale_for_table`), and they widen in position and narrow out of
+    // position by `position_bonus`.
+    /// Share of starting hands it plays (VPIP) 9-handed: the top `vpip` of
+    /// hands, e.g. 0.25 for the best quarter.
     pub vpip: f64,
     /// Share of starting hands it opens with a raise (PFR), from the top.
     /// Hands inside `vpip` but outside `pfr` limp or call.
@@ -42,8 +47,12 @@ pub struct Style {
     pub four_bet: f64,
     /// Share of its `vpip` range that calls a single raise.
     pub defend: f64,
-    /// Widens `vpip`, `pfr` and `three_bet` by this fraction on the button
-    /// and cutoff, e.g. 0.4 plays 40% more hands in late position.
+    /// How much position changes its ranges: on the button it plays
+    /// `1 + position_bonus` times its range, first to act after the flop
+    /// (small blind) `1 - position_bonus` times, scaling in between. The big
+    /// blind counts as middle position, since it closes the preflop action
+    /// at a discount. 0.4 means 40% wider on the button, 40% narrower in the
+    /// small blind.
     pub position_bonus: f64,
     /// Plays any hand with two cards of the same suit, whatever its rank.
     pub any_suited: bool,
@@ -116,10 +125,10 @@ impl Default for Style {
     /// 2/3-pot bets with some bluffs, calls by pot odds.
     fn default() -> Self {
         Self {
-            vpip: 0.24,
-            pfr: 0.19,
-            three_bet: 0.07,
-            four_bet: 0.03,
+            vpip: 0.17,
+            pfr: 0.13,
+            three_bet: 0.05,
+            four_bet: 0.02,
             defend: 0.6,
             position_bonus: 0.4,
             any_suited: false,
@@ -318,12 +327,12 @@ impl Personality {
             Self::DougPoker => base,
             Self::OldManCoffee => Style {
                 // Tight preflop, but limps most of what he plays.
-                vpip: 0.14,
-                pfr: 0.05,
-                three_bet: 0.02,
-                four_bet: 0.01,
+                vpip: 0.1,
+                pfr: 0.03,
+                three_bet: 0.013,
+                four_bet: 0.007,
                 defend: 0.5,
-                position_bonus: 0.0,
+                position_bonus: 0.15,
                 // Passive after the flop: bets only strong hands, and not
                 // often; mostly checks and calls.
                 value_margin: 0.25,
@@ -338,10 +347,10 @@ impl Personality {
                 ..base
             },
             Self::MisterCheating => Style {
-                vpip: 0.45,
-                pfr: 0.35,
-                three_bet: 0.15,
-                four_bet: 0.06,
+                vpip: 0.33,
+                pfr: 0.25,
+                three_bet: 0.1,
+                four_bet: 0.04,
                 defend: 0.7,
                 position_bonus: 0.3,
                 value_margin: 0.08,
@@ -356,12 +365,12 @@ impl Personality {
                 ..base
             },
             Self::MilkKing => Style {
-                vpip: 0.7,
-                pfr: 0.04,
-                three_bet: 0.01,
-                four_bet: 0.005,
+                vpip: 0.55,
+                pfr: 0.03,
+                three_bet: 0.007,
+                four_bet: 0.003,
                 defend: 0.9,
-                position_bonus: 0.0,
+                position_bonus: 0.15,
                 value_margin: 0.25,
                 aggression: 0.2,
                 bluff: 0.02,
@@ -373,9 +382,9 @@ impl Personality {
                 ..base
             },
             Self::PhilBigmouth => Style {
-                vpip: 0.15,
-                pfr: 0.12,
-                three_bet: 0.04,
+                vpip: 0.1,
+                pfr: 0.08,
+                three_bet: 0.03,
                 position_bonus: 0.2,
                 bluff: 0.1,
                 call_factor: 1.2,
@@ -385,10 +394,10 @@ impl Personality {
                 ..base
             },
             Self::Rampart => Style {
-                vpip: 0.38,
-                pfr: 0.28,
-                three_bet: 0.18,
-                four_bet: 0.12,
+                vpip: 0.27,
+                pfr: 0.2,
+                three_bet: 0.12,
+                four_bet: 0.08,
                 defend: 0.8,
                 value_margin: 0.06,
                 aggression: 0.95,
@@ -406,9 +415,9 @@ impl Personality {
                 ..base
             },
             Self::DannySmallball => Style {
-                vpip: 0.35,
-                pfr: 0.25,
-                three_bet: 0.05,
+                vpip: 0.25,
+                pfr: 0.17,
+                three_bet: 0.03,
                 defend: 0.85,
                 position_bonus: 0.5,
                 value_margin: 0.1,
@@ -422,11 +431,11 @@ impl Personality {
                 ..base
             },
             Self::ChrisMoneybags => Style {
-                vpip: 0.45,
-                pfr: 0.08,
-                three_bet: 0.02,
+                vpip: 0.33,
+                pfr: 0.05,
+                three_bet: 0.013,
                 defend: 0.85,
-                position_bonus: 0.0,
+                position_bonus: 0.15,
                 value_margin: 0.15,
                 aggression: 0.4,
                 bluff: 0.05,
@@ -438,12 +447,12 @@ impl Personality {
                 ..base
             },
             Self::UncleGary => Style {
-                vpip: 0.5,
-                pfr: 0.05,
-                three_bet: 0.01,
-                four_bet: 0.005,
+                vpip: 0.37,
+                pfr: 0.03,
+                three_bet: 0.007,
+                four_bet: 0.003,
                 defend: 0.9,
-                position_bonus: 0.0,
+                position_bonus: 0.15,
                 value_margin: 0.2,
                 aggression: 0.3,
                 bluff: 0.03,
@@ -454,8 +463,8 @@ impl Personality {
                 ..base
             },
             Self::GusBluffsen => Style {
-                vpip: 0.35,
-                pfr: 0.25,
+                vpip: 0.25,
+                pfr: 0.17,
                 backwards: true,
                 aggression: 0.9,
                 bluff: 0.15,
@@ -464,29 +473,29 @@ impl Personality {
                 ..base
             },
             Self::LadyLuckLinda => Style {
-                vpip: 0.12,
-                pfr: 0.06,
+                vpip: 0.08,
+                pfr: 0.04,
                 any_suited: true,
                 any_ace: true,
-                position_bonus: 0.0,
+                position_bonus: 0.15,
                 aggression: 0.5,
                 bluff: 0.1,
                 call_factor: 0.9,
                 ..base
             },
             Self::MichaelMiserable => Style {
-                vpip: 0.22,
-                pfr: 0.18,
+                vpip: 0.15,
+                pfr: 0.12,
                 bluff: 0.15,
                 caution: 0.2,
                 ..base
             },
             Self::BradOwned => Style {
                 // Loose and passive preflop, sees lots of flops.
-                vpip: 0.38,
-                pfr: 0.08,
-                three_bet: 0.02,
-                four_bet: 0.01,
+                vpip: 0.27,
+                pfr: 0.05,
+                three_bet: 0.013,
+                four_bet: 0.007,
                 defend: 0.7,
                 position_bonus: 0.2,
                 always_play: "JJ",
@@ -502,10 +511,10 @@ impl Personality {
                 ..base
             },
             Self::NikAirbag => Style {
-                vpip: 0.7,
-                pfr: 0.55,
-                three_bet: 0.3,
-                four_bet: 0.15,
+                vpip: 0.55,
+                pfr: 0.41,
+                three_bet: 0.21,
+                four_bet: 0.1,
                 defend: 0.85,
                 position_bonus: 0.2,
                 value_margin: 0.05,
@@ -519,10 +528,10 @@ impl Personality {
                 ..base
             },
             Self::Bungleman => Style {
-                vpip: 0.35,
-                pfr: 0.25,
-                three_bet: 0.15,
-                four_bet: 0.08,
+                vpip: 0.25,
+                pfr: 0.17,
+                three_bet: 0.1,
+                four_bet: 0.05,
                 defend: 0.8,
                 any_suited: true,
                 value_margin: 0.08,
@@ -544,6 +553,48 @@ impl Personality {
     pub fn bot(self, seed: Option<u64>) -> PersonalityBot {
         PersonalityBot::new(self.name(), self.style(), seed)
     }
+}
+
+/// Table size the preflop range traits ([`Style::vpip`] and friends) are
+/// written for.
+pub const BASELINE_PLAYERS: usize = 9;
+
+/// The widest a preflop range gets, however short the table.
+const MAX_RANGE: f64 = 0.95;
+
+/// Widens a range share written for [`BASELINE_PLAYERS`] to a table of
+/// `players`: `1 - (1 - share)^(9 / players)`, at most 0.95.
+///
+/// A hand worth playing against eight opponents is worth playing against
+/// fewer, and fewer opponents means fewer strong hands to run into, so
+/// ranges grow as the table shrinks: a 20% 9-handed range is about 28%
+/// 6-handed and 63% heads-up. Tables larger than 9 tighten the same way.
+pub fn scale_for_table(share: f64, players: usize) -> f64 {
+    if players == 0 || share <= 0.0 {
+        return 0.0;
+    }
+    let share = share.min(1.0);
+    (1.0 - (1.0 - share).powf(BASELINE_PLAYERS as f64 / players as f64)).min(MAX_RANGE)
+}
+
+/// How good `seat`'s position is, from 0 (first to act after the flop, the
+/// small blind) to 1 (the button, last to act). The big blind counts as 0.5:
+/// it is out of position, but closes the preflop action at a discount.
+pub fn position_strength(seat: usize, button: usize, players: usize) -> f64 {
+    if players < 2 {
+        return 0.5;
+    }
+    let big_blind = if players == 2 {
+        (button + 1) % 2
+    } else {
+        (button + 2) % players
+    };
+    if seat == big_blind {
+        return 0.5;
+    }
+    // Order of action after the flop: left of the button first, button last.
+    let order = (seat + players - button - 1) % players;
+    order as f64 / (players - 1) as f64
 }
 
 /// Hands from [`Style::always_play`], parsed for one variant.
@@ -710,17 +761,13 @@ impl PersonalityBot {
     fn preflop(&mut self, obs: &Observation, style: &Style) -> Action {
         let legal = &obs.legal;
         let n = obs.seats.len();
-        let late = obs.seat == obs.button || (n >= 4 && (obs.seat + 1) % n == obs.button);
-        let widen = if late {
-            1.0 + style.position_bonus
-        } else {
-            1.0
-        };
-        let (vpip, pfr, three_bet) = (
-            (style.vpip * widen).min(1.0),
-            (style.pfr * widen).min(1.0),
-            (style.three_bet * widen).min(1.0),
-        );
+        let position =
+            1.0 + style.position_bonus * (2.0 * position_strength(obs.seat, obs.button, n) - 1.0);
+        let range = |share: f64| (scale_for_table(share, n) * position).clamp(0.0, MAX_RANGE);
+        let vpip = range(style.vpip);
+        let pfr = range(style.pfr).min(vpip);
+        let three_bet = range(style.three_bet).min(vpip);
+        let four_bet = range(style.four_bet).min(vpip);
 
         // Share of starting hands better than this one, pulled up for hands
         // it plays regardless of rank.
@@ -731,15 +778,15 @@ impl PersonalityBot {
                 style.samples,
                 &mut self.rng,
             );
-        if (style.any_suited && has_suited(obs.hole_cards))
-            || (style.any_ace && has_ace(obs.hole_cards))
-        {
-            // Played whatever happens before it: call raises with them too.
-            top = top.min(vpip * style.defend);
-        }
-        if self.is_favorite(obs) {
+        // Hands played only because they're suited or hold an ace: always
+        // just call (or check), whatever happened before.
+        let pretty = (style.any_suited && has_suited(obs.hole_cards))
+            || (style.any_ace && has_ace(obs.hole_cards));
+        let favorite = self.is_favorite(obs);
+        if favorite {
             top = top.min(pfr);
         }
+        let only_pretty = pretty && !favorite && top > vpip;
 
         let big_blind = obs.rules.big_blind;
         let raises = obs
@@ -760,6 +807,10 @@ impl PersonalityBot {
             } else {
                 check_or_fold(legal)
             };
+        }
+
+        if only_pretty {
+            return passive(legal);
         }
 
         match raises {
@@ -785,13 +836,13 @@ impl PersonalityBot {
                 }
             }
             _ => {
-                if top <= style.four_bet {
+                if top <= four_bet {
                     let to = (obs.current_bet as f64 * 2.5).round() as u64;
                     if let Some(action) = raise_to(legal, to) {
                         return action;
                     }
                 }
-                if top <= style.four_bet * 2.5 {
+                if top <= four_bet * 2.5 {
                     return passive(legal);
                 }
             }
