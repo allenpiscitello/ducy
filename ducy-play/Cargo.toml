@@ -32,3 +32,7 @@ required-features = ["process"]
 [[example]]
 name = "bot_match"
 required-features = ["process"]
+
+[[bin]]
+name = "ducy-arena"
+required-features = ["process"]

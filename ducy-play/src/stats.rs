@@ -27,6 +27,17 @@ pub struct SeatStats {
 }
 
 impl SeatStats {
+    /// Adds another set of counts to these.
+    pub fn add(&mut self, other: &SeatStats) {
+        self.hands += other.hands;
+        self.vpip_hands += other.vpip_hands;
+        self.pfr_hands += other.pfr_hands;
+        self.faced_bets += other.faced_bets;
+        self.folds_to_bets += other.folds_to_bets;
+        self.aggressive += other.aggressive;
+        self.calls += other.calls;
+    }
+
     /// Share of hands played voluntarily, with a light prior of 25% so a few
     /// hands don't swing it to an extreme.
     pub fn vpip(&self) -> f64 {

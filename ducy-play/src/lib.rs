@@ -24,6 +24,7 @@
 #[cfg(doctest)]
 pub struct ReadmeDoctests;
 
+pub mod arena;
 mod bot;
 pub mod bots;
 mod deal;
@@ -38,6 +39,7 @@ mod showdown;
 pub mod stats;
 pub mod strength;
 
+pub use arena::{ArenaConfig, ArenaProgress, ArenaResult, PlayerResult, run_arena};
 pub use bot::{Bot, HandOutcome, HandSummary, Observation, SeatView, fallback_action, play_hand};
 pub use deal::Deal;
 pub use error::PlayError;
