@@ -1,4 +1,5 @@
-//! A table where one person plays Hold'em against ducy-play's personality bots.
+//! A table where one person plays no-limit Hold'em or pot-limit Omaha (PLO4,
+//! PLO5, PLO6) against ducy-play's personality bots.
 //!
 //! The page drives it one action at a time: [`BotTable::advance`] makes the
 //! next bot act, and [`BotTable::act`] applies the person's action, so the UI
@@ -9,7 +10,7 @@
 use ducy::deck::{Card, Deck};
 use ducy_play::{
     Action, Bot, Deal, Event, Hand, LegalActions, Personality, PersonalityBot, Pot, Street,
-    TableRules,
+    TableRules, Variant,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -87,7 +88,7 @@ struct TableState {
     pots: Vec<Pot>,
 }
 
-/// A Hold'em table: the person in seat 0 and up to eight bots.
+/// A Hold'em or Omaha table: the person in seat 0 and up to eight bots.
 #[wasm_bindgen]
 pub struct BotTable {
     rules: TableRules,
@@ -106,7 +107,9 @@ pub struct BotTable {
 impl BotTable {
     /// `bots` are personality ids (see `botPersonalities`), one per bot seat;
     /// the person sits in seat 0. Everyone starts with `buy_in` chips, and a
-    /// player who goes broke is topped back up before the next hand.
+    /// player who goes broke is topped back up before the next hand. `game`
+    /// is "nlhe" (no-limit Hold'em, the default) or "plo4", "plo5", "plo6"
+    /// (pot-limit Omaha with that many hole cards).
     #[wasm_bindgen(constructor)]
     pub fn new(
         bots: Vec<String>,
@@ -114,7 +117,16 @@ impl BotTable {
         small_blind: u64,
         big_blind: u64,
         seed: u64,
+        game: Option<String>,
     ) -> Result<BotTable, JsError> {
+        let rules = match game.as_deref().unwrap_or("nlhe") {
+            "nlhe" => TableRules::no_limit_holdem(small_blind, big_blind),
+            g @ ("plo4" | "plo5" | "plo6") => TableRules::pot_limit_omaha(small_blind, big_blind)
+                .with_variant(Variant::Omaha {
+                    hole_cards: g[3..].parse().unwrap_or(4),
+                }),
+            g => return Err(JsError::new(&format!("unknown game {g}"))),
+        };
         if bots.is_empty() || bots.len() + 1 > ducy_play::MAX_PLAYERS {
             return Err(JsError::new("between 1 and 8 bots"));
         }
@@ -133,7 +145,7 @@ impl BotTable {
         }
         let n = names.len();
         Ok(BotTable {
-            rules: TableRules::no_limit_holdem(small_blind, big_blind),
+            rules,
             names,
             ids,
             bots: seats,
