@@ -3,6 +3,7 @@
 
 pub mod abstraction;
 pub mod blueprint;
+pub mod bot;
 pub mod cards;
 pub mod chart;
 pub mod equity;

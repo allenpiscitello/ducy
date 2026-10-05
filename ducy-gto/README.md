@@ -10,7 +10,7 @@ expectation to any opponent. How far a strategy is from one is its
 **exploitability**: what a best-responding opponent wins against it. This
 crate finds equilibria and measures exploitability exactly.
 
-## What's here (steps 1–5 of 8)
+## What's here (steps 1–6 of 8)
 
 - `Game`: the interface a game implements (chance, players, payoffs, information sets).
 - `Cfr`: vanilla CFR and CFR+ over the whole game tree, for games small
@@ -164,6 +164,31 @@ by current hand strength instead of a precomputed table, so it needs no
 build. A 10 big blind shove/limp/fold game trains in seconds on it and learns
 sensible ranges (`tests/blueprint.rs`).
 
+## Playing the blueprint: `GtoBot`
+
+`holdem::bot::GtoBot` is a ducy-play `Bot`, so it sits at any table, in
+`run_match`, or anywhere else a bot goes.
+
+- **Following the hand:** at each decision it replays the hand's betting on the blueprint's tree.
+  - Its own actions are on the tree already.
+  - The opponent's off-menu bets are mapped to the neighboring menu sizes with
+    the randomized **pseudo-harmonic mapping** (Ganzfried and Sandholm). Each
+    mapping is drawn once per hand and kept.
+- **Choosing an action:** it looks up its bucket, **samples** the blueprint's
+  mixed strategy, and turns the chosen size back into chips as the same
+  fraction of the real pot, clamped to the legal range. Sizes are pot
+  fractions, so it works at any blinds; stacks other than the trained depth
+  clamp to what's legal.
+- **When the tree is all-in early:** a large real bet can be mapped to
+  all-in while the real hand still has chips behind. The tree's plan is
+  then to get every chip in, so the bot does.
+- **More than two players, or a hand it can't follow:** a pot-odds fallback
+  that never makes an illegal move. `off_tree` counts those decisions.
+- **Stress test:** `cargo run --release -p ducy-gto --example gto_stress -- 50000`
+  plays 100,000 duplicate hands against each of `RandomBot` (every bet size),
+  `EquityBot` and a personality bot: **0 illegal actions, 0 off-tree
+  decisions**.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
@@ -171,6 +196,6 @@ sensible ranges (`tests/blueprint.rs`).
 3. **Done:** Card abstraction: suit isomorphism, equity-distribution buckets (#87)
 4. **Done:** Action abstraction and the abstract heads-up no-limit tree (#88)
 5. **Done:** Train and store the blueprint strategy (#89)
-6. `GtoBot`: play the blueprint in ducy-play, with action translation (#90)
+6. **Done:** `GtoBot`: play the blueprint in ducy-play, with action translation (#90)
 7. Evaluation: Local Best Response and duplicate matches against the built-in bots (#91)
 8. Real-time depth-limited subgame solving (#92)
