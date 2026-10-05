@@ -14,4 +14,5 @@ pub mod iso;
 pub mod kmeans;
 pub mod lbr;
 pub mod range;
+pub mod review;
 pub mod river;
