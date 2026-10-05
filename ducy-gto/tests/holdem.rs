@@ -190,3 +190,16 @@ fn kmeans_finds_obvious_clusters() {
     assert_eq!(distance(&a, &d, Distance::Emd), 2.0);
     assert_eq!(distance(&a, &d, Distance::L2), 2.0);
 }
+
+#[test]
+fn abstraction_files_round_trip_and_compact_needs_centres() {
+    use ducy_gto::holdem::abstraction::CardAbstraction;
+    let quick = CardAbstraction::quick(5);
+    // The quick form keeps no centres, so it has no compact form.
+    assert!(quick.compact().is_none());
+    assert!(!quick.has_tables());
+    let loaded = CardAbstraction::load(&quick.save()).expect("reloads");
+    assert_eq!(loaded, quick);
+    assert!(loaded.same_buckets(&quick));
+    assert!(CardAbstraction::load(b"DUCYCABS\x03").is_none());
+}

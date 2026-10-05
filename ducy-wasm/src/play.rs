@@ -13,6 +13,14 @@
 use ducy_play::{
     Action, Command, Outgoing, Personality, Table, TableHost, TableRules, TableSeat, Variant,
 };
+use std::{cell::RefCell, sync::Arc};
+
+use ducy_gto::holdem::{
+    abstraction::CardAbstraction,
+    blueprint::Blueprint,
+    bot::GtoBot,
+    hunl::{BettingTree, Hunl, HunlConfig},
+};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -54,6 +62,60 @@ fn rules_for(game: Option<&str>, small_blind: u64, big_blind: u64) -> Result<Tab
     })
 }
 
+/// The GTO bot's data, once the page has loaded it with `loadGto`.
+struct Gto {
+    cards: Arc<CardAbstraction>,
+    blueprint: Arc<Blueprint>,
+    tree: Arc<BettingTree>,
+}
+
+thread_local! {
+    static GTO: RefCell<Option<Gto>> = const { RefCell::new(None) };
+}
+
+/// The id that seats the GTO bot.
+const GTO_ID: &str = "gto";
+
+/// Loads the GTO bot: a heads-up no-limit Hold'em blueprint and the card
+/// abstraction it was trained with (the compact form is enough). After
+/// this, "gto" can be used as a bot id. It's trained for one opponent at
+/// 100 big blinds; at bigger tables it falls back to a simple pot-odds rule.
+#[wasm_bindgen(js_name = loadGto)]
+pub fn load_gto(cards: &[u8], blueprint: &[u8]) -> Result<(), JsError> {
+    let cards =
+        CardAbstraction::load(cards).ok_or_else(|| JsError::new("not a card abstraction"))?;
+    let config = HunlConfig::default();
+    let game = Hunl::new(config, Some(&cards));
+    let blueprint = Blueprint::load(blueprint, &game, &cards)
+        .map_err(|e| JsError::new(&format!("blueprint doesn't match: {e:?}")))?;
+    let tree = Arc::new(game.tree);
+    GTO.with(|g| {
+        *g.borrow_mut() = Some(Gto {
+            cards: Arc::new(cards),
+            blueprint: Arc::new(blueprint),
+            tree,
+        })
+    });
+    Ok(())
+}
+
+/// Whether `loadGto` has been called.
+#[wasm_bindgen(js_name = gtoLoaded)]
+pub fn gto_loaded() -> bool {
+    GTO.with(|g| g.borrow().is_some())
+}
+
+fn gto_seat(seed: u64) -> Result<TableSeat, JsError> {
+    GTO.with(|g| {
+        let g = g.borrow();
+        let g = g
+            .as_ref()
+            .ok_or_else(|| JsError::new("call loadGto first"))?;
+        let bot = GtoBot::from_parts(g.cards.clone(), g.blueprint.clone(), g.tree.clone(), seed);
+        Ok(TableSeat::with_bot("GTO", GTO_ID, Box::new(bot)))
+    })
+}
+
 /// "You" in seat 0, then one seat per bot id.
 fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
     if bots.is_empty() || bots.len() + 1 > ducy_play::MAX_PLAYERS {
@@ -61,6 +123,10 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
     }
     let mut seats = vec![TableSeat::human("You", "you")];
     for (i, id) in bots.iter().enumerate() {
+        if id == GTO_ID {
+            seats.push(gto_seat(seed.wrapping_add(i as u64 + 1))?);
+            continue;
+        }
         let p =
             Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
         seats.push(TableSeat::bot(

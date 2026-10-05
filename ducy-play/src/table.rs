@@ -20,7 +20,9 @@ pub struct TableSeat {
     pub id: String,
     /// Plays the seat when `human` is false. A seat without a bot is always
     /// played by a person.
-    pub bot: Option<PersonalityBot>,
+    pub bot: Option<Box<dyn Bot>>,
+    /// The bot's name, shown again when a person gives the seat back.
+    pub bot_name: String,
     /// Whether a person plays this seat.
     pub human: bool,
     /// A person who isn't there: they check or fold at once.
@@ -34,17 +36,26 @@ impl TableSeat {
             name: name.into(),
             id: id.into(),
             bot: None,
+            bot_name: String::new(),
             human: true,
             away: false,
         }
     }
 
-    /// A seat played by `bot`.
+    /// A seat played by a personality bot.
     pub fn bot(id: impl Into<String>, bot: PersonalityBot) -> Self {
+        let name = bot.name();
+        Self::with_bot(name, id, Box::new(bot))
+    }
+
+    /// A seat played by any bot, shown as `name`.
+    pub fn with_bot(name: impl Into<String>, id: impl Into<String>, bot: Box<dyn Bot>) -> Self {
+        let name = name.into();
         Self {
-            name: bot.name().to_string(),
+            name: name.clone(),
             id: id.into(),
             bot: Some(bot),
+            bot_name: name,
             human: false,
             away: false,
         }

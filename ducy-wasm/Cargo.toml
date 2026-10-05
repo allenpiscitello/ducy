@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 ducy = { path = "..", default-features = false }
 ducy-play = { path = "../ducy-play", default-features = false, features = ["serde"] }
+ducy-gto = { path = "../ducy-gto", default-features = false }
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
