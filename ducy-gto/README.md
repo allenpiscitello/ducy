@@ -189,6 +189,33 @@ sensible ranges (`tests/blueprint.rs`).
   `EquityBot` and a personality bot: **0 illegal actions, 0 off-tree
   decisions**.
 
+## Shipping to the browser
+
+The full card abstraction is 565 MB, almost all of it the turn table. But a
+bucket is only "this hand's equity histogram, nearest cluster centre", so it
+can be computed instead of looked up. Builds now keep the centres (file
+format version 2), and `CardAbstraction::compact()` drops the tables:
+
+- **Size:** **65 KB** instead of 565 MB (`build_abstraction` writes
+  `<out>.compact` alongside the full file).
+- **Same buckets:** it computes the same buckets as the tables. The build
+  checks 2,000 random flop and turn hands, and the settings hash is
+  unchanged, so a blueprint trained on the full table loads and plays the
+  same on the compact one.
+- **Cost:** about 13 ms per flop or turn lookup natively.
+- **The build is deterministic:** a rebuild with the same settings assigns
+  every hand identically (`COMPARE=old.bin` checks it), so older files can
+  be upgraded by rebuilding.
+
+Training keeps using the full tables for speed.
+
+In ducy-wasm, `loadGto(cards, blueprint)` takes the two files (the compact
+abstraction and the 6 MB blueprint, about 2.8 MB gzipped), after which `"gto"`
+works as a bot id in `BotTable` and `MultiTable`. In Node, loading takes 14 ms,
+and decisions average 6 ms (57 ms at worst, a flop bucket computed on the fly).
+Table seats now accept any bot (`TableSeat::with_bot`), not only personality
+bots.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)

@@ -4,6 +4,12 @@
 //!
 //! Defaults: `abstraction.bin`, 200 buckets per postflop street. Prints how
 //! long each stage takes, the table sizes, and some sanity checks.
+//!
+//! It also writes the compact form next to it (`<out-file>.compact`, about
+//! 100 KB, for shipping to the browser) and checks that it gives the same
+//! bucket as the tables for thousands of random hands. With `COMPARE=old.bin`
+//! in the environment it also checks that an earlier build of the same
+//! settings assigns every hand identically (the build is deterministic).
 
 use std::time::Instant;
 
@@ -63,5 +69,46 @@ fn main() {
     let second = show("9h 8h", "Ah Kh Qh 2c 7d");
     let weak = show("3c 4d", "Ah Kh Qh 2c 7d");
     assert!(nuts as usize == config.river_buckets - 1 && nuts >= second && second > weak);
+    let compact = abs.compact().expect("a fresh build keeps its centres");
+    let compact_path = format!("{out}.compact");
+    std::fs::write(&compact_path, compact.save()).expect("write the compact abstraction");
+    println!(
+        "{compact_path}: {:.1} KB",
+        compact.save().len() as f64 / 1e3
+    );
+    let mut rng = ducy_gto::Rng::new(77);
+    let t = Instant::now();
+    let checks = 2000;
+    for i in 0..checks {
+        let mut cards: Vec<Card> = Vec::new();
+        while cards.len() < 6 {
+            let c = (rng.next_u64() % 52) as Card;
+            if !cards.contains(&c) {
+                cards.push(c);
+            }
+        }
+        let n = if i % 2 == 0 { 3 } else { 4 };
+        let hole = [cards[0], cards[1]];
+        let board = &cards[2..2 + n];
+        assert_eq!(
+            compact.bucket(hole, board),
+            abs.bucket(hole, board),
+            "{cards:?}"
+        );
+    }
+    println!(
+        "compact buckets match the tables on {checks} random flop and turn hands ({:.1} ms each)",
+        t.elapsed().as_secs_f64() * 1e3 / checks as f64
+    );
+    if let Ok(old) = std::env::var("COMPARE") {
+        let old = CardAbstraction::load(&std::fs::read(&old).expect("read COMPARE"))
+            .expect("an abstraction");
+        assert!(
+            abs.same_buckets(&old),
+            "the rebuild differs from {old:?}",
+            old = old.config
+        );
+        println!("identical buckets to the earlier build");
+    }
     println!("ok");
 }

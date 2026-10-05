@@ -89,6 +89,11 @@ pub struct CardAbstraction {
     turn: KeyTable,
     /// Upper equity bound of each river bucket but the last.
     river_edges: Vec<f32>,
+    /// Cluster centres (equity histograms), so buckets can be computed
+    /// without the tables. Empty for abstractions saved before they were
+    /// kept.
+    flop_centroids: Vec<f32>,
+    turn_centroids: Vec<f32>,
 }
 
 /// One distinct flop and how many of the 22,100 flops it stands for.
@@ -324,6 +329,8 @@ impl CardAbstraction {
             flop: KeyTable::from_pairs(flop),
             turn: KeyTable::from_pairs(turn),
             river_edges,
+            flop_centroids,
+            turn_centroids,
         }
     }
 
@@ -350,8 +357,14 @@ impl CardAbstraction {
                     &self.turn
                 };
                 if table.keys.is_empty() {
-                    // A quick abstraction: hand strength right now.
-                    return bucket_of(hand_strength(hole, board), self.num_buckets(board.len()));
+                    if self.flop_centroids.is_empty() {
+                        // A quick abstraction: hand strength right now.
+                        return bucket_of(
+                            hand_strength(hole, board),
+                            self.num_buckets(board.len()),
+                        );
+                    }
+                    return self.bucket_on_the_fly(hole, board);
                 }
                 table
                     .get(canonical(&cards))
@@ -385,7 +398,79 @@ impl CardAbstraction {
             flop: KeyTable::default(),
             turn: KeyTable::default(),
             river_edges: (1..buckets).map(|i| i as f32 / buckets as f32).collect(),
+            flop_centroids: Vec::new(),
+            turn_centroids: Vec::new(),
         }
+    }
+
+    /// The same abstraction without the flop and turn tables: about 100 KB
+    /// instead of hundreds of MB. Buckets come out the same, computed from
+    /// the hand's equity histogram and the cluster centres when needed
+    /// (about 20 ms on the flop, under 1 ms on the turn). `None` if this
+    /// abstraction didn't keep its centres.
+    pub fn compact(&self) -> Option<Self> {
+        if self.flop_centroids.is_empty() || self.turn_centroids.is_empty() {
+            return None;
+        }
+        Some(Self {
+            config: self.config,
+            flop: KeyTable::default(),
+            turn: KeyTable::default(),
+            river_edges: self.river_edges.clone(),
+            flop_centroids: self.flop_centroids.clone(),
+            turn_centroids: self.turn_centroids.clone(),
+        })
+    }
+
+    /// Whether `other` assigns every hand the same bucket: the same settings,
+    /// river edges and flop and turn tables (centres aside).
+    pub fn same_buckets(&self, other: &Self) -> bool {
+        self.config == other.config
+            && self.river_edges == other.river_edges
+            && self.flop == other.flop
+            && self.turn == other.turn
+    }
+
+    /// Whether flop and turn buckets come from tables (fast) rather than
+    /// being computed.
+    pub fn has_tables(&self) -> bool {
+        !self.flop.keys.is_empty()
+    }
+
+    /// A flop or turn bucket computed the way the build assigns it: the
+    /// hand's river-equity histogram over every runout, then the nearest
+    /// cluster centre.
+    fn bucket_on_the_fly(&self, hole: [Card; 2], board: &[Card]) -> u16 {
+        let flop = board.len() == 3;
+        let (bins, centroids) = if flop {
+            (self.config.flop_bins, &self.flop_centroids)
+        } else {
+            (self.config.turn_bins, &self.turn_centroids)
+        };
+        let used = mask(board) | bit(hole[0]) | bit(hole[1]);
+        let free: Vec<Card> = (0..NUM_CARDS as Card)
+            .filter(|&c| used & bit(c) == 0)
+            .collect();
+        let mut hist = vec![0.0f32; bins];
+        let mut full = [0u8; 5];
+        full[..board.len()].copy_from_slice(board);
+        if flop {
+            for (i, &t) in free.iter().enumerate() {
+                for &r in &free[i + 1..] {
+                    full[3] = t;
+                    full[4] = r;
+                    hist[bin(river_equity(hole, &full), bins)] += 1.0;
+                }
+            }
+        } else {
+            for &r in &free {
+                full[4] = r;
+                hist[bin(river_equity(hole, &full), bins)] += 1.0;
+            }
+        }
+        let mut h = vec![0.0f32; bins];
+        normalize(&hist, &mut h);
+        nearest(&h, centroids, bins, Distance::Emd) as u16
     }
 
     /// The river bucket for an equity against a random hand.
@@ -402,7 +487,7 @@ impl CardAbstraction {
     /// tables.
     pub fn save(&self) -> Vec<u8> {
         let c = &self.config;
-        let mut out = MAGIC.to_vec();
+        let mut out = MAGIC2.to_vec();
         for v in [
             c.flop_buckets,
             c.turn_buckets,
@@ -419,6 +504,12 @@ impl CardAbstraction {
         for e in &self.river_edges {
             out.extend(e.to_le_bytes());
         }
+        for c in [&self.flop_centroids, &self.turn_centroids] {
+            out.extend((c.len() as u64).to_le_bytes());
+            for x in c {
+                out.extend(x.to_le_bytes());
+            }
+        }
         for t in [&self.flop, &self.turn] {
             out.extend((t.keys.len() as u64).to_le_bytes());
             for k in &t.keys {
@@ -434,9 +525,11 @@ impl CardAbstraction {
     pub fn load(mut bytes: &[u8]) -> Option<Self> {
         use crate::key::{read_u64, take};
         let input = &mut bytes;
-        if take(input, MAGIC.len())? != MAGIC {
-            return None;
-        }
+        let version = match take(input, MAGIC.len())? {
+            m if m == MAGIC => 1,
+            m if m == MAGIC2 => 2,
+            _ => return None,
+        };
         let mut v = [0usize; 7];
         for x in &mut v {
             *x = read_u64(input)? as usize;
@@ -452,9 +545,21 @@ impl CardAbstraction {
             seed: read_u64(input)?,
         };
         let n = read_u64(input)? as usize;
-        let river_edges = (0..n)
-            .map(|_| take(input, 4).map(|b| f32::from_le_bytes(b.try_into().expect("4 bytes"))))
-            .collect::<Option<Vec<_>>>()?;
+        let floats = |input: &mut &[u8], n: usize| {
+            (0..n)
+                .map(|_| take(input, 4).map(|b| f32::from_le_bytes(b.try_into().expect("4 bytes"))))
+                .collect::<Option<Vec<_>>>()
+        };
+        let river_edges = floats(input, n)?;
+        let mut centroids = vec![Vec::new(), Vec::new()];
+        if version >= 2 {
+            for c in &mut centroids {
+                let n = read_u64(input)? as usize;
+                *c = floats(input, n)?;
+            }
+        }
+        let turn_centroids = centroids.pop()?;
+        let flop_centroids = centroids.pop()?;
         let mut tables = Vec::new();
         for _ in 0..2 {
             let n = read_u64(input)? as usize;
@@ -473,11 +578,15 @@ impl CardAbstraction {
             flop,
             turn,
             river_edges,
+            flop_centroids,
+            turn_centroids,
         })
     }
 }
 
 const MAGIC: &[u8] = b"DUCYCABS\x01";
+/// Version 2 adds the cluster centres.
+const MAGIC2: &[u8] = b"DUCYCABS\x02";
 
 fn bucket_of(strength: f32, buckets: usize) -> u16 {
     ((strength * buckets as f32) as usize).min(buckets - 1) as u16

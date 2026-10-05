@@ -305,3 +305,26 @@ fn random_play_keeps_cards_private_and_chips_conserved() {
     assert!(hands >= 100, "only {hands} hands played");
     assert!(played >= 200, "remote players only acted {played} times");
 }
+
+#[test]
+fn any_bot_can_take_a_seat() {
+    let seats = vec![
+        TableSeat::human("You", "you"),
+        TableSeat::with_bot(
+            "Rando",
+            "random",
+            Box::new(ducy_play::bots::RandomBot::new(Some(1))),
+        ),
+    ];
+    let mut t = Table::new(TableRules::no_limit_holdem(1, 2), seats, 200, 3).unwrap();
+    t.new_hand().unwrap();
+    assert_eq!(t.view(0).seats[1].name, "Rando");
+    // The bot plays whenever it's its turn; the person checks or calls.
+    while t.in_hand() {
+        if t.auto_to_act() {
+            t.advance().unwrap();
+        } else {
+            t.act_default(0).unwrap();
+        }
+    }
+}

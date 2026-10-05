@@ -278,6 +278,7 @@ name = "ducy-wasm"
 version = "0.1.0"
 dependencies = [
  "ducy",
+ "ducy-gto",
  "ducy-play",
  "getrandom 0.4.3",
  "rust_decimal",

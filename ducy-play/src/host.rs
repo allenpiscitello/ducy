@@ -358,8 +358,8 @@ impl TableHost {
             return;
         }
         let s = self.table.seat_mut(p.seat);
-        if let Some(bot) = &s.bot {
-            s.name = bot.name().to_string();
+        if s.bot.is_some() {
+            s.name = s.bot_name.clone();
             s.id = self.bot_ids[p.seat].clone();
         }
         s.human = false;
