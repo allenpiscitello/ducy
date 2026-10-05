@@ -1,0 +1,459 @@
+//! Card abstraction for heads-up Hold'em: maps hole cards and a board to a
+//! small bucket number per street, so a strategy can be stored per bucket
+//! rather than per hand.
+//!
+//! - **Preflop:** lossless, the 169 distinct starting hands.
+//! - **Flop and turn:** each canonical hand (up to suit isomorphism) gets a
+//!   histogram of its equity on the river, over every runout. Hands are
+//!   clustered with k-means under earth mover's distance, which groups hands
+//!   by how their strength can develop, not just their average strength. So
+//!   a flush draw and a weak made hand with the same equity end up apart.
+//! - **River:** equity against a random hand, split into equal-population
+//!   buckets.
+//!
+//! Building runs one pass over every runout of every distinct flop (1,755
+//! flops, 2.06 million river boards) to sample features and fit the
+//! clusters, then a second pass to assign every canonical flop and turn hand
+//! (1,286,792 and 55,190,538 of them) to a bucket. River buckets are computed
+//! on demand from the hand's equity. With the default config this takes
+//! about 4.6 minutes on 4 cores and saves to about 565 MB.
+
+use std::collections::{BTreeMap, HashSet};
+
+use super::{
+    cards::{Card, NUM_CARDS, NUM_HOLES, bit, hole_cards, hole_index, mask},
+    equity::{river_equities, river_equity},
+    iso::{NUM_PREFLOP_CLASSES, canonical, canonical_board, preflop_class},
+    kmeans::{Distance, kmeans, nearest},
+};
+use crate::rng::Rng;
+
+/// How finely to abstract each street.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AbstractionConfig {
+    pub flop_buckets: usize,
+    pub turn_buckets: usize,
+    pub river_buckets: usize,
+    /// Histogram bins for flop and turn equity distributions.
+    pub flop_bins: usize,
+    pub turn_bins: usize,
+    /// Roughly how many hands per street to fit the clusters on.
+    pub sample: usize,
+    pub kmeans_iters: usize,
+    pub seed: u64,
+}
+
+impl Default for AbstractionConfig {
+    /// 169 / 200 / 200 / 200 buckets.
+    fn default() -> Self {
+        Self {
+            flop_buckets: 200,
+            turn_buckets: 200,
+            river_buckets: 200,
+            flop_bins: 50,
+            turn_bins: 30,
+            sample: 200_000,
+            kmeans_iters: 40,
+            seed: 1,
+        }
+    }
+}
+
+/// Canonical hand keys (sorted) and their buckets.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct KeyTable {
+    keys: Vec<u64>,
+    buckets: Vec<u16>,
+}
+
+impl KeyTable {
+    fn from_pairs(mut pairs: Vec<(u64, u16)>) -> Self {
+        pairs.sort_unstable_by_key(|p| p.0);
+        pairs.dedup_by_key(|p| p.0);
+        Self {
+            keys: pairs.iter().map(|p| p.0).collect(),
+            buckets: pairs.iter().map(|p| p.1).collect(),
+        }
+    }
+
+    fn get(&self, key: u64) -> Option<u16> {
+        self.keys.binary_search(&key).ok().map(|i| self.buckets[i])
+    }
+}
+
+/// A built card abstraction.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CardAbstraction {
+    pub config: AbstractionConfig,
+    flop: KeyTable,
+    turn: KeyTable,
+    /// Upper equity bound of each river bucket but the last.
+    river_edges: Vec<f32>,
+}
+
+/// One distinct flop and how many of the 22,100 flops it stands for.
+fn distinct_flops() -> Vec<([Card; 3], u32)> {
+    let mut seen: BTreeMap<u64, ([Card; 3], u32)> = BTreeMap::new();
+    for a in 0..NUM_CARDS as Card {
+        for b in a + 1..NUM_CARDS as Card {
+            for c in b + 1..NUM_CARDS as Card {
+                let (k, _) = canonical_board(&[a, b, c]);
+                seen.entry(k).or_insert(([a, b, c], 0)).1 += 1;
+            }
+        }
+    }
+    seen.into_values().collect()
+}
+
+/// Equity histograms for every hand on one flop: on the flop itself (over all
+/// turn and river cards) and after each turn card (over the rivers).
+struct FlopPass {
+    flop_bins: usize,
+    turn_bins: usize,
+    /// `[hole][bin]`
+    flop_hist: Vec<f32>,
+    /// `[turn card][hole][bin]`
+    turn_hist: Vec<f32>,
+    /// A sample of river equities, for the river bucket edges.
+    river: Vec<f32>,
+}
+
+impl FlopPass {
+    fn run(flop: [Card; 3], flop_bins: usize, turn_bins: usize, river_stride: usize) -> Self {
+        let mut p = Self {
+            flop_bins,
+            turn_bins,
+            flop_hist: vec![0.0; NUM_HOLES * flop_bins],
+            turn_hist: vec![0.0; NUM_CARDS * NUM_HOLES * turn_bins],
+            river: Vec::new(),
+        };
+        let fmask = mask(&flop);
+        let rest: Vec<Card> = (0..NUM_CARDS as Card)
+            .filter(|&c| fmask & bit(c) == 0)
+            .collect();
+        let mut eq = [0.0f32; NUM_HOLES];
+        let mut n = 0usize;
+        for (i, &t) in rest.iter().enumerate() {
+            for &r in &rest[i + 1..] {
+                river_equities(&[flop[0], flop[1], flop[2], t, r], &mut eq);
+                for (h, &e) in eq.iter().enumerate() {
+                    if e < 0.0 {
+                        continue;
+                    }
+                    let fb = bin(e, flop_bins);
+                    p.flop_hist[h * flop_bins + fb] += 1.0;
+                    let tb = bin(e, turn_bins);
+                    // River r after turn t, and river t after turn r.
+                    p.turn_hist[(t as usize * NUM_HOLES + h) * turn_bins + tb] += 1.0;
+                    p.turn_hist[(r as usize * NUM_HOLES + h) * turn_bins + tb] += 1.0;
+                    n += 1;
+                    if n % river_stride == 0 {
+                        p.river.push(e);
+                    }
+                }
+            }
+        }
+        p
+    }
+
+    /// Calls `f(key, histogram)` once per canonical flop hand on this flop,
+    /// then `g` once per canonical turn hand, with normalized histograms.
+    fn emit(
+        &self,
+        flop: [Card; 3],
+        mut f: impl FnMut(u64, &[f32]),
+        mut g: impl FnMut(u64, &[f32]),
+    ) {
+        let fmask = mask(&flop);
+        let mut seen = HashSet::new();
+        let mut buf = vec![0.0f32; self.flop_bins.max(self.turn_bins)];
+        for h in 0..NUM_HOLES {
+            let (a, b) = hole_cards(h);
+            if fmask & (bit(a) | bit(b)) != 0 {
+                continue;
+            }
+            let k = canonical(&[a, b, flop[0], flop[1], flop[2]]);
+            if seen.insert(k) {
+                normalize(
+                    &self.flop_hist[h * self.flop_bins..(h + 1) * self.flop_bins],
+                    &mut buf[..self.flop_bins],
+                );
+                f(k, &buf[..self.flop_bins]);
+            }
+        }
+        seen.clear();
+        for t in 0..NUM_CARDS as Card {
+            if fmask & bit(t) != 0 {
+                continue;
+            }
+            for h in 0..NUM_HOLES {
+                let (a, b) = hole_cards(h);
+                if (fmask | bit(t)) & (bit(a) | bit(b)) != 0 {
+                    continue;
+                }
+                let k = canonical(&[a, b, flop[0], flop[1], flop[2], t]);
+                if seen.insert(k) {
+                    let at = (t as usize * NUM_HOLES + h) * self.turn_bins;
+                    normalize(
+                        &self.turn_hist[at..at + self.turn_bins],
+                        &mut buf[..self.turn_bins],
+                    );
+                    g(k, &buf[..self.turn_bins]);
+                }
+            }
+        }
+    }
+}
+
+fn bin(e: f32, bins: usize) -> usize {
+    ((e * bins as f32) as usize).min(bins - 1)
+}
+
+fn normalize(h: &[f32], out: &mut [f32]) {
+    let total: f32 = h.iter().sum();
+    for (o, &x) in out.iter_mut().zip(h) {
+        *o = if total > 0.0 { x / total } else { 0.0 };
+    }
+}
+
+/// Keeps a deterministic pseudo-random share of keys.
+fn keep(key: u64, seed: u64, share: f64) -> bool {
+    Rng::for_iteration(seed, key).next_f64() < share
+}
+
+#[cfg(feature = "parallel")]
+fn map_flops<T: Send>(
+    flops: &[([Card; 3], u32)],
+    f: impl Fn(&([Card; 3], u32)) -> T + Sync + Send,
+) -> Vec<T> {
+    use rayon::prelude::*;
+    flops.par_iter().map(f).collect()
+}
+
+#[cfg(not(feature = "parallel"))]
+fn map_flops<T>(flops: &[([Card; 3], u32)], f: impl Fn(&([Card; 3], u32)) -> T) -> Vec<T> {
+    flops.iter().map(f).collect()
+}
+
+/// Canonical hands per street, for sizing the sample.
+const FLOP_HANDS: f64 = 1_286_792.0;
+const TURN_HANDS: f64 = 55_190_538.0;
+
+impl CardAbstraction {
+    /// Builds the abstraction (about 4.6 minutes on 4 cores with the default
+    /// config). `progress` is called with a short message as each stage
+    /// starts.
+    pub fn build(config: AbstractionConfig, mut progress: impl FnMut(&str)) -> Self {
+        let flops = distinct_flops();
+        let (fb, tb) = (config.flop_bins, config.turn_bins);
+        let flop_share = (config.sample as f64 / FLOP_HANDS).min(1.0);
+        let turn_share = (config.sample as f64 / TURN_HANDS).min(1.0);
+        let stride = ((2_062_800.0 * 1081.0) / (config.sample.max(1) as f64)).max(1.0) as usize;
+
+        progress("sampling equity histograms");
+        let samples = map_flops(&flops, |&(flop, _)| {
+            let pass = FlopPass::run(flop, fb, tb, stride);
+            let (mut f, mut t) = (Vec::new(), Vec::new());
+            pass.emit(
+                flop,
+                |k, h| {
+                    if keep(k, config.seed, flop_share) {
+                        f.extend_from_slice(h);
+                    }
+                },
+                |k, h| {
+                    if keep(k, config.seed ^ 1, turn_share) {
+                        t.extend_from_slice(h);
+                    }
+                },
+            );
+            (f, t, pass.river)
+        });
+        let mut flop_points = Vec::new();
+        let mut turn_points = Vec::new();
+        let mut river = Vec::new();
+        for (f, t, r) in samples {
+            flop_points.extend(f);
+            turn_points.extend(t);
+            river.extend(r);
+        }
+
+        progress("clustering flop hands");
+        let flop_centroids = kmeans(
+            &flop_points,
+            fb,
+            config.flop_buckets,
+            config.kmeans_iters,
+            config.seed,
+            Distance::Emd,
+        );
+        progress("clustering turn hands");
+        let turn_centroids = kmeans(
+            &turn_points,
+            tb,
+            config.turn_buckets,
+            config.kmeans_iters,
+            config.seed + 1,
+            Distance::Emd,
+        );
+        river.sort_unstable_by(f32::total_cmp);
+        let river_edges = (1..config.river_buckets)
+            .map(|i| river[i * river.len() / config.river_buckets])
+            .collect();
+
+        progress("assigning every flop and turn hand");
+        let assigned = map_flops(&flops, |&(flop, _)| {
+            let pass = FlopPass::run(flop, fb, tb, usize::MAX);
+            let (mut f, mut t) = (Vec::new(), Vec::new());
+            pass.emit(
+                flop,
+                |k, h| f.push((k, nearest(h, &flop_centroids, fb, Distance::Emd) as u16)),
+                |k, h| t.push((k, nearest(h, &turn_centroids, tb, Distance::Emd) as u16)),
+            );
+            (f, t)
+        });
+        let mut flop = Vec::new();
+        let mut turn = Vec::new();
+        for (f, t) in assigned {
+            flop.extend(f);
+            turn.extend(t);
+        }
+        progress("sorting");
+        Self {
+            config,
+            flop: KeyTable::from_pairs(flop),
+            turn: KeyTable::from_pairs(turn),
+            river_edges,
+        }
+    }
+
+    /// Number of buckets on a street with `board_len` board cards.
+    pub fn num_buckets(&self, board_len: usize) -> usize {
+        match board_len {
+            0 => NUM_PREFLOP_CLASSES,
+            3 => self.config.flop_buckets,
+            4 => self.config.turn_buckets,
+            _ => self.config.river_buckets,
+        }
+    }
+
+    /// The bucket of `hole` with `board` (0, 3, 4 or 5 cards in deal order).
+    pub fn bucket(&self, hole: [Card; 2], board: &[Card]) -> u16 {
+        match board.len() {
+            0 => preflop_class(hole[0], hole[1]) as u16,
+            3 | 4 => {
+                let mut cards = vec![hole[0], hole[1]];
+                cards.extend_from_slice(board);
+                let table = if board.len() == 3 {
+                    &self.flop
+                } else {
+                    &self.turn
+                };
+                table
+                    .get(canonical(&cards))
+                    .expect("every canonical hand is in the table")
+            }
+            5 => {
+                let b: [Card; 5] = board.try_into().expect("five cards");
+                self.river_bucket(river_equity(hole, &b))
+            }
+            n => panic!("a board has 0, 3, 4 or 5 cards, not {n}"),
+        }
+    }
+
+    /// The river bucket for an equity against a random hand.
+    pub fn river_bucket(&self, equity: f32) -> u16 {
+        self.river_edges.partition_point(|&e| e <= equity) as u16
+    }
+
+    /// Canonical hands stored for the flop and turn.
+    pub fn table_sizes(&self) -> (usize, usize) {
+        (self.flop.keys.len(), self.turn.keys.len())
+    }
+
+    /// The abstraction as bytes: config, river edges, then the flop and turn
+    /// tables.
+    pub fn save(&self) -> Vec<u8> {
+        let c = &self.config;
+        let mut out = MAGIC.to_vec();
+        for v in [
+            c.flop_buckets,
+            c.turn_buckets,
+            c.river_buckets,
+            c.flop_bins,
+            c.turn_bins,
+            c.sample,
+            c.kmeans_iters,
+        ] {
+            out.extend((v as u64).to_le_bytes());
+        }
+        out.extend(c.seed.to_le_bytes());
+        out.extend((self.river_edges.len() as u64).to_le_bytes());
+        for e in &self.river_edges {
+            out.extend(e.to_le_bytes());
+        }
+        for t in [&self.flop, &self.turn] {
+            out.extend((t.keys.len() as u64).to_le_bytes());
+            for k in &t.keys {
+                out.extend(k.to_le_bytes());
+            }
+            for b in &t.buckets {
+                out.extend(b.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    pub fn load(mut bytes: &[u8]) -> Option<Self> {
+        use crate::key::{read_u64, take};
+        let input = &mut bytes;
+        if take(input, MAGIC.len())? != MAGIC {
+            return None;
+        }
+        let mut v = [0usize; 7];
+        for x in &mut v {
+            *x = read_u64(input)? as usize;
+        }
+        let config = AbstractionConfig {
+            flop_buckets: v[0],
+            turn_buckets: v[1],
+            river_buckets: v[2],
+            flop_bins: v[3],
+            turn_bins: v[4],
+            sample: v[5],
+            kmeans_iters: v[6],
+            seed: read_u64(input)?,
+        };
+        let n = read_u64(input)? as usize;
+        let river_edges = (0..n)
+            .map(|_| take(input, 4).map(|b| f32::from_le_bytes(b.try_into().expect("4 bytes"))))
+            .collect::<Option<Vec<_>>>()?;
+        let mut tables = Vec::new();
+        for _ in 0..2 {
+            let n = read_u64(input)? as usize;
+            let keys = (0..n)
+                .map(|_| read_u64(input))
+                .collect::<Option<Vec<_>>>()?;
+            let buckets = (0..n)
+                .map(|_| take(input, 2).map(|b| u16::from_le_bytes(b.try_into().expect("2 bytes"))))
+                .collect::<Option<Vec<_>>>()?;
+            tables.push(KeyTable { keys, buckets });
+        }
+        let turn = tables.pop()?;
+        let flop = tables.pop()?;
+        input.is_empty().then_some(Self {
+            config,
+            flop,
+            turn,
+            river_edges,
+        })
+    }
+}
+
+const MAGIC: &[u8] = b"DUCYCABS\x01";
+
+/// The index of `hole` among all 1,326 two-card hands (re-exported for
+/// callers building per-hand tables).
+pub fn hand_index(hole: [Card; 2]) -> usize {
+    hole_index(hole[0], hole[1])
+}
