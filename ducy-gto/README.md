@@ -10,7 +10,7 @@ expectation to any opponent. How far a strategy is from one is its
 **exploitability**: what a best-responding opponent wins against it. This
 crate finds equilibria and measures exploitability exactly.
 
-## What's here (steps 1–4 of 8)
+## What's here (steps 1–5 of 8)
 
 - `Game`: the interface a game implements (chance, players, payoffs, information sets).
 - `Cfr`: vanilla CFR and CFR+ over the whole game tree, for games small
@@ -134,13 +134,43 @@ the default buckets:
 That's about 2.2 million information sets and 48 MB of `f32` regrets and
 strategy sums, small enough to train on one machine.
 
+## Training the blueprint
+
+```sh
+cargo run --release -p ducy-gto --example build_abstraction -- abstraction.bin
+cargo run --release -p ducy-gto --example train_blueprint -- \
+    --cards abstraction.bin --out blueprint.bin --checkpoint checkpoint.bin --iters 300000000
+```
+
+- **Training:** DCFR-discounted external-sampling MCCFR on the default abstract
+  game (100 big blinds, the default bet menu, 169/200/200/200 buckets).
+- **Progress:** every `--every` iterations it prints the speed and the preflop
+  headline numbers (button open, limp and fold rates; big blind defend and
+  3-bet rates vs an open), and saves the checkpoint. A stopped run resumes from
+  the checkpoint exactly.
+- **Speed:** on a 12-core machine, about 28,000 iterations per second. All 2.2
+  million information sets are reached within a few million iterations.
+- **Output:** the blueprint (`holdem::blueprint::Blueprint`), with one byte per
+  action and about 6 MB for the default game. It records a hash of the game
+  and abstraction settings and refuses to load against anything else.
+- **Chart:** the run ends by printing the button's opening chart and the big
+  blind's defending chart (`holdem::chart`).
+
+The betting tree is compiled once (`BettingTree`): a hand in training is the
+deal plus a node number, and an information set is `node << 16 | bucket`.
+
+For tests there's `CardAbstraction::quick`, which buckets flop and turn hands
+by current hand strength instead of a precomputed table, so it needs no
+build. A 10 big blind shove/limp/fold game trains in seconds on it and learns
+sensible ranges (`tests/blueprint.rs`).
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
 2. **Done:** Monte Carlo CFR with linear/discounted weighting, pruning and parallel training (#86)
 3. **Done:** Card abstraction: suit isomorphism, equity-distribution buckets (#87)
 4. **Done:** Action abstraction and the abstract heads-up no-limit tree (#88)
-5. Train and store the blueprint strategy (#89)
+5. **Done:** Train and store the blueprint strategy (#89)
 6. `GtoBot`: play the blueprint in ducy-play, with action translation (#90)
 7. Evaluation: Local Best Response and duplicate matches against the built-in bots (#91)
 8. Real-time depth-limited subgame solving (#92)
