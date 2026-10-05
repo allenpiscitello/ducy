@@ -10,11 +10,21 @@ expectation to any opponent. How far a strategy is from one is its
 **exploitability**: what a best-responding opponent wins against it. This
 crate finds equilibria and measures exploitability exactly.
 
-## What's here (step 1 of 8)
+## What's here (steps 1–2 of 8)
 
 - `Game`: the interface a game implements (chance, players, payoffs, information sets).
 - `Cfr`: vanilla CFR and CFR+ over the whole game tree, for games small
   enough to enumerate.
+- `Mccfr`: Monte Carlo CFR with external sampling, for games too big to walk
+  in full. Each iteration explores all of the traverser's actions and samples
+  chance and the opponent. On top of that:
+  - **Discounting:** `Discount::Linear` (Linear CFR) and `Discount::DCFR`
+    (DCFR, α = 1.5, β = 0, γ = 2).
+  - **Regret-based pruning** (`Prune`), with periodic full passes.
+  - **Parallel batches with rayon:** reproducible for a seed and batch size,
+    whatever the thread count.
+  - **Compact storage:** `f32` regrets and strategy sums in flat arrays.
+  - **Checkpoints:** `save` / `load`. A resumed run is identical to an unbroken one.
 - `exploitability`, `best_response_value`, `expected_value`: exact evaluation of a `Profile`.
 - `games::kuhn` and `games::leduc`: Kuhn poker and Leduc hold'em, small games
   with known equilibrium values, for checking the solver.
@@ -42,10 +52,30 @@ equilibrium values of −1/18 ≈ −0.0556 for Kuhn and −0.0856 for Leduc.
 | Leduc | CFR+ | 1,000 | 0.255 | −0.0856 | 2.0 s |
 | Leduc | CFR+ | 3,000 | 0.035 | −0.0856 | 5.8 s |
 
+## Monte Carlo CFR
+
+`cargo run --release -p ducy-gto --example mccfr_leduc`, on 4 cores, batches
+of 256, exploitability in milli-chips per hand:
+
+| Iterations | Plain | Linear | DCFR | DCFR + pruning |
+|---|---|---|---|---|
+| 10,000 | 456.4 | 387.5 | 277.6 | 277.6 |
+| 100,000 | 81.2 | 73.4 | 51.7 | 51.6 |
+| 1,000,000 | 21.8 | 25.6 | 18.7 | 17.0 |
+| 4,000,000 (≈17 s) | 10.8 | 11.2 | 10.4 | 8.8 |
+
+On a game as small as Leduc, full-tree CFR+ is far better (0.26 in 2 s): a
+full walk costs barely more than a sample. Sampling pays off in big games,
+where one iteration costs the same however large the tree is.
+
+`cargo bench -p ducy-gto`: about 95,000 Leduc iterations per second on one
+core (batches of 16) and 273,000 with 4 cores (batches of 1,024), with 18.7
+bytes of regrets and strategy sums per information set.
+
 ## Next steps
 
-1. **This:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
-2. Monte Carlo CFR with linear/discounted weighting, pruning and parallel training (#86)
+1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
+2. **This:** Monte Carlo CFR with linear/discounted weighting, pruning and parallel training (#86)
 3. Card abstraction: suit isomorphism, equity-distribution buckets (#87)
 4. Action abstraction and the abstract heads-up no-limit tree (#88)
 5. Train and store the blueprint strategy (#89)
