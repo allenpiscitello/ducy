@@ -3,6 +3,9 @@
 //! and decisions it couldn't follow on the tree.
 //!
 //!     cargo run --release -p ducy-gto --example gto_stress -- 100000
+//!
+//! A second number solves the river in real time with that many iterations
+//! per solve (`-- 5000 50`).
 
 use std::sync::Arc;
 
@@ -11,7 +14,7 @@ use ducy_gto::{
     holdem::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
-        bot::GtoBot,
+        bot::{GtoBot, RiverSolving},
         hunl::{Hunl, HunlConfig},
     },
 };
@@ -28,6 +31,9 @@ fn main() {
     let deals: usize = std::env::args()
         .nth(1)
         .map_or(20_000, |s| s.parse().expect("deals"));
+    let river: usize = std::env::args()
+        .nth(2)
+        .map_or(0, |s| s.parse().expect("river iterations"));
     let cards = Arc::new(CardAbstraction::quick(8));
     let config = HunlConfig::default();
     let game = Hunl::new(config.clone(), Some(&cards));
@@ -45,7 +51,9 @@ fn main() {
         ),
     ];
     for (name, make) in opponents {
-        let gto = GtoBot::new(config.clone(), cards.clone(), &bp, 7).unwrap();
+        let gto = GtoBot::new(config.clone(), cards.clone(), &bp, 7)
+            .unwrap()
+            .with_river_solving(RiverSolving::new(river));
         let shared = Arc::new(std::sync::Mutex::new(gto));
         struct Shared(Arc<std::sync::Mutex<GtoBot>>);
         impl Bot for Shared {
@@ -58,11 +66,10 @@ fn main() {
         }
         let mut bots: Vec<Box<dyn Bot>> = vec![Box::new(Shared(shared.clone())), make()];
         let r = run_match(&MatchConfig::new(rules, deals, 5).duplicate(), &mut bots).unwrap();
+        let bot = shared.lock().unwrap();
         println!(
-            "{name:>12}: {} hands, illegal actions {}, off-tree decisions {}",
-            r.hands,
-            r.fallbacks[0],
-            shared.lock().unwrap().off_tree
+            "{name:>12}: {} hands, illegal actions {}, off-tree decisions {}, river solves {}",
+            r.hands, r.fallbacks[0], bot.off_tree, bot.river_solves
         );
     }
 }

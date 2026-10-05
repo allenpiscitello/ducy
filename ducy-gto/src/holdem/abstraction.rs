@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use super::{
     cards::{Card, NUM_CARDS, NUM_HOLES, bit, hole_cards, hole_index, mask, score},
-    equity::{river_equities, river_equity},
+    equity::{river_equities, river_equity, strengths},
     iso::{NUM_PREFLOP_CLASSES, canonical, canonical_board, preflop_class},
     kmeans::{Distance, kmeans, nearest},
 };
@@ -378,6 +378,41 @@ impl CardAbstraction {
         }
     }
 
+    /// Every hand's bucket with `board`, indexed by
+    /// [`hole_index`](super::cards::hole_index); `u16::MAX` for hands that
+    /// use a board card. Much faster than calling [`bucket`](Self::bucket)
+    /// 1,326 times on the river and with the quick abstraction, which score
+    /// every hand once and share the work.
+    pub fn buckets(&self, board: &[Card]) -> Vec<u16> {
+        let bm = mask(board);
+        let quick = board.len() < 5 && self.flop_centroids.is_empty() && {
+            let table = if board.len() == 3 { &self.flop } else { &self.turn };
+            table.keys.is_empty()
+        };
+        if board.len() == 5 || (board.len() >= 3 && quick) {
+            let mut eq = [0f32; NUM_HOLES];
+            strengths(board, &mut eq);
+            return eq
+                .iter()
+                .map(|&e| match e < 0.0 {
+                    true => u16::MAX,
+                    false if board.len() == 5 => self.river_bucket(e),
+                    false => bucket_of(e, self.num_buckets(board.len())),
+                })
+                .collect();
+        }
+        (0..NUM_HOLES)
+            .map(|h| {
+                let (a, b) = hole_cards(h);
+                if bm & (bit(a) | bit(b)) != 0 {
+                    u16::MAX
+                } else {
+                    self.bucket([a, b], board)
+                }
+            })
+            .collect()
+    }
+
     /// A cheap abstraction for tests and quick experiments, built instantly:
     /// preflop classes as usual, then `buckets` equal-width buckets per
     /// street by the hand's current strength against a random hand (no
@@ -435,6 +470,14 @@ impl CardAbstraction {
     /// being computed.
     pub fn has_tables(&self) -> bool {
         !self.flop.keys.is_empty()
+    }
+
+    /// Whether [`buckets`](Self::buckets) for a whole street is quick
+    /// (milliseconds): with tables, or the quick abstraction. A compact
+    /// abstraction computes each flop bucket from scratch, which for every
+    /// hand takes about half a minute.
+    pub fn fast_buckets(&self) -> bool {
+        self.has_tables() || self.flop_centroids.is_empty()
     }
 
     /// A flop or turn bucket computed the way the build assigns it: the

@@ -142,6 +142,31 @@ impl Betting {
         }
     }
 
+    /// The start of a betting round after the flop: `contributed` chips in
+    /// the pot, `stack` behind, nothing bet yet, the big blind (player 1) to
+    /// act. For solving one street from where a real hand stands.
+    pub fn street_start(street: usize, stack: [u64; 2], contributed: [u64; 2], big_blind: u64) -> Self {
+        Self {
+            street,
+            stack,
+            street_bet: [0, 0],
+            contributed,
+            current_bet: 0,
+            last_raise: big_blind,
+            big_blind,
+            to_act: 1,
+            acted: [false; 2],
+            raises: 0,
+            folded: None,
+            done: stack[0] == 0 || stack[1] == 0,
+        }
+    }
+
+    /// A bet or raise to `to` as a fraction of the pot after calling.
+    pub fn pot_fraction(&self, to: u64) -> f64 {
+        pot_fraction(to, self.current_bet, self.to_call(), self.pot())
+    }
+
     pub fn is_over(&self) -> bool {
         self.done || self.folded.is_some()
     }
@@ -293,6 +318,12 @@ impl Betting {
             }
         }
     }
+}
+
+/// A bet or raise to `to` as a fraction of the pot after calling, given the
+/// current bet, what the bettor has to call, and the pot before the action.
+pub fn pot_fraction(to: u64, current_bet: u64, to_call: u64, pot: u64) -> f64 {
+    (to.saturating_sub(current_bet)) as f64 / (pot + to_call).max(1) as f64
 }
 
 /// One point in the betting tree.

@@ -16,11 +16,18 @@
 //! from the blueprint's mixed strategy, and converts that action's size back
 //! to chips as the same fraction of the real pot, clamped to what's legal.
 //!
+//! With [`GtoBot::with_river_solving`], river decisions come from solving
+//! the river in real time instead (see [`river`](super::river)): both
+//! players' ranges are tracked through the hand, the river is solved from
+//! the real pot and stacks with the resolving gadget, and the solution is
+//! kept for the rest of the hand, solved again when the opponent bets a
+//! size it doesn't have.
+//!
 //! The blueprint is for heads-up play. At a table with more players, or if
 //! the hand ever can't be followed on the tree, the bot falls back to a
 //! simple pot-odds rule rather than ever returning an illegal action.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use ducy_play::{Action, Bot, Event, HandSummary, LegalActions, Observation, Street};
 use rand::{SeedableRng, rngs::StdRng};
@@ -28,8 +35,10 @@ use rand::{SeedableRng, rngs::StdRng};
 use super::{
     abstraction::CardAbstraction,
     blueprint::{Blueprint, BlueprintError},
-    cards::{Card, from_ducy},
-    hunl::{BettingTree, Hunl, HunlAction, HunlConfig},
+    cards::{Card, from_ducy, hole_index},
+    hunl::{Betting, BettingTree, Hunl, HunlAction, HunlConfig, pot_fraction},
+    range::replay,
+    river::RiverSolver,
 };
 use crate::rng::Rng;
 
@@ -43,12 +52,6 @@ pub fn pseudo_harmonic(a: f64, b: f64, x: f64) -> f64 {
         return 0.0;
     }
     ((b - x) * (1.0 + a)) / ((b - a) * (1.0 + x))
-}
-
-/// A bet or raise to `to` as a fraction of the pot after calling, given the
-/// current bet, what the bettor has to call, and the pot before the action.
-fn pot_fraction(to: u64, current_bet: u64, to_call: u64, pot: u64) -> f64 {
-    (to.saturating_sub(current_bet)) as f64 / (pot + to_call).max(1) as f64
 }
 
 /// The real hand's chips, tracked from its events.
@@ -78,9 +81,39 @@ struct Track {
     street: usize,
     /// Our side: 0 is the button.
     me: usize,
-    /// The node our own last action leads to, applied when its event shows
-    /// up instead of translating our own bet back.
-    pending: Option<u32>,
+    /// The action index of our own last action, applied when its event
+    /// shows up instead of translating our own bet back.
+    pending: Option<usize>,
+    /// Every step taken on the tree: the node and the action's index.
+    steps: Vec<(u32, usize)>,
+    /// The tree node the river starts at.
+    river_root: Option<u32>,
+    /// The real river actions so far, in chips.
+    river_path: Vec<HunlAction>,
+    /// The river solution for this hand.
+    solved: Option<Box<RiverSolver>>,
+}
+
+/// How hard to solve the river.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RiverSolving {
+    /// Iterations per solve.
+    pub iterations: usize,
+    /// Stop early after this long (not on WebAssembly, which has no clock).
+    pub time: Option<Duration>,
+    /// The river bet menu (`menu.postflop`); blinds come from the table.
+    pub config: HunlConfig,
+}
+
+impl RiverSolving {
+    /// `iterations` per solve, the blueprint's own postflop menu.
+    pub fn new(iterations: usize) -> Self {
+        Self {
+            iterations,
+            time: None,
+            config: HunlConfig::default(),
+        }
+    }
 }
 
 /// A bot that plays a heads-up blueprint.
@@ -92,7 +125,10 @@ pub struct GtoBot {
     track: Track,
     /// Decisions where it had to use the fallback rule.
     pub off_tree: u32,
+    /// River solves run (re-solves included).
+    pub river_solves: u32,
     fallback_rng: StdRng,
+    river: Option<RiverSolving>,
 }
 
 impl GtoBot {
@@ -125,8 +161,19 @@ impl GtoBot {
             rng: Rng::new(seed),
             track: Track::default(),
             off_tree: 0,
+            river_solves: 0,
             fallback_rng: StdRng::seed_from_u64(seed ^ 0x5eed),
+            river: None,
         }
+    }
+
+    /// Solves the river in real time instead of playing the blueprint there.
+    /// Needs a card abstraction whose buckets are quick to compute for every
+    /// hand (see [`CardAbstraction::fast_buckets`]); otherwise, or with zero
+    /// iterations, the bot plays the blueprint on the river too.
+    pub fn with_river_solving(mut self, solving: RiverSolving) -> Self {
+        self.river = (solving.iterations > 0 && self.cards.fast_buckets()).then_some(solving);
+        self
     }
 
     /// The blueprint's action probabilities at this decision, with the
@@ -202,11 +249,21 @@ impl GtoBot {
                 // The tree may still be on an earlier street if a real bet was
                 // mapped to a smaller one: close the round with calls/checks.
                 self.catch_up();
+                if street == Street::River {
+                    self.track.river_root = self.track.node;
+                }
             }
-            Event::Fold { seat } => self.step(side(seat), Real::Fold),
-            Event::Check { seat } => self.step(side(seat), Real::Check),
+            Event::Fold { seat } => {
+                self.on_river(HunlAction::Fold);
+                self.step(side(seat), Real::Fold)
+            }
+            Event::Check { seat } => {
+                self.on_river(HunlAction::Check);
+                self.step(side(seat), Real::Check)
+            }
             Event::Call { seat, amount, .. } => {
                 let p = side(seat);
+                self.on_river(HunlAction::Call);
                 self.step(p, Real::Call);
                 let t = &mut self.track;
                 t.real.street_bet[p] += amount;
@@ -217,6 +274,11 @@ impl GtoBot {
                 let r = self.track.real;
                 let to_call = r.current_bet.saturating_sub(r.street_bet[p]);
                 let frac = pot_fraction(to, r.current_bet, to_call, r.pot());
+                self.on_river(if r.current_bet == 0 {
+                    HunlAction::Bet(to)
+                } else {
+                    HunlAction::Raise(to)
+                });
                 self.step(p, Real::Raise { frac, all_in });
                 let t = &mut self.track;
                 let added = to - t.real.street_bet[p];
@@ -225,6 +287,13 @@ impl GtoBot {
                 t.real.current_bet = to;
             }
             Event::Award { .. } => {}
+        }
+    }
+
+    /// Records a real action if the hand is on the river.
+    fn on_river(&mut self, a: HunlAction) {
+        if self.track.street == 3 {
+            self.track.river_path.push(a);
         }
     }
 
@@ -239,6 +308,9 @@ impl GtoBot {
                 .actions
                 .iter()
                 .position(|a| matches!(a, HunlAction::Check | HunlAction::Call));
+            if let Some(i) = i {
+                self.track.steps.push((node, i));
+            }
             self.track.node = i.map(|i| n.children[i]);
         }
     }
@@ -257,9 +329,10 @@ impl GtoBot {
             return;
         }
         if p == self.track.me
-            && let Some(next) = self.track.pending.take()
+            && let Some(i) = self.track.pending.take()
         {
-            self.track.node = Some(next);
+            self.track.steps.push((node, i));
+            self.track.node = Some(n.children[i]);
             return;
         }
         let pick = |pred: &dyn Fn(&HunlAction) -> bool| n.actions.iter().position(pred);
@@ -307,7 +380,107 @@ impl GtoBot {
                 }
             }
         };
+        if let Some(i) = i {
+            self.track.steps.push((node, i));
+        }
         self.track.node = i.map(|i| n.children[i]);
+    }
+
+    /// A river decision from the solved subgame: solved now if there's no
+    /// solution yet or the real river left its tree. `None` to fall back to
+    /// the blueprint.
+    fn river_action(&mut self, obs: &Observation) -> Option<Action> {
+        if obs.seats.len() != 2 {
+            return None;
+        }
+        self.follow(obs);
+        let me = self.track.me;
+        let root = river_root(obs)?;
+        // The real river so far must replay legally to our turn.
+        let mut b = root.clone();
+        for &a in &self.track.river_path {
+            if b.is_over() {
+                return None;
+            }
+            b = b.play(a);
+        }
+        if b.is_over() || b.to_act != me {
+            return None;
+        }
+        let path = self.track.river_path.clone();
+        let on_tree = |s: &RiverSolver| s.tree.follow(&path).is_some();
+        if !self.track.solved.as_deref().is_some_and(on_tree) {
+            let solver = self.solve_river(obs, &root, &path)?;
+            self.track.solved = Some(Box::new(solver));
+            self.river_solves += 1;
+        }
+        let solver = self.track.solved.as_deref()?;
+        let node = solver.tree.follow(&path)?;
+        let hole: Vec<Card> = obs.hole_cards.iter(false).map(from_ducy).collect();
+        let probs = solver.probs(node, hole_index(hole[0], hole[1]))?;
+        let a = solver.tree.nodes[node as usize].actions[self.rng.sample(&probs)];
+        self.track.pending = None;
+        Some(real_action(a, obs))
+    }
+
+    /// Solves the river from `root` with the real actions `path` in the
+    /// tree, the bot's own earlier river actions frozen at the previous
+    /// solution, and the gadget against the blueprint's river values.
+    fn solve_river(
+        &self,
+        obs: &Observation,
+        root: &Betting,
+        path: &[HunlAction],
+    ) -> Option<RiverSolver> {
+        let settings = self.river.as_ref()?;
+        let bp_root = self.track.river_root?;
+        let bp_node = &self.tree.nodes[bp_root as usize];
+        if bp_node.actions.is_empty() || bp_node.betting.street != 3 {
+            return None;
+        }
+        let board: Vec<Card> = obs.board.iter().copied().map(from_ducy).collect();
+        let board: [Card; 5] = board.try_into().ok()?;
+        // Both ranges at the start of the river, from the tree steps before it.
+        let before: Vec<(u32, usize)> = self
+            .track
+            .steps
+            .iter()
+            .copied()
+            .filter(|&(n, _)| self.tree.nodes[n as usize].betting.street < 3)
+            .collect();
+        let ranges = replay(&self.cards, &self.blueprint, &self.tree, &before, &board);
+        if ranges.iter().any(|r| r.total() <= 0.0) {
+            return None;
+        }
+        let mut config = settings.config.clone();
+        config.big_blind = obs.rules.big_blind;
+        let mut solver = RiverSolver::new(
+            board,
+            root,
+            &config,
+            path,
+            [&ranges[0].weight, &ranges[1].weight],
+        );
+        let me = self.track.me;
+        let buckets = self.cards.buckets(&board);
+        let reference = solver.blueprint_strategy(&self.blueprint, &self.tree, bp_root, &buckets);
+        let target = solver.best_response(1 - me, &reference);
+        solver.set_gadget(1 - me, target);
+        if let Some(prev) = self.track.solved.as_deref() {
+            for (k, (node, _)) in solver.tree.along(path)?.into_iter().enumerate() {
+                let n = &solver.tree.nodes[node as usize];
+                if n.betting.to_act != me {
+                    continue;
+                }
+                if let Some(old) = prev.tree.follow(&path[..k])
+                    && prev.tree.nodes[old as usize].actions == n.actions
+                {
+                    solver.freeze(node, prev.average_at(old));
+                }
+            }
+        }
+        run_budget(&mut solver, settings);
+        Some(solver)
     }
 
     /// Converts an abstract action at `node` to a legal real one.
@@ -373,6 +546,59 @@ enum Real {
     Raise { frac: f64, all_in: bool },
 }
 
+/// Runs a solver for the iterations (and time) allowed.
+fn run_budget(solver: &mut RiverSolver, settings: &RiverSolving) {
+    match settings.time {
+        None => solver.run(settings.iterations),
+        Some(limit) => {
+            let start = std::time::Instant::now();
+            for _ in 0..settings.iterations {
+                solver.iterate();
+                if start.elapsed() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// The real hand's betting at the start of the river (player 0 the button).
+fn river_root(obs: &Observation) -> Option<Betting> {
+    let seat = |p: usize| if p == 0 { obs.button } else { 1 - obs.button };
+    let mut stack = [0; 2];
+    let mut contributed = [0; 2];
+    for p in 0..2 {
+        let s = obs.seats.get(seat(p))?;
+        stack[p] = s.stack + s.street_bet;
+        contributed[p] = s.contributed - s.street_bet;
+    }
+    Some(Betting::street_start(
+        3,
+        stack,
+        contributed,
+        obs.rules.big_blind,
+    ))
+}
+
+/// A subgame action in real chips, clamped to what's legal.
+fn real_action(a: HunlAction, obs: &Observation) -> Action {
+    let legal = &obs.legal;
+    let check_or_call = if legal.can_check {
+        Action::Check
+    } else {
+        Action::Call
+    };
+    match a {
+        HunlAction::Fold if legal.can_fold => Action::Fold,
+        HunlAction::Fold | HunlAction::Check | HunlAction::Call => check_or_call,
+        HunlAction::Bet(to) | HunlAction::Raise(to) => match (legal.bet, legal.raise) {
+            (Some(r), _) => Action::Bet(to.clamp(r.min_to, r.max_to)),
+            (None, Some(r)) => Action::Raise(to.clamp(r.min_to, r.max_to)),
+            (None, None) => check_or_call,
+        },
+    }
+}
+
 fn street_index(s: Street) -> usize {
     match s {
         Street::Preflop => 0,
@@ -391,6 +617,12 @@ impl Bot for GtoBot {
                 None if obs.legal.can_check => Action::Check,
                 None => Action::Call,
             });
+        }
+        if self.river.is_some()
+            && obs.street == Street::River
+            && let Some(action) = self.river_action(obs)
+        {
+            return Some(action);
         }
         match self.strategy(obs) {
             Some((actions, probs)) => {
@@ -412,7 +644,7 @@ impl Bot for GtoBot {
                             Action::Bet(_) | Action::Raise(_)
                         )
                 );
-                self.track.pending = same.then(|| self.tree.nodes[node as usize].children[i]);
+                self.track.pending = same.then_some(i);
                 Some(action)
             }
             None => Some(self.fallback(obs)),

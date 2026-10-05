@@ -5,7 +5,7 @@ use ducy_gto::{
     holdem::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
-        bot::{GtoBot, pseudo_harmonic},
+        bot::{GtoBot, RiverSolving, pseudo_harmonic},
         hunl::{Hunl, HunlConfig},
     },
 };
@@ -113,6 +113,56 @@ fn same_seed_same_play() {
             .net
     };
     assert_eq!(run(), run());
+}
+
+/// Plays `deals` duplicate deals with a river-solving bot in seat 0 and
+/// returns (illegal actions, river solves).
+fn play_solving(other: Box<dyn Bot>, deals: usize, rules: TableRules, stack: u64) -> (u32, u32) {
+    use std::sync::Mutex;
+    struct Shared(Arc<Mutex<GtoBot>>);
+    impl Bot for Shared {
+        fn act(&mut self, o: &ducy_play::Observation) -> Option<ducy_play::Action> {
+            self.0.lock().unwrap().act(o)
+        }
+        fn hand_over(&mut self, s: &ducy_play::HandSummary) {
+            self.0.lock().unwrap().hand_over(s)
+        }
+    }
+    let gto = Arc::new(Mutex::new(
+        bot(21).with_river_solving(RiverSolving::new(6)),
+    ));
+    let mut bots: Vec<Box<dyn Bot>> = vec![Box::new(Shared(gto.clone())), other];
+    let config = MatchConfig::new(rules, deals, 17)
+        .with_starting_stack(stack)
+        .duplicate();
+    let r = run_match(&config, &mut bots).unwrap();
+    let solves = gto.lock().unwrap().river_solves;
+    (r.fallbacks[0], solves)
+}
+
+#[test]
+fn river_solving_plays_legally_against_wild_bets() {
+    // RandomBot bets every size, so the bot re-solves for off-tree bets.
+    let (illegal, solves) = play_solving(
+        Box::new(RandomBot::new(Some(22))),
+        150,
+        TableRules::no_limit_holdem(1, 2),
+        200,
+    );
+    assert_eq!(illegal, 0);
+    assert!(solves > 0, "never solved a river");
+}
+
+#[test]
+fn river_solving_plays_legally_at_other_stakes() {
+    let (illegal, solves) = play_solving(
+        Box::new(ducy_play::bots::CallingStation),
+        40,
+        TableRules::no_limit_holdem(5, 10),
+        400,
+    );
+    assert_eq!(illegal, 0);
+    assert!(solves > 0, "never solved a river");
 }
 
 #[test]
