@@ -55,3 +55,14 @@ impl Key for () {
         Some(())
     }
 }
+
+impl Key for Vec<u8> {
+    fn write(&self, out: &mut Vec<u8>) {
+        out.extend((self.len() as u64).to_le_bytes());
+        out.extend(self);
+    }
+    fn read(input: &mut &[u8]) -> Option<Self> {
+        let n = read_u64(input)? as usize;
+        take(input, n).map(<[u8]>::to_vec)
+    }
+}

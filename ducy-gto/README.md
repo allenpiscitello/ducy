@@ -10,7 +10,7 @@ expectation to any opponent. How far a strategy is from one is its
 **exploitability**: what a best-responding opponent wins against it. This
 crate finds equilibria and measures exploitability exactly.
 
-## What's here (steps 1–2 of 8)
+## What's here (steps 1–4 of 8)
 
 - `Game`: the interface a game implements (chance, players, payoffs, information sets).
 - `Cfr`: vanilla CFR and CFR+ over the whole game tree, for games small
@@ -26,6 +26,16 @@ crate finds equilibria and measures exploitability exactly.
   - **Compact storage:** `f32` regrets and strategy sums in flat arrays.
   - **Checkpoints:** `save` / `load`. A resumed run is identical to an unbroken one.
 - `exploitability`, `best_response_value`, `expected_value`: exact evaluation of a `Profile`.
+- `holdem::abstraction::CardAbstraction`: maps hole cards and a board to a bucket per street:
+  - **Preflop:** 169 lossless classes.
+  - **Flop and turn:** k-means under earth mover's distance on each hand's
+    river-equity histogram over all runouts. Hands are canonicalized by suit
+    isomorphism first.
+  - **River:** equal-population buckets of equity against a random hand.
+- `holdem::hunl::Hunl`: the abstract heads-up no-limit game, with a
+  configurable bet menu (`BetMenu`) and the card abstraction for information
+  sets. Its betting follows ducy-play's rules exactly (fuzz-tested against
+  `ducy_play::Hand`).
 - `games::kuhn` and `games::leduc`: Kuhn poker and Leduc hold'em, small games
   with known equilibrium values, for checking the solver.
 
@@ -72,12 +82,64 @@ where one iteration costs the same however large the tree is.
 core (batches of 16) and 273,000 with 4 cores (batches of 1,024), with 18.7
 bytes of regrets and strategy sums per information set.
 
+## Card abstraction
+
+`cargo run --release -p ducy-gto --example build_abstraction -- abstraction.bin`
+builds the default abstraction (169 / 200 / 200 / 200 buckets) and checks it.
+It's one pass over every runout of all 1,755 distinct flops (2.06 million
+river boards) to sample equity histograms and fit the clusters, then a second
+pass to assign all 1,286,792 canonical flop hands and 55,190,538 canonical
+turn hands. Those are the known counts of distinct hands up to suit
+isomorphism, and the build checks it finds exactly that many.
+
+The speed comes from scoring each river board once for every hand
+(`river_equities`): score the 1,081 hands the board allows, sort them, and
+count each hand's wins and ties with binary searches, correcting for shared
+cards. That takes about 120 µs per board, against 17 µs per hand (18 ms per
+board) one hand at a time.
+
+On 4 cores (default config):
+
+| Stage | Time |
+|---|---|
+| Sample equity histograms (every runout of every flop) | 79 s |
+| Cluster flop hands (k-means, EMD, 200 clusters) | 22 s |
+| Cluster turn hands | 12 s |
+| Assign all flop and turn hands (second full pass) | 160 s |
+| Sort the tables | 3 s |
+| **Total** | **4.6 min** |
+
+The file is 565 MB. Sanity checks from the build:
+- Isomorphic hands share a bucket.
+- A set, a flush draw and air land in different flop buckets.
+- On the river, the royal flush is in the top bucket (199), the second-nut
+  flush in bucket 196, and a busted hand in bucket 0.
+
+The turn table is most of the file: an 8-byte canonical key and a 2-byte
+bucket per hand. A dense hand index (Waugh's hand isomorphism) would drop the
+keys and shrink it about tenfold, if the size becomes a problem.
+
+## The abstract game
+
+With the default bet menu, the betting tree has these information sets with
+the default buckets:
+
+| Street | Betting sequences | Information sets | Actions |
+|---|---|---|---|
+| Preflop | 16 | 2,704 | 45 per bucket |
+| Flop | 180 | 36,000 | 512 per bucket |
+| Turn | 1,532 | 306,400 | 4,264 per bucket |
+| River | 9,236 | 1,847,200 | 24,976 per bucket |
+
+That's about 2.2 million information sets and 48 MB of `f32` regrets and
+strategy sums, small enough to train on one machine.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
-2. **This:** Monte Carlo CFR with linear/discounted weighting, pruning and parallel training (#86)
-3. Card abstraction: suit isomorphism, equity-distribution buckets (#87)
-4. Action abstraction and the abstract heads-up no-limit tree (#88)
+2. **Done:** Monte Carlo CFR with linear/discounted weighting, pruning and parallel training (#86)
+3. **Done:** Card abstraction: suit isomorphism, equity-distribution buckets (#87)
+4. **Done:** Action abstraction and the abstract heads-up no-limit tree (#88)
 5. Train and store the blueprint strategy (#89)
 6. `GtoBot`: play the blueprint in ducy-play, with action translation (#90)
 7. Evaluation: Local Best Response and duplicate matches against the built-in bots (#91)

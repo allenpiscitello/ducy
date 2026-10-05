@@ -299,10 +299,8 @@ where
                 if player == 0 { u } else { -u }
             }
             Turn::Chance => {
-                let outcomes = self.game.chance_outcomes(s);
-                let probs: Vec<f64> = outcomes.iter().map(|(_, p)| *p).collect();
-                let i = rng.sample(&probs);
-                self.traverse(&outcomes[i].0, player, prune, rng, delta)
+                let next = self.game.sample_chance(s, rng);
+                self.traverse(&next, player, prune, rng, delta)
             }
             Turn::Player(p) => {
                 let n = self.game.num_actions(s);

@@ -33,6 +33,7 @@
 mod cfr;
 mod game;
 pub mod games;
+pub mod holdem;
 mod key;
 mod mccfr;
 mod profile;
