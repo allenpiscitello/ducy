@@ -9,6 +9,9 @@
 //! - [`Game`]: the interface a game implements (chance, players, terminal
 //!   payoffs, information sets).
 //! - [`Cfr`]: vanilla CFR and CFR+ over the full tree, for small games.
+//! - [`Mccfr`]: Monte Carlo CFR with external sampling, discounting (Linear
+//!   CFR, DCFR), regret-based pruning, parallel batches and checkpoints, for
+//!   games too big to walk in full.
 //! - [`exploitability`], [`best_response_value`], [`expected_value`]: exact
 //!   evaluation of a [`Profile`].
 //! - [`games`]: Kuhn poker and Leduc hold'em, small games with known
@@ -30,8 +33,14 @@
 mod cfr;
 mod game;
 pub mod games;
+mod key;
+mod mccfr;
 mod profile;
+mod rng;
 
 pub use cfr::{Cfr, Variant};
 pub use game::{Game, Turn};
+pub use key::Key;
+pub use mccfr::{Config, Discount, Mccfr, Prune};
 pub use profile::{Profile, best_response_value, expected_value, exploitability};
+pub use rng::Rng;

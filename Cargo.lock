@@ -243,6 +243,10 @@ dependencies = [
 [[package]]
 name = "ducy-gto"
 version = "0.1.0"
+dependencies = [
+ "criterion",
+ "rayon",
+]
 
 [[package]]
 name = "ducy-play"
