@@ -39,6 +39,8 @@ crate finds equilibria and measures exploitability exactly.
 - `holdem::river`: an exact river solver with safe re-solving, and
   `holdem::range`: ranges tracked through a hand, for solving the river in
   real time (see [below](#solving-the-river-in-real-time)).
+- `holdem::review`: grading a player's decisions in a hand against the
+  blueprint, in big blinds lost (see [below](#reviewing-hands-against-the-blueprint)).
 - `games::kuhn` and `games::leduc`: Kuhn poker and Leduc hold'em, small games
   with known equilibrium values, for checking the solver.
 
@@ -305,6 +307,65 @@ wins −237 ± 1,082 mbb/hand against the blueprint and −251 ± 1,077 against
 river solving over 2,000 hands, a paired change of −14 ± 293. With the
 compact abstraction a river solve costs about 0.25 s in all (ranges, then
 200 iterations), so the duplicate match plays about 7 hands a second.
+
+## Reviewing hands against the blueprint
+
+After a heads-up hand against `GtoBot`, `holdem::review` grades each of the
+player's decisions against the blueprint, holding the same cards (#107):
+
+- **Replay:** the hand is followed on the blueprint's tree exactly as
+  `GtoBot` follows it (`holdem::follow`), and both players' ranges are
+  tracked. A bet between two menu sizes counts as a mix of both, with the
+  pseudo-harmonic mapping's weights.
+- **Values:** at each decision, the expected value of every action on the
+  menu for the player's actual hand against the bot's *range* (never its
+  actual cards, so luck doesn't count), with both players following the
+  blueprint afterwards. Turn and river decisions are exact (every river
+  card), flop decisions average 32 sampled turn and river cards with a
+  standard error, and preflop decisions are graded on the blueprint's mix
+  alone (valuing them means sampling flops, which needs every hand's flop
+  bucket: too slow with the compact abstraction).
+- **Grades:**
+  - the blueprint's main (most frequent) action is always **fine**;
+  - an action it mixes in at least 5% of the time is **fine** too, with a
+    note that it's the less common choice and what the main play is;
+  - anything else is graded by the big blinds it gives up against the best
+    action: **fine** under 0.25 bb (or within twice the sampling error),
+    then **inaccuracy**, **mistake** from 1 bb and **blunder** from 4 bb;
+  - preflop, a play the blueprint (almost) never makes is a **deviation**,
+    with no cost attached.
+- **Sessions:** `ReviewLog` keeps the finished hands so a player can play
+  several and then review them all; `SessionReview` totals the big blinds
+  lost (per 100 hands too), the grades and the costliest decisions, with
+  the actual result kept apart.
+
+In ducy-wasm, a `BotTable` heads-up against `"gto"` keeps each finished
+hand: `reviewLastHand()`, `reviewSession()` (`{hands, summary}`),
+`reviewableHands()` and `clearReviews()`. `ducy-wasm/tests/review.cjs`
+plays and reviews hands under Node in CI, with the tiny model from
+`cargo run -p ducy-gto --example tiny_model -- target/tiny-model`.
+
+The tests check it against brute force (ranges, and turn, river and flop
+values), on known spots (folding the nuts to a shove costs the 101 bb pot,
+calling off with the worst hand costs 99 bb, checking the nuts gives up
+value), that the replay reproduces the real pot at every decision, that the
+same hand reviews the same way twice, and that `GtoBot` reviewing its own
+play is charged nothing.
+
+### Calibrating it
+
+```sh
+gh release download gto-hunl-300m -p cards.bin -p blueprint.bin
+cargo run --release -p ducy-gto --example review_calibration -- \
+    --cards cards.bin --blueprint blueprint.bin --hands 500
+```
+
+This plays `GtoBot` against itself, EquityBot, a calling station and every
+personality, reviews the opponent's decisions, and prints the big blinds
+charged per 100 hands and per decision, the grades, the actual result, and
+the review time per decision on each street. `GtoBot` should be charged
+about nothing, and the bots it beats most (`gto_match`) should be charged
+the most.
 
 ## Next steps
 
