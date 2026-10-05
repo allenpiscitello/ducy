@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 
 mod play;
-pub use play::BotTable;
+pub use play::{BotTable, MultiTable};
 
 use ducy::deck::{Card, Deck};
 use ducy::games::flop_game::FlopGame;

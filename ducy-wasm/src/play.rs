@@ -6,22 +6,15 @@
 //! can show each decision as it happens. [`BotTable::state`] returns what the
 //! person may see: their own cards, public chip counts, and other players'
 //! cards only once they're shown down.
+//!
+//! [`MultiTable`] hosts the same kind of table for people on other devices:
+//! the page passes it each player's messages and sends back what it returns.
 
-use ducy::deck::{Card, Deck};
 use ducy_play::{
-    Action, Bot, Deal, Event, Hand, LegalActions, Personality, PersonalityBot, Pot, Street,
-    TableRules, Variant,
+    Action, Command, Outgoing, Personality, Table, TableHost, TableRules, TableSeat, Variant,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
-
-fn cards(deck: Deck) -> Vec<String> {
-    deck.iter(true).map(|c| c.to_string()).collect()
-}
-
-fn card_strings(board: &[Card]) -> Vec<String> {
-    board.iter().map(|c| c.to_string()).collect()
-}
 
 fn err(e: impl std::fmt::Debug) -> JsError {
     JsError::new(&format!("{e:?}"))
@@ -50,57 +43,50 @@ pub fn bot_personalities() -> Result<JsValue, JsError> {
     serde_wasm_bindgen::to_value(&list).map_err(err)
 }
 
-#[derive(Serialize)]
-struct SeatState {
-    name: String,
-    /// Personality id, or "you" for the person's seat.
-    id: String,
-    stack: u64,
-    street_bet: u64,
-    folded: bool,
-    all_in: bool,
-    /// The person's own cards always; a bot's only once shown down.
-    cards: Option<Vec<String>>,
-    /// Chips won this hand, once it's over.
-    won: u64,
-    /// Net result this hand, once it's over.
-    net: i64,
+fn rules_for(game: Option<&str>, small_blind: u64, big_blind: u64) -> Result<TableRules, JsError> {
+    Ok(match game.unwrap_or("nlhe") {
+        "nlhe" => TableRules::no_limit_holdem(small_blind, big_blind),
+        g @ ("plo4" | "plo5" | "plo6") => TableRules::pot_limit_omaha(small_blind, big_blind)
+            .with_variant(Variant::Omaha {
+                hole_cards: g[3..].parse().unwrap_or(4),
+            }),
+        g => return Err(JsError::new(&format!("unknown game {g}"))),
+    })
 }
 
-#[derive(Serialize)]
-struct TableState {
-    hand_number: u64,
-    street: Option<Street>,
-    board: Vec<String>,
-    pot: u64,
-    current_bet: u64,
-    button: usize,
-    hero: usize,
-    big_blind: u64,
-    /// The seat whose turn it is, if the hand is still going.
-    to_act: Option<usize>,
-    /// What the person may do, when it's their turn.
-    legal: Option<LegalActions>,
-    seats: Vec<SeatState>,
-    events: Vec<Event>,
-    complete: bool,
-    showdown: bool,
-    pots: Vec<Pot>,
+/// "You" in seat 0, then one seat per bot id.
+fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
+    if bots.is_empty() || bots.len() + 1 > ducy_play::MAX_PLAYERS {
+        return Err(JsError::new("between 1 and 8 bots"));
+    }
+    let mut seats = vec![TableSeat::human("You", "you")];
+    for (i, id) in bots.iter().enumerate() {
+        let p =
+            Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
+        seats.push(TableSeat::bot(
+            p.id(),
+            p.bot(Some(seed.wrapping_add(i as u64 + 1))),
+        ));
+    }
+    Ok(seats)
+}
+
+fn action(kind: &str, amount: u64) -> Result<Action, JsError> {
+    Ok(match kind {
+        "fold" => Action::Fold,
+        "check" => Action::Check,
+        "call" => Action::Call,
+        "bet" => Action::Bet(amount),
+        "raise" => Action::Raise(amount),
+        "allin" => Action::AllIn,
+        _ => return Err(JsError::new(&format!("unknown action {kind}"))),
+    })
 }
 
 /// A Hold'em or Omaha table: the person in seat 0 and up to eight bots.
 #[wasm_bindgen]
 pub struct BotTable {
-    rules: TableRules,
-    names: Vec<String>,
-    ids: Vec<String>,
-    bots: Vec<Option<PersonalityBot>>,
-    stacks: Vec<u64>,
-    buy_in: u64,
-    button: usize,
-    hand: Option<Hand>,
-    hand_number: u64,
-    seed: u64,
+    table: Table,
 }
 
 #[wasm_bindgen]
@@ -119,189 +105,203 @@ impl BotTable {
         seed: u64,
         game: Option<String>,
     ) -> Result<BotTable, JsError> {
-        let rules = match game.as_deref().unwrap_or("nlhe") {
-            "nlhe" => TableRules::no_limit_holdem(small_blind, big_blind),
-            g @ ("plo4" | "plo5" | "plo6") => TableRules::pot_limit_omaha(small_blind, big_blind)
-                .with_variant(Variant::Omaha {
-                    hole_cards: g[3..].parse().unwrap_or(4),
-                }),
-            g => return Err(JsError::new(&format!("unknown game {g}"))),
-        };
-        if bots.is_empty() || bots.len() + 1 > ducy_play::MAX_PLAYERS {
-            return Err(JsError::new("between 1 and 8 bots"));
-        }
+        let rules = rules_for(game.as_deref(), small_blind, big_blind)?;
         if small_blind == 0 || big_blind < small_blind || buy_in < big_blind {
             return Err(JsError::new("invalid blinds or buy-in"));
         }
-        let mut names = vec!["You".to_string()];
-        let mut ids = vec!["you".to_string()];
-        let mut seats = vec![None];
-        for (i, id) in bots.iter().enumerate() {
-            let p = Personality::from_name(id)
-                .ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
-            names.push(p.name().to_string());
-            ids.push(p.id().to_string());
-            seats.push(Some(p.bot(Some(seed.wrapping_add(i as u64 + 1)))));
-        }
-        let n = names.len();
-        Ok(BotTable {
-            rules,
-            names,
-            ids,
-            bots: seats,
-            stacks: vec![buy_in; n],
-            buy_in,
-            button: n - 1,
-            hand: None,
-            hand_number: 0,
-            seed,
-        })
+        let table = Table::new(rules, seats_for(&bots, seed)?, buy_in, seed).map_err(err)?;
+        Ok(BotTable { table })
     }
 
     /// Deals the next hand (moving the button and topping up broke players)
     /// and returns the state.
     #[wasm_bindgen(js_name = newHand)]
     pub fn new_hand(&mut self) -> Result<JsValue, JsError> {
-        if let Some(h) = &self.hand {
-            match h.result() {
-                Some(r) => self.stacks = r.final_stacks.clone(),
-                None => return Err(JsError::new("the current hand isn't over")),
-            }
+        if self.table.in_hand() {
+            return Err(JsError::new("the current hand isn't over"));
         }
-        for s in &mut self.stacks {
-            if *s == 0 {
-                *s = self.buy_in;
-            }
-        }
-        self.button = (self.button + 1) % self.stacks.len();
-        self.hand_number += 1;
-        let deal = Deal::random(
-            self.rules.variant,
-            self.stacks.len(),
-            Some(self.seed.wrapping_add(self.hand_number * 7919)),
-        )
-        .map_err(err)?;
-        self.hand = Some(Hand::new(self.rules, &self.stacks, self.button, deal).map_err(err)?);
+        self.table.new_hand().map_err(err)?;
         self.state()
     }
 
     /// Lets the next bot act if it's a bot's turn; returns the state either way.
     pub fn advance(&mut self) -> Result<JsValue, JsError> {
-        let hand = self
-            .hand
-            .as_mut()
-            .ok_or_else(|| JsError::new("no hand dealt"))?;
-        if let Some(seat) = hand.to_act()
-            && let Some(bot) = self.bots[seat].as_mut()
-        {
-            let obs = hand
-                .observation(seat)
-                .ok_or_else(|| JsError::new("no observation"))?;
-            let action = bot.act(&obs);
-            let ok = action.is_some_and(|a| hand.act(a).is_ok());
-            if !ok {
-                hand.act(ducy_play::fallback_action(&obs.legal))
-                    .map_err(err)?;
-            }
-            self.finish_if_over();
+        if self.table.hand().is_none() {
+            return Err(JsError::new("no hand dealt"));
         }
+        self.table.advance().map_err(err)?;
         self.state()
     }
 
     /// Applies the person's action: "fold", "check", "call", "bet", "raise"
     /// or "allin". `amount` is the street total for a bet or raise.
     pub fn act(&mut self, kind: &str, amount: u64) -> Result<JsValue, JsError> {
-        let hand = self
-            .hand
-            .as_mut()
-            .ok_or_else(|| JsError::new("no hand dealt"))?;
-        if hand.to_act() != Some(0) {
+        if self.table.hand().is_none() {
+            return Err(JsError::new("no hand dealt"));
+        }
+        if self.table.to_act() != Some(0) {
             return Err(JsError::new("it isn't your turn"));
         }
-        let action = match kind {
-            "fold" => Action::Fold,
-            "check" => Action::Check,
-            "call" => Action::Call,
-            "bet" => Action::Bet(amount),
-            "raise" => Action::Raise(amount),
-            "allin" => Action::AllIn,
-            _ => return Err(JsError::new(&format!("unknown action {kind}"))),
-        };
-        hand.act(action).map_err(err)?;
-        self.finish_if_over();
+        self.table.act(0, action(kind, amount)?).map_err(err)?;
         self.state()
     }
 
     /// Whether it's a bot's turn (the page calls `advance` while this is true).
     #[wasm_bindgen(js_name = botToAct)]
     pub fn bot_to_act(&self) -> bool {
-        self.hand
-            .as_ref()
-            .and_then(|h| h.to_act())
-            .is_some_and(|s| self.bots[s].is_some())
+        self.table.auto_to_act()
     }
 
     /// What the person may see right now.
     pub fn state(&self) -> Result<JsValue, JsError> {
-        let hand = self
-            .hand
-            .as_ref()
-            .ok_or_else(|| JsError::new("no hand dealt"))?;
-        let result = hand.result();
-        let showdown = result.is_some_and(|r| r.showdown);
-        let seats = (0..hand.num_seats())
-            .map(|s| {
-                let shown = s == 0 || (showdown && !hand.has_folded(s));
-                SeatState {
-                    name: self.names[s].clone(),
-                    id: self.ids[s].clone(),
-                    stack: result.map_or(hand.stack(s), |r| r.final_stacks[s]),
-                    street_bet: if result.is_some() {
-                        0
-                    } else {
-                        hand.street_bet(s)
-                    },
-                    folded: hand.has_folded(s),
-                    all_in: hand.is_all_in(s),
-                    cards: shown.then(|| cards(hand.deal().hole_cards()[s])),
-                    won: result.map_or(0, |r| r.payouts[s]),
-                    net: result.map_or(0, |r| r.net[s]),
-                }
-            })
-            .collect();
-        let to_act = hand.to_act();
-        let state = TableState {
-            hand_number: self.hand_number,
-            street: (!hand.is_complete()).then(|| hand.street()),
-            board: card_strings(hand.board()),
-            pot: hand.pot(),
-            current_bet: hand.current_bet(),
-            button: hand.button(),
-            hero: 0,
-            big_blind: self.rules.big_blind,
-            to_act,
-            legal: hand.legal_actions().filter(|l| l.seat == 0),
-            seats,
-            events: hand.events().to_vec(),
-            complete: hand.is_complete(),
-            showdown,
-            pots: result.map_or_else(Vec::new, |r| r.pots.clone()),
-        };
-        serde_wasm_bindgen::to_value(&state).map_err(err)
+        if self.table.hand().is_none() {
+            return Err(JsError::new("no hand dealt"));
+        }
+        to_js(&self.table.view(0))
     }
 }
 
-impl BotTable {
-    /// Tells the bots how a finished hand went, so they can adapt.
-    fn finish_if_over(&mut self) {
-        let Some(hand) = &self.hand else { return };
-        if !hand.is_complete() {
-            return;
+fn to_js(value: &impl Serialize) -> Result<JsValue, JsError> {
+    value
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(err)
+}
+
+#[derive(Serialize)]
+struct Message<'a> {
+    to: &'a str,
+    data: &'a ducy_play::Update,
+}
+
+/// What a host call returns: the host's own view, whether a bot or away
+/// player should act next, and the messages to send to each player.
+#[derive(Serialize)]
+struct HostResult<'a> {
+    /// Goes up whenever anything changes, so the page can drop late results.
+    seq: u64,
+    state: ducy_play::TableView,
+    #[serde(rename = "botToAct")]
+    bot_to_act: bool,
+    #[serde(rename = "turnMsLeft")]
+    turn_ms_left: Option<u64>,
+    #[serde(rename = "openSeats")]
+    open_seats: usize,
+    out: Vec<Message<'a>>,
+}
+
+/// A table hosted for people on other devices: the host in seat 0, bots in
+/// the other seats, and some of those seats open for people to take. Every
+/// call takes the time in milliseconds (e.g. `Date.now()`) and returns
+/// `{seq, state, botToAct, turnMsLeft, openSeats, out}`, where `out` lists
+/// `{to, data}` messages for the page to send to each player.
+#[wasm_bindgen]
+pub struct MultiTable {
+    host: TableHost,
+}
+
+#[wasm_bindgen]
+impl MultiTable {
+    /// Like [`BotTable::new`], with `open` saying which bot seats people may
+    /// take (one flag per bot) and `host_name` the host's shown name.
+    /// `turn_ms` is how long a person has to act (0 for no limit).
+    #[wasm_bindgen(constructor)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        bots: Vec<String>,
+        open: Vec<u8>,
+        host_name: String,
+        buy_in: u64,
+        small_blind: u64,
+        big_blind: u64,
+        seed: u64,
+        game: Option<String>,
+        turn_ms: u64,
+    ) -> Result<MultiTable, JsError> {
+        let rules = rules_for(game.as_deref(), small_blind, big_blind)?;
+        if small_blind == 0 || big_blind < small_blind || buy_in < big_blind {
+            return Err(JsError::new("invalid blinds or buy-in"));
         }
-        for (seat, bot) in self.bots.iter_mut().enumerate() {
-            if let (Some(bot), Some(summary)) = (bot.as_mut(), hand.summary(seat)) {
-                bot.hand_over(&summary);
-            }
+        if open.len() != bots.len() {
+            return Err(JsError::new("one open flag per bot"));
         }
+        let mut seats = seats_for(&bots, seed)?;
+        let name: String = host_name.trim().chars().take(ducy_play::MAX_NAME).collect();
+        if !name.is_empty() {
+            seats[0].name = name;
+        }
+        let table = Table::new(rules, seats, buy_in, seed).map_err(err)?;
+        let open = std::iter::once(false)
+            .chain(open.iter().map(|&o| o != 0))
+            .collect();
+        let host = TableHost::new(table, open, turn_ms).map_err(err)?;
+        Ok(MultiTable { host })
+    }
+
+    fn result(&self, out: &[Outgoing], now: u64) -> Result<JsValue, JsError> {
+        to_js(&HostResult {
+            seq: self.host.seq(),
+            state: self.host.host_view(),
+            bot_to_act: self.host.auto_to_act(),
+            turn_ms_left: self.host.turn_ms_left(now),
+            open_seats: self.host.open_seats(),
+            out: out
+                .iter()
+                .map(|o| Message {
+                    to: &o.to,
+                    data: &o.update,
+                })
+                .collect(),
+        })
+    }
+
+    /// The host's view, with no messages.
+    pub fn state(&self, now: f64) -> Result<JsValue, JsError> {
+        self.result(&[], now as u64)
+    }
+
+    /// A message from player `client` (a JSON command object).
+    pub fn handle(&mut self, client: &str, command: JsValue, now: f64) -> Result<JsValue, JsError> {
+        let now = now as u64;
+        let out = match serde_wasm_bindgen::from_value::<Command>(command) {
+            Ok(c) => self.host.handle(client, c, now),
+            Err(_) => vec![Outgoing {
+                to: client.to_string(),
+                update: ducy_play::Update::Rejected {
+                    reason: "bad message".to_string(),
+                },
+            }],
+        };
+        self.result(&out, now)
+    }
+
+    /// Player `client`'s connection dropped.
+    pub fn disconnected(&mut self, client: &str, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.disconnected(client, now as u64);
+        self.result(&out, now as u64)
+    }
+
+    /// Deals the next hand.
+    #[wasm_bindgen(js_name = newHand)]
+    pub fn new_hand(&mut self, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.new_hand(now as u64).map_err(err)?;
+        self.result(&out, now as u64)
+    }
+
+    /// Lets a bot (or an away player) act.
+    pub fn advance(&mut self, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.advance(now as u64).map_err(err)?;
+        self.result(&out, now as u64)
+    }
+
+    /// The host's own action.
+    pub fn act(&mut self, kind: &str, amount: u64, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.host_act(kind, amount, now as u64).map_err(err)?;
+        self.result(&out, now as u64)
+    }
+
+    /// Runs the turn clock; call it every half second or so.
+    pub fn tick(&mut self, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.tick(now as u64);
+        self.result(&out, now as u64)
     }
 }
