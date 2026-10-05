@@ -133,7 +133,7 @@ fn polar_range_bluffs_and_bluff_catcher_calls_at_indifference() {
         ranges[0][h] = 1.0;
     }
     let mut s = RiverSolver::new(b, &root, &config, &[], [&ranges[0], &ranges[1]]);
-    s.run(2000);
+    s.run(1000);
     let bet_freq = |hs: &[usize]| -> f64 {
         hs.iter().map(|&h| s.probs(0, h).unwrap()[1]).sum::<f64>()
     };

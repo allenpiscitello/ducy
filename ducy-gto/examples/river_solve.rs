@@ -25,22 +25,6 @@ fn main() {
         ("Kc Jd 5s 4h 3d", 100, 100),
     ];
     let mut rng = Rng::new(7);
-    if std::env::var("SDBENCH").is_ok() {
-        let b: [u8; 5] = parse("Qs Td 7h 4c 2s").unwrap().try_into().unwrap();
-        let h = ducy_gto::holdem::river::RiverHands::new(b);
-        let opp: Vec<f32> = (0..h.len()).map(|_| rng.next_f64() as f32).collect();
-        let mut out = vec![0f32; h.len()];
-        let t = Instant::now();
-        for _ in 0..10000 {
-            h.showdown(&opp, 1.0, &mut out);
-        }
-        println!("showdown {:?}", t.elapsed() / 10000);
-        let t = Instant::now();
-        for _ in 0..10000 {
-            h.fold(&opp, 1.0, &mut out);
-        }
-        println!("fold {:?}", t.elapsed() / 10000);
-    }
     for (board, put_in, behind) in spots {
         let b: [u8; 5] = parse(board).unwrap().try_into().unwrap();
         let root = Betting::street_start(3, [behind, behind], [put_in, put_in], 2);
