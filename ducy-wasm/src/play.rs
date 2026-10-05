@@ -20,6 +20,7 @@ use ducy_gto::holdem::{
     blueprint::Blueprint,
     bot::GtoBot,
     hunl::{BettingTree, Hunl, HunlConfig},
+    review::{HandReview, ReviewConfig, ReviewLog, Reviewer, SessionReview},
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -150,9 +151,40 @@ fn action(kind: &str, amount: u64) -> Result<Action, JsError> {
 }
 
 /// A Hold'em or Omaha table: the person in seat 0 and up to eight bots.
+///
+/// Heads-up no-limit Hold'em against "gto", every finished hand is kept for
+/// review: `reviewLastHand` grades the person's decisions in the last one,
+/// and `reviewSession` all of them since the last `clearReviews`.
 #[wasm_bindgen]
 pub struct BotTable {
     table: Table,
+    reviews: ReviewLog,
+    /// The last hand number recorded for review.
+    recorded: u64,
+}
+
+#[derive(Serialize)]
+struct SessionResult {
+    hands: Vec<HandReview>,
+    summary: SessionReview,
+}
+
+/// Runs `f` with a reviewer for the loaded GTO bot.
+fn with_reviewer<T>(f: impl FnOnce(&Reviewer) -> T) -> Result<T, JsError> {
+    GTO.with(|g| {
+        let g = g.borrow();
+        let g = g
+            .as_ref()
+            .ok_or_else(|| JsError::new("call loadGto first"))?;
+        let reviewer = Reviewer {
+            tree: &g.tree,
+            blueprint: &g.blueprint,
+            cards: &g.cards,
+            tree_big_blind: HunlConfig::default().big_blind,
+            config: ReviewConfig::default(),
+        };
+        Ok(f(&reviewer))
+    })
 }
 
 #[wasm_bindgen]
@@ -176,7 +208,11 @@ impl BotTable {
             return Err(JsError::new("invalid blinds or buy-in"));
         }
         let table = Table::new(rules, seats_for(&bots, seed)?, buy_in, seed).map_err(err)?;
-        Ok(BotTable { table })
+        Ok(BotTable {
+            table,
+            reviews: ReviewLog::default(),
+            recorded: 0,
+        })
     }
 
     /// Deals the next hand (moving the button and topping up broke players)
@@ -196,6 +232,7 @@ impl BotTable {
             return Err(JsError::new("no hand dealt"));
         }
         self.table.advance().map_err(err)?;
+        self.keep_for_review();
         self.state()
     }
 
@@ -209,6 +246,7 @@ impl BotTable {
             return Err(JsError::new("it isn't your turn"));
         }
         self.table.act(0, action(kind, amount)?).map_err(err)?;
+        self.keep_for_review();
         self.state()
     }
 
@@ -224,6 +262,64 @@ impl BotTable {
             return Err(JsError::new("no hand dealt"));
         }
         to_js(&self.table.view(0))
+    }
+
+    /// Hands kept for review (heads-up no-limit Hold'em against "gto").
+    #[wasm_bindgen(js_name = reviewableHands)]
+    pub fn reviewable_hands(&self) -> usize {
+        self.reviews.len()
+    }
+
+    /// The review of the person's decisions in the last finished hand
+    /// against "gto", or null if there is none. Each decision has the
+    /// street, board, pot and price in big blinds, the action taken, the
+    /// blueprint's actions with how often it plays each (and their values
+    /// when valued), the big blinds lost, a grade (fine, inaccuracy,
+    /// mistake, blunder, deviation or unknown) and a note.
+    #[wasm_bindgen(js_name = reviewLastHand)]
+    pub fn review_last_hand(&mut self) -> Result<JsValue, JsError> {
+        let reviews = &mut self.reviews;
+        let r = with_reviewer(|rv| reviews.last(rv).cloned())?;
+        match r {
+            Some(r) => to_js(&r),
+            None => Ok(JsValue::NULL),
+        }
+    }
+
+    /// Every kept hand's review, and totals for the session:
+    /// `{hands, summary}`. Hands are reviewed once and remembered.
+    #[wasm_bindgen(js_name = reviewSession)]
+    pub fn review_session(&mut self) -> Result<JsValue, JsError> {
+        let reviews = &mut self.reviews;
+        let (hands, summary) = with_reviewer(|rv| reviews.all(rv))?;
+        to_js(&SessionResult { hands, summary })
+    }
+
+    /// Forgets the hands kept for review, to start a new session.
+    #[wasm_bindgen(js_name = clearReviews)]
+    pub fn clear_reviews(&mut self) {
+        self.reviews.clear();
+    }
+}
+
+impl BotTable {
+    /// Keeps a just-finished hand for review when the person played it
+    /// heads-up against the GTO bot.
+    fn keep_for_review(&mut self) {
+        let number = self.table.hand_number();
+        let Some(hand) = self.table.hand() else {
+            return;
+        };
+        if !hand.is_complete() || number == self.recorded {
+            return;
+        }
+        self.recorded = number;
+        if self.table.num_seats() == 2
+            && self.table.seat(1).id == GTO_ID
+            && let Some(summary) = hand.summary(0)
+        {
+            self.reviews.record(&summary);
+        }
     }
 }
 
