@@ -59,8 +59,12 @@ fn fuzz(config: HunlConfig, hands: usize, seed: u64) {
                 }
                 Turn::Player(p) => {
                     assert_eq!(hand.to_act(), Some(p), "who acts");
-                    assert_eq!(street_index(hand.street()), s.street, "street");
-                    let actions = game.actions(&s);
+                    assert_eq!(
+                        street_index(hand.street()),
+                        game.betting(&s).street,
+                        "street"
+                    );
+                    let actions = game.actions(&s).to_vec();
                     let i = (rng.next_u64() % actions.len() as u64) as usize;
                     let a = actions[i];
                     let real = match a {
@@ -77,14 +81,15 @@ fn fuzz(config: HunlConfig, hands: usize, seed: u64) {
                     );
                     s = game.apply(&s, i);
                     actions_played += 1;
+                    let b = game.betting(&s);
                     for seat in 0..2 {
                         assert_eq!(
                             hand.contributed(seat),
-                            s.contributed[seat],
+                            b.contributed[seat],
                             "contributed after {a:?}"
                         );
                         if !hand.is_complete() {
-                            assert_eq!(hand.stack(seat), s.stack[seat], "stack after {a:?}");
+                            assert_eq!(hand.stack(seat), b.stack[seat], "stack after {a:?}");
                         }
                     }
                 }
@@ -131,9 +136,9 @@ fn heads_up_order_and_blinds() {
     let game = Hunl::new(HunlConfig::default(), None);
     let s = game.deal([[0, 1], [2, 3]], [4, 5, 6, 7, 8]);
     // The button (player 0) posts the small blind and acts first preflop.
-    assert_eq!(s.contributed, [1, 2]);
-    assert_eq!(s.to_act, 0);
-    let a = game.actions(&s);
+    assert_eq!(game.betting(&s).contributed, [1, 2]);
+    assert_eq!(game.betting(&s).to_act, 0);
+    let a = game.actions(&s).to_vec();
     assert_eq!(
         a,
         vec![
@@ -146,7 +151,7 @@ fn heads_up_order_and_blinds() {
     // Limp, check: the flop, where the big blind acts first and bets are
     // a third, three quarters and 1.25 of the 4-chip pot.
     let s = game.apply(&game.apply(&s, 1), 0);
-    assert_eq!((s.street, s.to_act), (1, 1));
+    assert_eq!((game.betting(&s).street, game.betting(&s).to_act), (1, 1));
     assert_eq!(
         game.actions(&s),
         vec![
@@ -163,8 +168,22 @@ fn heads_up_order_and_blinds() {
 fn tree_statistics() {
     let game = Hunl::new(HunlConfig::default(), None);
     let stats = game.tree_stats();
-    println!("{stats:?}");
-    assert!(stats.sequences.iter().all(|&n| n > 0));
-    // Every street's sequences are reachable from the one before it.
-    assert!(stats.sequences[1] > stats.sequences[0] / 10);
+    assert_eq!(stats.sequences, [16, 180, 1532, 9236]);
+    assert_eq!(stats.actions, [45, 512, 4264, 24976]);
+    // Children are numbered after their parent, and every action leads somewhere.
+    for (i, n) in game.tree.nodes.iter().enumerate() {
+        assert_eq!(n.actions.len(), n.children.len());
+        assert!(n.children.iter().all(|&c| c as usize > i));
+    }
+}
+
+#[test]
+fn information_sets_depend_on_betting_and_bucket_only() {
+    let game = Hunl::new(HunlConfig::default(), None);
+    let mut rng = Rng::new(3);
+    let a = game.sample_chance(&game.root(), &mut rng);
+    let b = game.sample_chance(&game.root(), &mut rng);
+    // No abstraction: every hand is bucket 0, so different deals share keys.
+    assert_eq!(game.info(&a), game.info(&b));
+    assert_ne!(game.info(&a), game.info(&game.apply(&a, 1)));
 }
