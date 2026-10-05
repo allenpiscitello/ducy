@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use super::{
     cards::{Card, NUM_CARDS, NUM_HOLES, bit, hole_cards, hole_index, mask, score},
-    equity::{river_equities, river_equity},
+    equity::{river_equities, river_equity, strengths},
     iso::{NUM_PREFLOP_CLASSES, canonical, canonical_board, preflop_class},
     kmeans::{Distance, kmeans, nearest},
 };
@@ -376,6 +376,132 @@ impl CardAbstraction {
             }
             n => panic!("a board has 0, 3, 4 or 5 cards, not {n}"),
         }
+    }
+
+    /// Every hand's bucket with `board`, indexed by
+    /// [`hole_index`](super::cards::hole_index); `u16::MAX` for hands that
+    /// use a board card. The same buckets as [`bucket`](Self::bucket), much
+    /// faster for all 1,326 hands: on the river and with the quick
+    /// abstraction every hand is scored once and the work shared, and a
+    /// compact abstraction builds every hand's histogram from one pass over
+    /// the runouts (about 0.2 s on the flop, 10 ms on the turn).
+    pub fn buckets(&self, board: &[Card]) -> Vec<u16> {
+        let bm = mask(board);
+        let quick = board.len() < 5 && self.flop_centroids.is_empty() && {
+            let table = if board.len() == 3 {
+                &self.flop
+            } else {
+                &self.turn
+            };
+            table.keys.is_empty()
+        };
+        if board.len() == 5 || (board.len() >= 3 && quick) {
+            let mut eq = [0f32; NUM_HOLES];
+            strengths(board, &mut eq);
+            return eq
+                .iter()
+                .map(|&e| match e < 0.0 {
+                    true => u16::MAX,
+                    false if board.len() == 5 => self.river_bucket(e),
+                    false => bucket_of(e, self.num_buckets(board.len())),
+                })
+                .collect();
+        }
+        if matches!(board.len(), 3 | 4) && !self.has_tables() {
+            return self.buckets_on_the_fly(board);
+        }
+        (0..NUM_HOLES)
+            .map(|h| {
+                let (a, b) = hole_cards(h);
+                if bm & (bit(a) | bit(b)) != 0 {
+                    u16::MAX
+                } else {
+                    self.bucket([a, b], board)
+                }
+            })
+            .collect()
+    }
+
+    /// [`bucket_on_the_fly`](Self::bucket_on_the_fly) for every hand at
+    /// once: each runout scores all hands in one [`river_equities`] call, so
+    /// a whole flop takes about 0.2 s on one core instead of 1,081 times
+    /// 13 ms (spread over the cores with the `parallel` feature).
+    fn buckets_on_the_fly(&self, board: &[Card]) -> Vec<u16> {
+        let flop = board.len() == 3;
+        let (bins, centroids) = if flop {
+            (self.config.flop_bins, &self.flop_centroids)
+        } else {
+            (self.config.turn_bins, &self.turn_centroids)
+        };
+        let bm = mask(board);
+        let open: Vec<usize> = (0..NUM_HOLES)
+            .filter(|&h| {
+                let (a, b) = hole_cards(h);
+                bm & (bit(a) | bit(b)) == 0
+            })
+            .collect();
+        let free: Vec<Card> = (0..NUM_CARDS as Card)
+            .filter(|&c| bm & bit(c) == 0)
+            .collect();
+        // Histograms over the rivers after each turn card (after the one turn
+        // on the turn), summed: integer counts, so in any order the same.
+        let turns: Vec<Option<Card>> = if flop {
+            free.iter().map(|&t| Some(t)).collect()
+        } else {
+            vec![None]
+        };
+        let per_turn = |turn: &Option<Card>| {
+            let mut hist = vec![0f32; NUM_HOLES * bins];
+            let mut full = [0u8; 5];
+            full[..board.len()].copy_from_slice(board);
+            let mut eq = [0f32; NUM_HOLES];
+            // Each pair of runout cards once: rivers above the turn card.
+            let (at, rivers) = match *turn {
+                Some(t) => (
+                    3,
+                    &free[free.iter().position(|&c| c == t).expect("free") + 1..],
+                ),
+                None => (4, &free[..]),
+            };
+            if let Some(t) = *turn {
+                full[at] = t;
+            }
+            for &r in rivers {
+                full[4] = r;
+                river_equities(&full, &mut eq);
+                for &h in &open {
+                    // -1 marks hands that hold a runout card.
+                    if eq[h] >= 0.0 {
+                        hist[h * bins + bin(eq[h], bins)] += 1.0;
+                    }
+                }
+            }
+            hist
+        };
+        let add = |mut a: Vec<f32>, b: Vec<f32>| {
+            a.iter_mut().zip(b).for_each(|(x, y)| *x += y);
+            a
+        };
+        #[cfg(feature = "parallel")]
+        let hist = {
+            use rayon::prelude::*;
+            turns
+                .par_iter()
+                .map(per_turn)
+                .reduce(|| vec![0f32; NUM_HOLES * bins], add)
+        };
+        #[cfg(not(feature = "parallel"))]
+        let hist = turns
+            .iter()
+            .map(per_turn)
+            .fold(vec![0f32; NUM_HOLES * bins], add);
+        let mut out = vec![u16::MAX; NUM_HOLES];
+        let mut h = vec![0f32; bins];
+        for &i in &open {
+            normalize(&hist[i * bins..(i + 1) * bins], &mut h);
+            out[i] = nearest(&h, centroids, bins, Distance::Emd) as u16;
+        }
+        out
     }
 
     /// A cheap abstraction for tests and quick experiments, built instantly:

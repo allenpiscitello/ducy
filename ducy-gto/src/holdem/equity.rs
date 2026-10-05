@@ -8,17 +8,26 @@
 
 use super::cards::{Card, NUM_CARDS, NUM_HOLES, bit, hole_index, mask, score};
 
-/// Opponent hands left once the board and our hand are out: C(45, 2).
-const OPPONENT_HANDS: f32 = 990.0;
-
 /// Every hand's share of the pot against a random opponent hand on `board`,
 /// indexed by [`hole_index`]. Hands that use a board card get -1.
 pub fn river_equities(board: &[Card; 5], out: &mut [f32; NUM_HOLES]) {
+    strengths(board, out);
+}
+
+/// Every hand's share against a random opponent hand with `board` (3 to 5
+/// cards) as it is now, ignoring cards to come: the river equity on a full
+/// board, and on the flop and turn the same as
+/// [`hand_strength`](super::abstraction::hand_strength). Hands that use a
+/// board card get -1.
+pub fn strengths(board: &[Card], out: &mut [f32; NUM_HOLES]) {
     let board_mask = mask(board);
     let free: Vec<Card> = (0..NUM_CARDS as Card)
         .filter(|&c| board_mask & bit(c) == 0)
         .collect();
-    let mut hands: Vec<(u32, Card, Card)> = Vec::with_capacity(1081);
+    // Opponent hands left once the board and our hand are out.
+    let rest = free.len() - 2;
+    let opponents = (rest * (rest - 1) / 2) as f32;
+    let mut hands: Vec<(u32, Card, Card)> = Vec::with_capacity(1176);
     for (i, &a) in free.iter().enumerate() {
         for &b in &free[i + 1..] {
             hands.push((score(board_mask | bit(a) | bit(b)), a, b));
@@ -42,7 +51,7 @@ pub fn river_equities(board: &[Card; 5], out: &mut [f32; NUM_HOLES]) {
         // lists removes it twice; add one back to leave it out exactly once.
         let ties = |v: &[u32]| upto(v, s) - below(v, s);
         let equal = ties(&all) + 1 - ties(ca) - ties(cb);
-        out[hole_index(a, b)] = (less as f32 + 0.5 * equal as f32) / OPPONENT_HANDS;
+        out[hole_index(a, b)] = (less as f32 + 0.5 * equal as f32) / opponents;
     }
 }
 
@@ -65,7 +74,7 @@ pub fn river_equity(hole: [Card; 2], board: &[Card; 5]) -> f32 {
             };
         }
     }
-    won / OPPONENT_HANDS
+    won / 990.0
 }
 
 /// Equity against a random hand on any street, averaging over every runout

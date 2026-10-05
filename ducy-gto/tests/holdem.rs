@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use ducy_gto::{
     Rng,
     holdem::{
+        abstraction::CardAbstraction,
         cards::{Card, NUM_HOLES, card, hole_cards, hole_index, parse, rank, suit},
         equity::{equity, river_equities, river_equity},
         iso::{
@@ -193,7 +194,6 @@ fn kmeans_finds_obvious_clusters() {
 
 #[test]
 fn abstraction_files_round_trip_and_compact_needs_centres() {
-    use ducy_gto::holdem::abstraction::CardAbstraction;
     let quick = CardAbstraction::quick(5);
     // The quick form keeps no centres, so it has no compact form.
     assert!(quick.compact().is_none());
@@ -202,4 +202,72 @@ fn abstraction_files_round_trip_and_compact_needs_centres() {
     assert_eq!(loaded, quick);
     assert!(loaded.same_buckets(&quick));
     assert!(CardAbstraction::load(b"DUCYCABS\x03").is_none());
+}
+
+/// A compact abstraction (centres, no tables) with random centres, written
+/// in the file format: its flop and turn buckets are computed from equity
+/// histograms just as a real one's.
+fn random_compact(buckets: usize, bins: usize, seed: u64) -> CardAbstraction {
+    let quick = CardAbstraction::quick(buckets).save();
+    // The quick file: magic, 8 numbers, the river edges, two empty centre
+    // lists and two empty tables.
+    let edges = buckets - 1;
+    let magic = quick.len() - (8 * 8 + 8 + 4 * edges + 4 * 8);
+    let mut out = quick[..magic].to_vec();
+    for v in [buckets, buckets, buckets, bins, bins, 0, 0, 0] {
+        out.extend((v as u64).to_le_bytes());
+    }
+    out.extend((edges as u64).to_le_bytes());
+    out.extend_from_slice(&quick[magic + 72..magic + 72 + 4 * edges]);
+    let mut rng = Rng::new(seed);
+    for _ in 0..2 {
+        out.extend(((buckets * bins) as u64).to_le_bytes());
+        for _ in 0..buckets {
+            let h: Vec<f64> = (0..bins).map(|_| rng.next_f64()).collect();
+            let total: f64 = h.iter().sum();
+            for x in h {
+                out.extend(((x / total) as f32).to_le_bytes());
+            }
+        }
+    }
+    out.extend(0u64.to_le_bytes());
+    out.extend(0u64.to_le_bytes());
+    let c = CardAbstraction::load(&out).expect("a valid file");
+    assert!(!c.has_tables() && c.compact().is_some());
+    c
+}
+
+#[test]
+fn all_buckets_at_once_match_one_at_a_time() {
+    let compact = random_compact(12, 10, 3);
+    let quick = CardAbstraction::quick(12);
+    let mut rng = Rng::new(9);
+    for board in [
+        cards("Kh 9s 4d"),
+        cards("Kh 9s 4d 4c"),
+        cards("Kh 9s 4d 4c 2h"),
+        vec![],
+    ] {
+        let open: Vec<usize> = (0..NUM_HOLES)
+            .filter(|&h| {
+                let (a, b) = hole_cards(h);
+                !board.contains(&a) && !board.contains(&b)
+            })
+            .collect();
+        for abs in [&compact, &quick] {
+            let all = abs.buckets(&board);
+            // One computed flop or turn bucket scores tens of thousands of
+            // hands: check a sample there.
+            let n = match board.len() {
+                3 => 8,
+                4 => 60,
+                _ => open.len(),
+            };
+            for _ in 0..n {
+                let h = open[(rng.next_u64() % open.len() as u64) as usize];
+                let (a, b) = hole_cards(h);
+                assert_eq!(all[h], abs.bucket([a, b], &board), "{h} on {board:?}");
+            }
+        }
+    }
 }
