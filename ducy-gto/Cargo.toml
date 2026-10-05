@@ -1,0 +1,12 @@
+[package]
+name = "ducy-gto"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+license = "MIT"
+description = "Game-theory-optimal poker strategies with counterfactual regret minimization, built on ducy."
+repository = "https://github.com/allenpiscitello/ducy"
+categories = ["game-engines", "algorithms"]
+keywords = ["poker", "cfr", "gto", "nash", "holdem"]
+
+[dependencies]
