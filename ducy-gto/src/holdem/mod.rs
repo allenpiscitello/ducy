@@ -8,6 +8,7 @@ pub mod bot;
 pub mod cards;
 pub mod chart;
 pub mod equity;
+pub mod follow;
 pub mod hunl;
 pub mod iso;
 pub mod kmeans;
