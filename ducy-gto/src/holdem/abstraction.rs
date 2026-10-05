@@ -21,7 +21,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use super::{
-    cards::{Card, NUM_CARDS, NUM_HOLES, bit, hole_cards, hole_index, mask},
+    cards::{Card, NUM_CARDS, NUM_HOLES, bit, hole_cards, hole_index, mask, score},
     equity::{river_equities, river_equity},
     iso::{NUM_PREFLOP_CLASSES, canonical, canonical_board, preflop_class},
     kmeans::{Distance, kmeans, nearest},
@@ -349,6 +349,10 @@ impl CardAbstraction {
                 } else {
                     &self.turn
                 };
+                if table.keys.is_empty() {
+                    // A quick abstraction: hand strength right now.
+                    return bucket_of(hand_strength(hole, board), self.num_buckets(board.len()));
+                }
                 table
                     .get(canonical(&cards))
                     .expect("every canonical hand is in the table")
@@ -358,6 +362,29 @@ impl CardAbstraction {
                 self.river_bucket(river_equity(hole, &b))
             }
             n => panic!("a board has 0, 3, 4 or 5 cards, not {n}"),
+        }
+    }
+
+    /// A cheap abstraction for tests and quick experiments, built instantly:
+    /// preflop classes as usual, then `buckets` equal-width buckets per
+    /// street by the hand's current strength against a random hand (no
+    /// lookahead for draws). Not for real training.
+    pub fn quick(buckets: usize) -> Self {
+        let config = AbstractionConfig {
+            flop_buckets: buckets,
+            turn_buckets: buckets,
+            river_buckets: buckets,
+            flop_bins: 0,
+            turn_bins: 0,
+            sample: 0,
+            kmeans_iters: 0,
+            seed: 0,
+        };
+        Self {
+            config,
+            flop: KeyTable::default(),
+            turn: KeyTable::default(),
+            river_edges: (1..buckets).map(|i| i as f32 / buckets as f32).collect(),
         }
     }
 
@@ -451,6 +478,34 @@ impl CardAbstraction {
 }
 
 const MAGIC: &[u8] = b"DUCYCABS\x01";
+
+fn bucket_of(strength: f32, buckets: usize) -> u16 {
+    ((strength * buckets as f32) as usize).min(buckets - 1) as u16
+}
+
+/// Share of opponent hands `hole` beats (ties count half) with the board as
+/// it is now, ignoring cards to come.
+pub fn hand_strength(hole: [Card; 2], board: &[Card]) -> f32 {
+    let bm = mask(board);
+    let used = bm | bit(hole[0]) | bit(hole[1]);
+    let me = score(used);
+    let free: Vec<Card> = (0..NUM_CARDS as Card)
+        .filter(|&c| used & bit(c) == 0)
+        .collect();
+    let (mut won, mut n) = (0.0f32, 0.0f32);
+    for (i, &a) in free.iter().enumerate() {
+        for &b in &free[i + 1..] {
+            let them = score(bm | bit(a) | bit(b));
+            won += match me.cmp(&them) {
+                std::cmp::Ordering::Greater => 1.0,
+                std::cmp::Ordering::Equal => 0.5,
+                std::cmp::Ordering::Less => 0.0,
+            };
+            n += 1.0;
+        }
+    }
+    won / n
+}
 
 /// The index of `hole` among all 1,326 two-card hands (re-exported for
 /// callers building per-hand tables).

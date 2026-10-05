@@ -10,6 +10,11 @@
 //! all-ins, the button acting first preflop and last after the flop, so every
 //! abstract action is a legal action in a real `ducy_play::Hand`. Both players
 //! start each hand with the same stack. Player 0 is the button (small blind).
+//!
+//! The betting doesn't depend on the cards, so it's compiled once into a
+//! [`BettingTree`] of numbered nodes. A hand in progress is just the deal and
+//! a node number, and an information set is a node and a bucket, which makes
+//! training fast.
 
 use super::{
     abstraction::CardAbstraction,
@@ -97,78 +102,31 @@ pub enum HunlAction {
     Raise(u64),
 }
 
-/// A hand in the abstract game.
+/// The betting part of a hand: chips, whose turn, and the round so far.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HunlState {
-    /// Hole cards for player 0 and 1, and the whole board, dealt at the root.
-    pub hole: [[Card; 2]; 2],
-    pub board: [Card; 5],
-    /// Each player's bucket on each street.
-    pub buckets: [[u16; 4]; 2],
-    dealt: bool,
+pub struct Betting {
     /// 0 preflop to 3 river.
     pub street: usize,
     pub stack: [u64; 2],
     pub street_bet: [u64; 2],
     pub contributed: [u64; 2],
     pub current_bet: u64,
-    last_raise: u64,
+    pub last_raise: u64,
     big_blind: u64,
     pub to_act: usize,
     acted: [bool; 2],
     /// Bets and raises this round (preflop, the big blind counts as one).
-    raises: usize,
-    folded: Option<usize>,
+    pub raises: usize,
+    pub folded: Option<usize>,
     done: bool,
-    /// Action indices so far, with 255 between streets.
-    pub history: Vec<u8>,
 }
 
-impl HunlState {
-    pub fn is_over(&self) -> bool {
-        self.done || self.folded.is_some()
-    }
-
-    fn to_call(&self) -> u64 {
-        self.current_bet - self.street_bet[self.to_act]
-    }
-
-    fn all_in_to(&self) -> u64 {
-        self.street_bet[self.to_act] + self.stack[self.to_act]
-    }
-}
-
-/// Heads-up no-limit Hold'em, abstracted.
-pub struct Hunl<'a> {
-    pub config: HunlConfig,
-    /// `None` puts every hand in bucket 0: just the betting tree, for tests
-    /// and tree statistics.
-    pub cards: Option<&'a CardAbstraction>,
-}
-
-impl<'a> Hunl<'a> {
-    pub fn new(config: HunlConfig, cards: Option<&'a CardAbstraction>) -> Self {
-        Self { config, cards }
-    }
-
-    /// A hand with these cards dealt and the blinds posted.
-    pub fn deal(&self, hole: [[Card; 2]; 2], board: [Card; 5]) -> HunlState {
-        let c = &self.config;
-        let mut buckets = [[0u16; 4]; 2];
-        if let Some(cards) = self.cards {
-            for (p, b) in buckets.iter_mut().enumerate() {
-                for (street, n) in [0usize, 3, 4, 5].into_iter().enumerate() {
-                    b[street] = cards.bucket(hole[p], &board[..n]);
-                }
-            }
-        }
+impl Betting {
+    /// Blinds posted, the button (player 0) to act.
+    pub fn start(c: &HunlConfig) -> Self {
         let sb = c.small_blind.min(c.stack);
         let bb = c.big_blind.min(c.stack);
-        HunlState {
-            hole,
-            board,
-            buckets,
-            dealt: true,
+        Self {
             street: 0,
             stack: [c.stack - sb, c.stack - bb],
             street_bet: [sb, bb],
@@ -181,15 +139,42 @@ impl<'a> Hunl<'a> {
             raises: 1,
             folded: None,
             done: false,
-            history: Vec::new(),
         }
     }
 
-    /// The actions open at `s`, in action-index order: fold (when facing a
-    /// bet), check or call, then bets or raises from smallest to all-in.
-    pub fn actions(&self, s: &HunlState) -> Vec<HunlAction> {
-        let me = s.to_act;
-        let to_call = s.to_call();
+    pub fn is_over(&self) -> bool {
+        self.done || self.folded.is_some()
+    }
+
+    pub fn pot(&self) -> u64 {
+        self.contributed[0] + self.contributed[1]
+    }
+
+    pub fn to_call(&self) -> u64 {
+        self.current_bet - self.street_bet[self.to_act]
+    }
+
+    /// The street total that puts the player to act all-in.
+    pub fn all_in_to(&self) -> u64 {
+        self.street_bet[self.to_act] + self.stack[self.to_act]
+    }
+
+    /// The smallest legal bet or raise (all-in if that's less).
+    pub fn min_to(&self) -> u64 {
+        (self.current_bet + self.last_raise).min(self.all_in_to())
+    }
+
+    /// Whether the player to act may bet or raise at all.
+    pub fn can_raise(&self) -> bool {
+        let me = self.to_act;
+        self.stack[1 - me] > 0 && self.stack[me] > self.to_call()
+    }
+
+    /// The actions on `menu` at this point, in action-index order: fold
+    /// (when facing a bet), check or call, then bets or raises from smallest
+    /// to all-in.
+    pub fn actions(&self, c: &HunlConfig) -> Vec<HunlAction> {
+        let to_call = self.to_call();
         let mut out = Vec::with_capacity(6);
         if to_call > 0 {
             out.push(HunlAction::Fold);
@@ -197,31 +182,30 @@ impl<'a> Hunl<'a> {
         } else {
             out.push(HunlAction::Check);
         }
-        // No raising when the opponent is all-in or we can only just call.
-        if s.stack[1 - me] == 0 || s.stack[me] <= to_call {
+        if !self.can_raise() {
             return out;
         }
-        let all_in = s.all_in_to();
-        let min_to = (s.current_bet + s.last_raise).min(all_in);
-        let menu = if s.street == 0 {
-            &self.config.menu.preflop
+        let all_in = self.all_in_to();
+        let min_to = self.min_to();
+        let menu = if self.street == 0 {
+            &c.menu.preflop
         } else {
-            &self.config.menu.postflop
+            &c.menu.postflop
         };
-        let depth = if s.street == 0 {
-            s.raises - 1
+        let depth = if self.street == 0 {
+            self.raises - 1
         } else {
-            s.raises
+            self.raises
         };
         let sizes = &menu[depth.min(menu.len() - 1)];
-        let pot = s.contributed[0] + s.contributed[1];
+        let pot = self.pot();
         let mut tos: Vec<u64> = sizes
             .iter()
             .map(|&size| {
                 let to = match size {
-                    Size::Pot(f) => s.current_bet + (f * (pot + to_call) as f64).round() as u64,
-                    Size::Bb(x) => (x * self.config.big_blind as f64).round() as u64,
-                    Size::Times(x) => (x * s.current_bet as f64).round() as u64,
+                    Size::Pot(f) => self.current_bet + (f * (pot + to_call) as f64).round() as u64,
+                    Size::Bb(x) => (x * c.big_blind as f64).round() as u64,
+                    Size::Times(x) => (x * self.current_bet as f64).round() as u64,
                     Size::AllIn => all_in,
                 };
                 to.clamp(min_to, all_in)
@@ -230,7 +214,7 @@ impl<'a> Hunl<'a> {
         tos.sort_unstable();
         tos.dedup();
         for to in tos {
-            out.push(if s.current_bet == 0 {
+            out.push(if self.current_bet == 0 {
                 HunlAction::Bet(to)
             } else {
                 HunlAction::Raise(to)
@@ -239,11 +223,11 @@ impl<'a> Hunl<'a> {
         out
     }
 
-    /// Plays `action` (one of [`Self::actions`]).
-    pub fn play(&self, s: &HunlState, action: HunlAction, index: usize) -> HunlState {
-        let mut n = s.clone();
-        let me = s.to_act;
-        n.history.push(index as u8);
+    /// The betting after `action`, which must be legal here (any legal
+    /// amount, not only the menu's).
+    pub fn play(&self, action: HunlAction) -> Self {
+        let mut n = self.clone();
+        let me = self.to_act;
         match action {
             HunlAction::Fold => {
                 n.folded = Some(me);
@@ -251,14 +235,14 @@ impl<'a> Hunl<'a> {
             }
             HunlAction::Check => {}
             HunlAction::Call => {
-                let amount = s.to_call().min(s.stack[me]);
+                let amount = self.to_call().min(self.stack[me]);
                 n.put_in(me, amount);
             }
             HunlAction::Bet(to) | HunlAction::Raise(to) => {
-                let increase = to - s.current_bet;
-                n.put_in(me, to - s.street_bet[me]);
+                let increase = to - self.current_bet;
+                n.put_in(me, to - self.street_bet[me]);
                 n.current_bet = to;
-                if increase >= s.last_raise {
+                if increase >= self.last_raise {
                     n.last_raise = increase;
                 }
                 n.raises += 1;
@@ -267,9 +251,9 @@ impl<'a> Hunl<'a> {
         }
         n.acted[me] = true;
         let other = 1 - me;
-        let needs = |st: &HunlState, p: usize| {
-            st.stack[p] > 0
-                && (st.street_bet[p] < st.current_bet || (!st.acted[p] && st.stack[1 - p] > 0))
+        let needs = |b: &Betting, p: usize| {
+            b.stack[p] > 0
+                && (b.street_bet[p] < b.current_bet || (!b.acted[p] && b.stack[1 - p] > 0))
         };
         if needs(&n, other) {
             n.to_act = other;
@@ -280,9 +264,7 @@ impl<'a> Hunl<'a> {
         }
         n
     }
-}
 
-impl HunlState {
     fn put_in(&mut self, p: usize, amount: u64) {
         let amount = amount.min(self.stack[p]);
         self.stack[p] -= amount;
@@ -290,8 +272,8 @@ impl HunlState {
         self.contributed[p] += amount;
     }
 
-    /// Ends the betting round: deals on to the next street where someone can
-    /// act, or to the showdown.
+    /// Ends the betting round: on to the next street where someone can act,
+    /// or to the showdown.
     fn next_street(&mut self) {
         loop {
             if self.street == 3 {
@@ -299,60 +281,187 @@ impl HunlState {
                 return;
             }
             self.street += 1;
-            self.history.push(255);
             self.street_bet = [0, 0];
             self.current_bet = 0;
             self.raises = 0;
             self.acted = [false, false];
+            self.last_raise = self.big_blind;
             // After the flop the big blind (player 1) acts first.
             if self.stack[0] > 0 && self.stack[1] > 0 {
                 self.to_act = 1;
-                self.last_raise = self.big_blind;
                 return;
             }
         }
     }
 }
 
+/// One point in the betting tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Node {
+    pub betting: Betting,
+    /// The menu's actions here (empty once the hand is over).
+    pub actions: Vec<HunlAction>,
+    /// The node each action leads to.
+    pub children: Vec<u32>,
+}
+
+/// Every betting sequence the menu allows, numbered; node 0 is the start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BettingTree {
+    pub nodes: Vec<Node>,
+}
+
+impl BettingTree {
+    pub fn build(c: &HunlConfig) -> Self {
+        fn add(c: &HunlConfig, b: Betting, nodes: &mut Vec<Node>) -> u32 {
+            let id = nodes.len() as u32;
+            let actions = if b.is_over() {
+                Vec::new()
+            } else {
+                b.actions(c)
+            };
+            nodes.push(Node {
+                betting: b.clone(),
+                actions: actions.clone(),
+                children: Vec::new(),
+            });
+            let children = actions.iter().map(|&a| add(c, b.play(a), nodes)).collect();
+            nodes[id as usize].children = children;
+            id
+        }
+        let mut nodes = Vec::new();
+        add(c, Betting::start(c), &mut nodes);
+        Self { nodes }
+    }
+
+    /// Decision points and actions per street.
+    pub fn stats(&self) -> TreeStats {
+        let mut out = TreeStats::default();
+        for n in self.nodes.iter().filter(|n| !n.actions.is_empty()) {
+            out.sequences[n.betting.street] += 1;
+            out.actions[n.betting.street] += n.actions.len() as u64;
+        }
+        out
+    }
+}
+
+/// A hand in the abstract game: the deal, each player's buckets, and where
+/// the betting is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HunlState {
+    /// Hole cards for player 0 and 1, and the whole board, dealt at the root.
+    pub hole: [[Card; 2]; 2],
+    pub board: [Card; 5],
+    /// Each player's bucket on each street.
+    pub buckets: [[u16; 4]; 2],
+    /// Index into the betting tree.
+    pub node: u32,
+    /// Player 0's showdown result: 1 win, -1 loss, 0 split.
+    pub showdown: i8,
+    dealt: bool,
+}
+
+/// Heads-up no-limit Hold'em, abstracted.
+pub struct Hunl<'a> {
+    pub config: HunlConfig,
+    /// `None` puts every hand in bucket 0: just the betting tree, for tests
+    /// and tree statistics.
+    pub cards: Option<&'a CardAbstraction>,
+    pub tree: BettingTree,
+}
+
+impl<'a> Hunl<'a> {
+    pub fn new(config: HunlConfig, cards: Option<&'a CardAbstraction>) -> Self {
+        let tree = BettingTree::build(&config);
+        Self {
+            config,
+            cards,
+            tree,
+        }
+    }
+
+    /// A hand with these cards dealt and the blinds posted.
+    pub fn deal(&self, hole: [[Card; 2]; 2], board: [Card; 5]) -> HunlState {
+        let mut buckets = [[0u16; 4]; 2];
+        if let Some(cards) = self.cards {
+            for (p, b) in buckets.iter_mut().enumerate() {
+                for (street, n) in [0usize, 3, 4, 5].into_iter().enumerate() {
+                    b[street] = cards.bucket(hole[p], &board[..n]);
+                }
+            }
+        }
+        let bm = mask(&board);
+        let mine = score(bm | bit(hole[0][0]) | bit(hole[0][1]));
+        let theirs = score(bm | bit(hole[1][0]) | bit(hole[1][1]));
+        HunlState {
+            hole,
+            board,
+            buckets,
+            node: 0,
+            showdown: mine.cmp(&theirs) as i8,
+            dealt: true,
+        }
+    }
+
+    pub fn node(&self, s: &HunlState) -> &Node {
+        &self.tree.nodes[s.node as usize]
+    }
+
+    /// The betting at `s`.
+    pub fn betting(&self, s: &HunlState) -> &Betting {
+        &self.node(s).betting
+    }
+
+    /// The actions open at `s`, in action-index order.
+    pub fn actions(&self, s: &HunlState) -> &[HunlAction] {
+        &self.node(s).actions
+    }
+
+    /// Statistics of the betting tree.
+    pub fn tree_stats(&self) -> TreeStats {
+        self.tree.stats()
+    }
+}
+
 impl Game for Hunl<'_> {
     type State = HunlState;
-    /// The street, the player's bucket on it, then the action indices so far.
-    type Info = Vec<u8>;
+    /// `node << 16 | bucket`: the betting so far and the player's bucket on
+    /// this street.
+    type Info = u64;
 
     fn root(&self) -> HunlState {
-        let blank = Hunl::new(self.config.clone(), None);
-        let mut s = blank.deal([[0, 1], [2, 3]], [4, 5, 6, 7, 8]);
-        s.dealt = false;
-        s
+        HunlState {
+            hole: [[0, 1], [2, 3]],
+            board: [4, 5, 6, 7, 8],
+            buckets: [[0; 4]; 2],
+            node: 0,
+            showdown: 0,
+            dealt: false,
+        }
     }
 
     fn turn(&self, s: &HunlState) -> Turn {
         if !s.dealt {
-            Turn::Chance
-        } else if s.is_over() {
+            return Turn::Chance;
+        }
+        let b = self.betting(s);
+        if b.is_over() {
             Turn::Terminal
         } else {
-            Turn::Player(s.to_act)
+            Turn::Player(b.to_act)
         }
     }
 
     fn utility(&self, s: &HunlState) -> f64 {
-        if let Some(p) = s.folded {
+        let b = self.betting(s);
+        if let Some(p) = b.folded {
             return if p == 0 {
-                -(s.contributed[0] as f64)
+                -(b.contributed[0] as f64)
             } else {
-                s.contributed[1] as f64
+                b.contributed[1] as f64
             };
         }
-        let board = mask(&s.board);
-        let mine = score(board | bit(s.hole[0][0]) | bit(s.hole[0][1]));
-        let theirs = score(board | bit(s.hole[1][0]) | bit(s.hole[1][1]));
-        let at_stake = s.contributed[0].min(s.contributed[1]) as f64;
-        match mine.cmp(&theirs) {
-            std::cmp::Ordering::Greater => at_stake,
-            std::cmp::Ordering::Less => -at_stake,
-            std::cmp::Ordering::Equal => 0.0,
-        }
+        s.showdown as f64 * b.contributed[0].min(b.contributed[1]) as f64
     }
 
     /// Too many deals to list; see [`Game::sample_chance`].
@@ -380,21 +489,19 @@ impl Game for Hunl<'_> {
     }
 
     fn num_actions(&self, s: &HunlState) -> usize {
-        self.actions(s).len()
+        self.node(s).actions.len()
     }
 
     fn apply(&self, s: &HunlState, action: usize) -> HunlState {
-        let a = self.actions(s)[action];
-        self.play(s, a, action)
+        let mut n = s.clone();
+        n.node = self.node(s).children[action];
+        n
     }
 
-    fn info(&self, s: &HunlState) -> Vec<u8> {
-        let b = s.buckets[s.to_act][s.street];
-        let mut key = Vec::with_capacity(3 + s.history.len());
-        key.push(s.street as u8);
-        key.extend(b.to_le_bytes());
-        key.extend(&s.history);
-        key
+    fn info(&self, s: &HunlState) -> u64 {
+        let b = self.betting(s);
+        let bucket = s.buckets[b.to_act][b.street];
+        (s.node as u64) << 16 | bucket as u64
     }
 }
 
@@ -424,30 +531,5 @@ impl TreeStats {
             total += self.actions[street] * cards.num_buckets(n) as u64 * 8;
         }
         total
-    }
-}
-
-impl Hunl<'_> {
-    /// Walks the whole betting tree once.
-    pub fn tree_stats(&self) -> TreeStats {
-        fn walk(g: &Hunl, s: &HunlState, out: &mut TreeStats) {
-            if s.is_over() {
-                return;
-            }
-            let actions = g.actions(s);
-            out.sequences[s.street] += 1;
-            out.actions[s.street] += actions.len() as u64;
-            for (i, &a) in actions.iter().enumerate() {
-                walk(g, &g.play(s, a, i), out);
-            }
-        }
-        let mut out = TreeStats::default();
-        let blank = Hunl::new(self.config.clone(), None);
-        walk(
-            &blank,
-            &blank.deal([[0, 1], [2, 3]], [4, 5, 6, 7, 8]),
-            &mut out,
-        );
-        out
     }
 }

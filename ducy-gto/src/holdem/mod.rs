@@ -2,7 +2,9 @@
 //! suit isomorphism, equity features and the card abstraction.
 
 pub mod abstraction;
+pub mod blueprint;
 pub mod cards;
+pub mod chart;
 pub mod equity;
 pub mod hunl;
 pub mod iso;

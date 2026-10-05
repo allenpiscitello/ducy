@@ -391,6 +391,18 @@ where
         }
     }
 
+    /// The average strategy at one information set, if it has been seen.
+    pub fn average_at(&self, info: &G::Info) -> Option<Vec<f64>> {
+        let &id = self.table.index.get(info)?;
+        let s = &self.table.sum[self.table.range(id)];
+        let total: f64 = s.iter().map(|&x| x as f64).sum();
+        Some(if total > 0.0 {
+            s.iter().map(|&x| x as f64 / total).collect()
+        } else {
+            vec![1.0 / s.len() as f64; s.len()]
+        })
+    }
+
     /// The average strategy, which converges to an equilibrium.
     pub fn average(&self) -> Profile<G::Info> {
         let mut profile = Profile::new();
