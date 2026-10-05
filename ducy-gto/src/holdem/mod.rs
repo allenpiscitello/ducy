@@ -10,3 +10,4 @@ pub mod equity;
 pub mod hunl;
 pub mod iso;
 pub mod kmeans;
+pub mod lbr;
