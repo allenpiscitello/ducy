@@ -35,3 +35,5 @@ jobs:
           node-version: 20
       - run: cd ducy-play-wasm && wasm-pack build --target nodejs --out-dir pkg-node
       - run: node ducy-play-wasm/tests/smoke.cjs
+      - run: cd ducy-wasm && wasm-pack build --target nodejs --out-dir pkg-node
+      - run: node ducy-wasm/tests/friends.cjs

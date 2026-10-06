@@ -11,7 +11,8 @@
 //! the page passes it each player's messages and sends back what it returns.
 
 use ducy_play::{
-    Action, Command, Outgoing, Personality, Table, TableHost, TableRules, TableSeat, Variant,
+    Action, ChipRequest, Command, Outgoing, Personality, Table, TableHost, TableRules, TableSeat,
+    Variant,
 };
 use std::{cell::RefCell, sync::Arc};
 
@@ -252,14 +253,33 @@ struct HostResult<'a> {
     turn_ms_left: Option<u64>,
     #[serde(rename = "openSeats")]
     open_seats: usize,
+    /// People who'd be dealt into the next hand, the host included.
+    #[serde(rename = "playersIn")]
+    players_in: usize,
+    /// At a friends table: requests for chips waiting for the host, the
+    /// buy-in limits, and the host's own chips approved for the next hand.
+    #[serde(rename = "chipRequests")]
+    chip_requests: Vec<ChipRequest>,
+    #[serde(rename = "buyIn")]
+    buy_in: Option<BuyIn>,
+    #[serde(rename = "hostPendingChips")]
+    host_pending_chips: u64,
     out: Vec<Message<'a>>,
 }
 
-/// A table hosted for people on other devices: the host in seat 0, bots in
-/// the other seats, and some of those seats open for people to take. Every
-/// call takes the time in milliseconds (e.g. `Date.now()`) and returns
-/// `{seq, state, botToAct, turnMsLeft, openSeats, out}`, where `out` lists
-/// `{to, data}` messages for the page to send to each player.
+#[derive(Serialize)]
+struct BuyIn {
+    min: u64,
+    max: u64,
+}
+
+/// A table hosted for people on other devices: the host in seat 0, and the
+/// other seats either bots that people may take over (`new`) or empty seats
+/// for friends, with real chips the host hands out (`friends`). Every call
+/// takes the time in milliseconds (e.g. `Date.now()`) and returns `{seq,
+/// state, botToAct, turnMsLeft, openSeats, playersIn, chipRequests, buyIn,
+/// hostPendingChips, out}`, where `out` lists `{to, data}` messages for the
+/// page to send to each player.
 #[wasm_bindgen]
 pub struct MultiTable {
     host: TableHost,
@@ -303,6 +323,51 @@ impl MultiTable {
         Ok(MultiTable { host })
     }
 
+    /// A table for friends: the host in seat 0 and `seats - 1` empty seats
+    /// (2 to 10 in all) that people take as they join. No bots: a hand is
+    /// dealt to whoever is seated with chips, once there are two. Chips are
+    /// real: the host starts with `host_chips`, everyone else asks the host
+    /// for chips, and a stack after a request must be `min_buy_in` to
+    /// `max_buy_in` chips.
+    #[allow(clippy::too_many_arguments)]
+    pub fn friends(
+        seats: usize,
+        host_name: String,
+        host_chips: u64,
+        min_buy_in: u64,
+        max_buy_in: u64,
+        small_blind: u64,
+        big_blind: u64,
+        seed: u64,
+        game: Option<String>,
+        turn_ms: u64,
+    ) -> Result<MultiTable, JsError> {
+        let rules = rules_for(game.as_deref(), small_blind, big_blind)?;
+        if small_blind == 0 || big_blind < small_blind || min_buy_in < big_blind {
+            return Err(JsError::new("invalid blinds or buy-in"));
+        }
+        if !(2..=ducy_play::MAX_PLAYERS).contains(&seats) {
+            return Err(JsError::new("a table seats 2 to 10"));
+        }
+        if host_chips < min_buy_in || host_chips > max_buy_in {
+            return Err(JsError::new(
+                "the host's chips must be within the buy-in limits",
+            ));
+        }
+        let name: String = host_name.trim().chars().take(ducy_play::MAX_NAME).collect();
+        let mut all = vec![TableSeat::human(
+            if name.is_empty() { "Host" } else { &name },
+            "you",
+        )];
+        all.extend((1..seats).map(|_| TableSeat::empty()));
+        let table = Table::new(rules, all, host_chips, seed).map_err(err)?;
+        let open = (0..seats).map(|s| s > 0).collect();
+        let host = TableHost::new(table, open, turn_ms)
+            .and_then(|h| h.with_bank(min_buy_in, max_buy_in))
+            .map_err(err)?;
+        Ok(MultiTable { host })
+    }
+
     fn result(&self, out: &[Outgoing], now: u64) -> Result<JsValue, JsError> {
         to_js(&HostResult {
             seq: self.host.seq(),
@@ -310,6 +375,13 @@ impl MultiTable {
             bot_to_act: self.host.auto_to_act(),
             turn_ms_left: self.host.turn_ms_left(now),
             open_seats: self.host.open_seats(),
+            players_in: self.host.players_in(),
+            chip_requests: self.host.chip_requests(),
+            buy_in: self
+                .host
+                .buy_in_limits()
+                .map(|(min, max)| BuyIn { min, max }),
+            host_pending_chips: self.host.host_pending_chips(),
             out: out
                 .iter()
                 .map(|o| Message {
@@ -368,6 +440,35 @@ impl MultiTable {
     /// Runs the turn clock; call it every half second or so.
     pub fn tick(&mut self, now: f64) -> Result<JsValue, JsError> {
         let out = self.host.tick(now as u64);
+        self.result(&out, now as u64)
+    }
+
+    /// Approves the chips the player in `seat` asked for.
+    #[wasm_bindgen(js_name = approveChips)]
+    pub fn approve_chips(&mut self, seat: usize, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.approve_chips(seat, now as u64);
+        self.result(&out, now as u64)
+    }
+
+    /// Turns down the chips the player in `seat` asked for.
+    #[wasm_bindgen(js_name = denyChips)]
+    pub fn deny_chips(&mut self, seat: usize, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.deny_chips(seat, now as u64);
+        self.result(&out, now as u64)
+    }
+
+    /// The host adds `amount` chips to their own stack, within the buy-in
+    /// limits (before the next hand if they're in this one).
+    #[wasm_bindgen(js_name = hostChips)]
+    pub fn host_chips(&mut self, amount: u64, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.host_chips(amount, now as u64).map_err(err)?;
+        self.result(&out, now as u64)
+    }
+
+    /// Removes the person in `seat`: they fold out of this hand and the
+    /// seat is free from the next.
+    pub fn remove(&mut self, seat: usize, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.remove(seat, now as u64);
         self.result(&out, now as u64)
     }
 }
