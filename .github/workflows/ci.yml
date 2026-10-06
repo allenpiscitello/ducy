@@ -38,3 +38,4 @@ jobs:
       - run: cd ducy-wasm && wasm-pack build --target nodejs --out-dir pkg-node
       - run: cargo run -p ducy-gto --example tiny_model -- target/tiny-model
       - run: node ducy-wasm/tests/review.cjs
+      - run: node ducy-wasm/tests/friends.cjs

@@ -6,10 +6,20 @@
 //! networking: feed it each player's commands and send each [`Outgoing`] it
 //! returns to its recipient over whatever connection the app uses.
 //!
-//! Seat 0 is the host's own seat. Seats marked *open* are played by their bot
-//! until someone joins; a person takes over at the start of the next hand,
-//! and the bot takes the seat back when they leave. Times are milliseconds
-//! from any clock the caller chooses, which keeps the host deterministic.
+//! Seat 0 is the host's own seat. Seats marked *open* are for people: an
+//! open seat with a bot is played by the bot until someone joins, and an
+//! empty one ([`crate::TableSeat::empty`]) isn't dealt in. A person takes the
+//! seat at the start of the next hand, and gives it back (to its bot, or
+//! empty) when they leave or the host removes them. A person who's away or
+//! disconnected sits out, and one who stays disconnected for
+//! [`DROP_AFTER_HANDS`] hands is removed. Times are milliseconds from any
+//! clock the caller chooses, which keeps the host deterministic.
+//!
+//! With a bank ([`TableHost::with_bank`]), chips are real: they carry over
+//! from hand to hand, people sit down with none, and they ask the host for
+//! chips ([`Command::RequestChips`]), who approves or denies each request.
+//! A stack after a request must be between the table's minimum and maximum
+//! buy-in. Without one, every seat is topped back up to the buy-in.
 
 use crate::{Action, PlayError, Table, TableView};
 
@@ -32,8 +42,11 @@ pub enum Command {
     },
     /// Back after being away (timed out twice).
     SitIn,
-    /// Give the seat back to its bot.
+    /// Give the seat back (to its bot, or empty).
     Leave,
+    /// Ask the host for `amount` more chips (0 withdraws the request). The
+    /// stack after it must be within the table's buy-in limits.
+    RequestChips { amount: u64 },
 }
 
 /// A message from the host to one player.
@@ -49,9 +62,40 @@ pub enum Update {
         view: Box<TableView>,
         /// Time left for whoever is acting, if a person is on the clock.
         turn_ms_left: Option<u64>,
+        /// Your chips and requests, at a table with a bank.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        chips: Option<ChipsView>,
     },
     /// Your command was refused.
     Rejected { reason: String },
+}
+
+/// What a player knows about chips at a table with a bank, sent with each
+/// state.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ChipsView {
+    /// The smallest and largest stack a request may bring you to.
+    pub min: u64,
+    pub max: u64,
+    /// Chips you've asked for and the host hasn't answered.
+    pub requested: u64,
+    /// Chips approved, added before the next hand.
+    pub approved: u64,
+}
+
+/// A request for chips, for the host to approve or deny.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ChipRequest {
+    pub seat: usize,
+    pub name: String,
+    pub amount: u64,
+    /// Chips the player has now.
+    pub stack: u64,
 }
 
 /// An update and the client it's for.
@@ -72,7 +116,23 @@ struct Player {
     pending: bool,
     /// Gave the seat back; the bot returns at the next hand.
     leaving: bool,
+    /// Hands dealt in a row while disconnected.
+    missed: u32,
+    /// Chips asked for, not yet answered.
+    requested: u64,
+    /// Chips approved during a hand they're in, added before the next.
+    approved: u64,
 }
+
+/// A table's buy-in limits, in chips.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Bank {
+    min: u64,
+    max: u64,
+}
+
+/// Hands a disconnected person can miss before they're removed.
+pub const DROP_AFTER_HANDS: u32 = 3;
 
 /// Runs a table for the host (seat 0) and remote players.
 pub struct TableHost {
@@ -86,6 +146,9 @@ pub struct TableHost {
     turn: Option<(u64, usize)>,
     /// Each seat's id when its bot plays it.
     bot_ids: Vec<String>,
+    bank: Option<Bank>,
+    /// The host's own chips approved during a hand they're in.
+    host_approved: u64,
 }
 
 /// Most characters kept from a player's name.
@@ -99,11 +162,8 @@ impl TableHost {
         if open.len() != table.num_seats() || open[0] {
             return Err(PlayError::InvalidPlayerCount);
         }
-        if open
-            .iter()
-            .enumerate()
-            .any(|(s, &o)| o && table.seat(s).bot.is_none())
-        {
+        // A closed seat needs someone to play it.
+        if (1..open.len()).any(|s| !open[s] && table.seat(s).is_empty()) {
             return Err(PlayError::InvalidPlayerCount);
         }
         let bot_ids = (0..table.num_seats())
@@ -118,7 +178,108 @@ impl TableHost {
             deadline: None,
             turn: None,
             bot_ids,
+            bank: None,
+            host_approved: 0,
         })
+    }
+
+    /// Makes chips real: stacks carry over, people sit down with no chips,
+    /// and they ask the host for chips (see [`Command::RequestChips`]). A
+    /// stack after a request must be from `min` to `max` chips. The host
+    /// keeps the stack the table was made with.
+    pub fn with_bank(mut self, min: u64, max: u64) -> Result<Self, PlayError> {
+        if min == 0 || max < min {
+            return Err(PlayError::InvalidSetup);
+        }
+        self.table.set_top_up(false);
+        self.bank = Some(Bank { min, max });
+        Ok(self)
+    }
+
+    /// The buy-in limits, with a bank.
+    pub fn buy_in_limits(&self) -> Option<(u64, u64)> {
+        self.bank.map(|b| (b.min, b.max))
+    }
+
+    /// Requests for chips waiting for the host, oldest seat first.
+    pub fn chip_requests(&self) -> Vec<ChipRequest> {
+        let mut out: Vec<ChipRequest> = self
+            .players
+            .iter()
+            .filter(|p| p.requested > 0 && !p.leaving)
+            .map(|p| ChipRequest {
+                seat: p.seat,
+                name: p.name.clone(),
+                amount: p.requested,
+                stack: self.table.stack(p.seat) + p.approved,
+            })
+            .collect();
+        out.sort_by_key(|r| r.seat);
+        out
+    }
+
+    /// Approves the request from `seat`: the chips are added now, or before
+    /// the next hand if the player is in this one.
+    pub fn approve_chips(&mut self, seat: usize, now: u64) -> Vec<Outgoing> {
+        let Some(i) = self.players.iter().position(|p| p.seat == seat) else {
+            return Vec::new();
+        };
+        let amount = std::mem::take(&mut self.players[i].requested);
+        if amount == 0 {
+            return Vec::new();
+        }
+        // In this hand, or not seated until the next one: added then.
+        if self.playing(seat) || self.players[i].pending {
+            self.players[i].approved += amount;
+        } else {
+            let _ = self.table.add_chips(seat, amount);
+        }
+        self.changed(now)
+    }
+
+    /// Denies the request from `seat`.
+    pub fn deny_chips(&mut self, seat: usize, now: u64) -> Vec<Outgoing> {
+        let Some(p) = self.players.iter_mut().find(|p| p.seat == seat) else {
+            return Vec::new();
+        };
+        if p.requested == 0 {
+            return Vec::new();
+        }
+        p.requested = 0;
+        self.changed(now)
+    }
+
+    /// The host adds chips to their own seat, within the limits: now, or
+    /// before the next hand if they're in this one.
+    pub fn host_chips(&mut self, amount: u64, now: u64) -> Result<Vec<Outgoing>, PlayError> {
+        let stack = self.table.stack(0) + self.host_approved;
+        self.check_request(stack, amount)?;
+        if self.playing(0) {
+            self.host_approved += amount;
+        } else {
+            self.table.add_chips(0, amount)?;
+        }
+        Ok(self.changed(now))
+    }
+
+    /// Chips the host has had approved for the next hand.
+    pub fn host_pending_chips(&self) -> u64 {
+        self.host_approved
+    }
+
+    /// Whether `seat` is in the hand being played.
+    fn playing(&self, seat: usize) -> bool {
+        self.table.in_hand() && self.table.hand_index(seat).is_some()
+    }
+
+    /// Whether a stack of `stack` may ask for `amount` more.
+    fn check_request(&self, stack: u64, amount: u64) -> Result<(), PlayError> {
+        let bank = self.bank.ok_or(PlayError::IllegalAction)?;
+        let after = stack + amount;
+        if amount == 0 || after < bank.min || after > bank.max {
+            return Err(PlayError::IllegalAction);
+        }
+        Ok(())
     }
 
     pub fn table(&self) -> &Table {
@@ -209,6 +370,9 @@ impl TableHost {
                     timeouts: 0,
                     pending,
                     leaving: false,
+                    missed: 0,
+                    requested: 0,
+                    approved: 0,
                 });
                 if !pending {
                     self.take_seat(seat, name);
@@ -246,17 +410,58 @@ impl TableHost {
                 self.changed(now)
             }
             (Command::Leave, Some(i)) => {
-                let p = &mut self.players[i];
-                p.leaving = true;
-                p.connected = false;
-                let seat = p.seat;
-                if self.table.in_hand() {
-                    self.table.seat_mut(seat).away = true;
-                } else {
-                    self.release_seat(i);
-                }
+                self.players[i].connected = false;
+                self.remove_player(i);
                 self.changed(now)
             }
+            (Command::RequestChips { amount }, Some(i)) => {
+                let Some(bank) = self.bank else {
+                    return reject("this table has no chip requests");
+                };
+                let p = &self.players[i];
+                if amount > 0 {
+                    let stack = self.table.stack(p.seat) + p.approved;
+                    if self.check_request(stack, amount).is_err() {
+                        let reason = if stack >= bank.max {
+                            format!("you already have the most allowed ({} chips)", bank.max)
+                        } else {
+                            format!(
+                                "ask for {} to {} chips",
+                                bank.min.saturating_sub(stack).max(1),
+                                bank.max - stack
+                            )
+                        };
+                        return reject(&reason);
+                    }
+                }
+                self.players[i].requested = amount;
+                self.changed(now)
+            }
+        }
+    }
+
+    /// The host removes whoever sits in `seat`: they fold out of a hand in
+    /// progress and the seat is free from the next hand. They get no more
+    /// updates (they can join again).
+    pub fn remove(&mut self, seat: usize, now: u64) -> Vec<Outgoing> {
+        let Some(i) = self.players.iter().position(|p| p.seat == seat) else {
+            return Vec::new();
+        };
+        self.players[i].connected = false;
+        self.remove_player(i);
+        self.changed(now)
+    }
+
+    /// Gives player `i`'s seat back: now between hands, or once this hand is
+    /// over (folding at their turn meanwhile).
+    fn remove_player(&mut self, i: usize) {
+        let p = &mut self.players[i];
+        p.leaving = true;
+        let seat = p.seat;
+        if self.table.in_hand() && !p.pending {
+            self.table.seat_mut(seat).away = true;
+        } else {
+            self.release_seat(i);
         }
     }
 
@@ -297,26 +502,56 @@ impl TableHost {
     }
 
     /// Deals the next hand: people who joined take their seats, people who
-    /// left give theirs back to the bots.
+    /// left give theirs back, people who are away sit out, and someone
+    /// disconnected for [`DROP_AFTER_HANDS`] hands is removed. Fails, dealing
+    /// nothing, with fewer than two players in.
     pub fn new_hand(&mut self, now: u64) -> Result<Vec<Outgoing>, PlayError> {
         if self.table.in_hand() {
             return Err(PlayError::IllegalAction);
         }
-        while let Some(i) = self.players.iter().position(|p| p.leaving) {
+        while let Some(i) = self
+            .players
+            .iter()
+            .position(|p| p.leaving || p.missed >= DROP_AFTER_HANDS)
+        {
             self.release_seat(i);
         }
+        // Chips approved during the last hand.
+        let host_chips = std::mem::take(&mut self.host_approved);
+        if host_chips > 0 {
+            let _ = self.table.add_chips(0, host_chips);
+        }
         for i in 0..self.players.len() {
+            let seat = self.players[i].seat;
+            // (Someone sitting down gets theirs in take_seat.)
+            if !self.players[i].pending {
+                let chips = std::mem::take(&mut self.players[i].approved);
+                if chips > 0 {
+                    let _ = self.table.add_chips(seat, chips);
+                }
+            }
             if self.players[i].pending {
                 self.players[i].pending = false;
-                let seat = self.players[i].seat;
                 self.take_seat(seat, self.players[i].name.clone());
                 if !self.players[i].connected {
                     self.table.seat_mut(seat).away = true;
                 }
             }
+            // Away (disconnected, or timed out twice): not dealt in.
+            let away = self.table.seat(seat).away;
+            self.table.seat_mut(seat).sitting_out = away;
         }
         self.table.new_hand()?;
+        for p in &mut self.players {
+            p.missed = if p.connected { 0 } else { p.missed + 1 };
+        }
         Ok(self.changed(now))
+    }
+
+    /// People seated, the host included, and how many of them would be dealt
+    /// into the next hand.
+    pub fn players_in(&self) -> usize {
+        self.table.players_in()
     }
 
     /// Runs the turn clock: a person out of time checks or folds, and after
@@ -349,7 +584,17 @@ impl TableHost {
         s.id = format!("player{seat}");
         s.human = true;
         s.away = false;
-        let _ = self.table.reset_stack(seat);
+        s.sitting_out = false;
+        // With a bank, people sit down with no chips and ask for some.
+        if self.bank.is_some() {
+            let _ = self.table.set_stack(seat, 0);
+            let i = self.players.iter().position(|p| p.seat == seat);
+            if let Some(chips) = i.map(|i| std::mem::take(&mut self.players[i].approved)) {
+                let _ = self.table.add_chips(seat, chips);
+            }
+        } else {
+            let _ = self.table.reset_stack(seat);
+        }
     }
 
     fn release_seat(&mut self, i: usize) {
@@ -361,10 +606,20 @@ impl TableHost {
         if s.bot.is_some() {
             s.name = s.bot_name.clone();
             s.id = self.bot_ids[p.seat].clone();
+        } else {
+            // Back to an empty seat.
+            s.name.clear();
+            s.id.clear();
         }
         s.human = false;
         s.away = false;
-        let _ = self.table.reset_stack(p.seat);
+        s.sitting_out = false;
+        // Their chips leave with them.
+        if self.bank.is_some() {
+            let _ = self.table.set_stack(p.seat, 0);
+        } else {
+            let _ = self.table.reset_stack(p.seat);
+        }
     }
 
     fn welcome_and_update(&mut self, client_id: &str, seat: usize, now: u64) -> Vec<Outgoing> {
@@ -379,6 +634,13 @@ impl TableHost {
     /// Something changed: restart the clock if the turn moved, and send
     /// every connected player their view.
     fn changed(&mut self, now: u64) -> Vec<Outgoing> {
+        // Someone who left (or was removed) during a hand is gone once it's
+        // over.
+        if !self.table.in_hand() {
+            while let Some(i) = self.players.iter().position(|p| p.leaving) {
+                self.release_seat(i);
+            }
+        }
         self.seq += 1;
         let turn = self
             .table
@@ -406,12 +668,19 @@ impl TableHost {
                     view.seats[0].cards = None;
                     view.legal = None;
                 }
+                let chips = self.bank.map(|b| ChipsView {
+                    min: b.min,
+                    max: b.max,
+                    requested: p.requested,
+                    approved: p.approved,
+                });
                 Outgoing {
                     to: p.client_id.clone(),
                     update: Update::State {
                         seq: self.seq,
                         view: Box::new(view),
                         turn_ms_left,
+                        chips,
                     },
                 }
             })

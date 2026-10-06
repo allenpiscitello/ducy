@@ -1,7 +1,9 @@
 //! A table that plays hand after hand: seats, stacks, the button and bots.
 //!
 //! [`Table`] is the game state a host keeps. Seats are played by people or by
-//! personality bots, and a seat can switch between the two between hands.
+//! personality bots, and a seat can switch between the two between hands. A
+//! seat can also be empty, and a person can sit out: each hand is dealt only
+//! to the seats in play, so a table of friends can wait for people to join.
 //! [`Table::view`] builds what one seat may see, with seats renumbered so
 //! that seat is always seat 0, the way a poker client puts you at the bottom.
 
@@ -27,6 +29,8 @@ pub struct TableSeat {
     pub human: bool,
     /// A person who isn't there: they check or fold at once.
     pub away: bool,
+    /// A person who isn't dealt in from the next hand on.
+    pub sitting_out: bool,
 }
 
 impl TableSeat {
@@ -39,6 +43,34 @@ impl TableSeat {
             bot_name: String::new(),
             human: true,
             away: false,
+            sitting_out: false,
+        }
+    }
+
+    /// A seat with no one in it: it isn't dealt in until someone sits down.
+    pub fn empty() -> Self {
+        Self {
+            name: String::new(),
+            id: String::new(),
+            bot: None,
+            bot_name: String::new(),
+            human: false,
+            away: false,
+            sitting_out: false,
+        }
+    }
+
+    /// Whether no one sits here: no person and no bot.
+    pub fn is_empty(&self) -> bool {
+        !self.human && self.bot.is_none()
+    }
+
+    /// Whether the next hand deals this seat in.
+    pub fn plays(&self) -> bool {
+        if self.human {
+            !self.sitting_out
+        } else {
+            self.bot.is_some()
         }
     }
 
@@ -58,6 +90,7 @@ impl TableSeat {
             bot_name: name,
             human: false,
             away: false,
+            sitting_out: false,
         }
     }
 }
@@ -107,6 +140,13 @@ pub struct SeatState {
     pub human: bool,
     /// A person who isn't there right now.
     pub away: bool,
+    /// No one sits here.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub empty: bool,
+    /// A person who sits here but isn't in this hand (or, between hands,
+    /// won't be dealt in).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sitting_out: bool,
     pub stack: u64,
     pub street_bet: u64,
     pub folded: bool,
@@ -120,7 +160,11 @@ pub struct SeatState {
 }
 
 /// Hand after hand at one table. Everyone starts with `buy_in` chips, and a
-/// player who goes broke is topped back up before the next hand.
+/// player who goes broke is topped back up before the next hand (unless
+/// [`Table::set_top_up`] turns that off: then chips carry over and a seat
+/// without chips sits out until it gets some). Each hand is
+/// dealt to the seats in play ([`TableSeat::plays`]); the hand numbers its
+/// players 0, 1, … in seat order, and the table maps them back to seats.
 pub struct Table {
     rules: TableRules,
     seats: Vec<TableSeat>,
@@ -128,10 +172,14 @@ pub struct Table {
     buy_in: u64,
     button: usize,
     hand: Option<Hand>,
+    /// The seat of each of the current hand's players.
+    dealt: Vec<usize>,
     hand_number: u64,
     /// Whether `stacks` has taken in the finished hand's result, so a stack
     /// reset between hands isn't overwritten by it.
     synced: bool,
+    /// Whether a seat out of chips gets the buy-in again.
+    top_up: bool,
     seed: u64,
 }
 
@@ -151,9 +199,6 @@ impl Table {
         {
             return Err(PlayError::InvalidBlinds);
         }
-        if seats.iter().any(|s| !s.human && s.bot.is_none()) {
-            return Err(PlayError::InvalidPlayerCount);
-        }
         let n = seats.len();
         Ok(Self {
             rules,
@@ -162,8 +207,10 @@ impl Table {
             buy_in,
             button: n - 1,
             hand: None,
+            dealt: Vec::new(),
             hand_number: 0,
             synced: false,
+            top_up: true,
             seed,
         })
     }
@@ -186,8 +233,26 @@ impl Table {
         &mut self.seats[seat]
     }
 
+    /// The current (or last) hand. Its players are numbered 0, 1, … among
+    /// the seats dealt in; see [`Self::hand_index`].
     pub fn hand(&self) -> Option<&Hand> {
         self.hand.as_ref()
+    }
+
+    /// `seat`'s player number in the current hand, if it was dealt in.
+    pub fn hand_index(&self, seat: usize) -> Option<usize> {
+        self.dealt.iter().position(|&s| s == seat)
+    }
+
+    /// The seats dealt into the current hand, in order.
+    pub fn dealt(&self) -> &[usize] {
+        &self.dealt
+    }
+
+    /// The finished hand's summary for `seat` (its seat numbers are the
+    /// hand's player numbers), if `seat` played it.
+    pub fn summary(&self, seat: usize) -> Option<crate::HandSummary> {
+        self.hand.as_ref()?.summary(self.hand_index(seat)?)
     }
 
     pub fn hand_number(&self) -> u64 {
@@ -196,10 +261,10 @@ impl Table {
 
     /// Chips behind for `seat`: in the current hand, or between hands.
     pub fn stack(&self, seat: usize) -> u64 {
-        match &self.hand {
-            Some(h) if !self.synced => h
-                .result()
-                .map_or_else(|| h.stack(seat), |r| r.final_stacks[seat]),
+        match (&self.hand, self.hand_index(seat)) {
+            (Some(h), Some(i)) if !self.synced => {
+                h.result().map_or_else(|| h.stack(i), |r| r.final_stacks[i])
+            }
             _ => self.stacks[seat],
         }
     }
@@ -221,7 +286,9 @@ impl Table {
             return;
         }
         if let Some(r) = self.hand.as_ref().and_then(|h| h.result()) {
-            self.stacks = r.final_stacks.clone();
+            for (i, &s) in self.dealt.iter().enumerate() {
+                self.stacks[s] = r.final_stacks[i];
+            }
             self.synced = true;
         }
     }
@@ -231,32 +298,88 @@ impl Table {
         self.hand.as_ref().is_some_and(|h| !h.is_complete())
     }
 
-    /// Deals the next hand, moving the button and topping up broke players.
+    /// Whether a seat out of chips gets the buy-in again before the next
+    /// hand (on by default). Off, chips carry over: a seat with none isn't
+    /// dealt in until [`Self::add_chips`] gives it some.
+    pub fn set_top_up(&mut self, on: bool) {
+        self.top_up = on;
+    }
+
+    /// Adds chips to a seat that isn't in a hand being played.
+    pub fn add_chips(&mut self, seat: usize, amount: u64) -> Result<(), PlayError> {
+        if self.in_hand() && self.hand_index(seat).is_some() {
+            return Err(PlayError::IllegalAction);
+        }
+        self.sync_stacks();
+        self.stacks[seat] += amount;
+        Ok(())
+    }
+
+    /// Sets the chips of a seat that isn't in a hand being played.
+    pub fn set_stack(&mut self, seat: usize, chips: u64) -> Result<(), PlayError> {
+        if self.in_hand() && self.hand_index(seat).is_some() {
+            return Err(PlayError::IllegalAction);
+        }
+        self.sync_stacks();
+        self.stacks[seat] = chips;
+        Ok(())
+    }
+
+    /// Whether `seat` would be dealt into the next hand: someone plays it
+    /// and it has chips (or will be topped up).
+    fn will_play(&self, seat: usize) -> bool {
+        self.seats[seat].plays() && (self.top_up || self.stack(seat) > 0)
+    }
+
+    /// How many seats the next hand would deal in.
+    pub fn players_in(&self) -> usize {
+        (0..self.seats.len()).filter(|&s| self.will_play(s)).count()
+    }
+
+    /// Deals the next hand to the seats in play, moving the button to the
+    /// next of them and topping up broke players. Fails with fewer than two
+    /// players.
     pub fn new_hand(&mut self) -> Result<(), PlayError> {
         if self.in_hand() {
             return Err(PlayError::IllegalAction);
         }
+        let n = self.seats.len();
         self.sync_stacks();
-        for s in &mut self.stacks {
-            if *s == 0 {
-                *s = self.buy_in;
+        let dealt: Vec<usize> = (0..n).filter(|&s| self.will_play(s)).collect();
+        if dealt.len() < 2 {
+            return Err(PlayError::InvalidPlayerCount);
+        }
+        if self.top_up {
+            for s in &mut self.stacks {
+                if *s == 0 {
+                    *s = self.buy_in;
+                }
             }
         }
-        self.button = (self.button + 1) % self.stacks.len();
+        self.button = (1..=n)
+            .map(|k| (self.button + k) % n)
+            .find(|s| dealt.contains(s))
+            .expect("two players are in");
         self.hand_number += 1;
         let deal = Deal::random(
             self.rules.variant,
-            self.stacks.len(),
+            dealt.len(),
             Some(self.seed.wrapping_add(self.hand_number * 7919)),
         )?;
-        self.hand = Some(Hand::new(self.rules, &self.stacks, self.button, deal)?);
+        let stacks: Vec<u64> = dealt.iter().map(|&s| self.stacks[s]).collect();
+        let button = dealt.iter().position(|&s| s == self.button).expect("dealt");
+        self.hand = Some(Hand::new(self.rules, &stacks, button, deal)?);
+        self.dealt = dealt;
         self.synced = false;
         Ok(())
     }
 
     /// The seat whose turn it is, if a hand is going.
     pub fn to_act(&self) -> Option<usize> {
-        self.hand.as_ref().and_then(|h| h.to_act())
+        self.hand
+            .as_ref()
+            .and_then(|h| h.to_act())
+            .map(|i| self.dealt[i])
     }
 
     /// Whether the seat to act plays without waiting for a person: a bot, or
@@ -275,9 +398,9 @@ impl Table {
             return Ok(false);
         }
         let hand = self.hand.as_mut().ok_or(PlayError::HandComplete)?;
-        let seat = hand.to_act().ok_or(PlayError::HandComplete)?;
-        let obs = hand.observation(seat).ok_or(PlayError::HandComplete)?;
-        let s = &mut self.seats[seat];
+        let i = hand.to_act().ok_or(PlayError::HandComplete)?;
+        let obs = hand.observation(i).ok_or(PlayError::HandComplete)?;
+        let s = &mut self.seats[self.dealt[i]];
         let action = match (&mut s.bot, s.human) {
             (Some(bot), false) => bot.act(&obs),
             _ => None,
@@ -291,8 +414,9 @@ impl Table {
 
     /// Plays `action` for `seat`, which must be the seat to act.
     pub fn act(&mut self, seat: usize, action: Action) -> Result<(), PlayError> {
+        let i = self.hand_index(seat);
         let hand = self.hand.as_mut().ok_or(PlayError::HandComplete)?;
-        if hand.to_act() != Some(seat) {
+        if i.is_none() || hand.to_act() != i {
             return Err(PlayError::IllegalAction);
         }
         hand.act(action)?;
@@ -302,11 +426,12 @@ impl Table {
 
     /// Checks if it can, folds otherwise: for a person who ran out of time.
     pub fn act_default(&mut self, seat: usize) -> Result<(), PlayError> {
+        let i = self.hand_index(seat);
         let legal = self
             .hand
             .as_ref()
             .and_then(|h| h.legal_actions())
-            .filter(|l| l.seat == seat)
+            .filter(|l| Some(l.seat) == i)
             .ok_or(PlayError::IllegalAction)?;
         self.act(seat, fallback_action(&legal))
     }
@@ -317,8 +442,8 @@ impl Table {
         if !hand.is_complete() {
             return;
         }
-        for (seat, s) in self.seats.iter_mut().enumerate() {
-            if let (Some(bot), Some(summary)) = (s.bot.as_mut(), hand.summary(seat)) {
+        for (i, &seat) in self.dealt.iter().enumerate() {
+            if let (Some(bot), Some(summary)) = (self.seats[seat].bot.as_mut(), hand.summary(i)) {
                 bot.hand_over(&summary);
             }
         }
@@ -347,7 +472,10 @@ impl Table {
                 to_act: None,
                 legal: None,
                 seats: order
-                    .map(|s| self.seat_state(s, self.stacks[s], 0, false, false, None, 0, 0))
+                    .map(|s| {
+                        let out = self.seats[s].human && self.seats[s].sitting_out;
+                        self.seat_state(s, self.stacks[s], 0, false, false, None, 0, 0, out)
+                    })
                     .collect(),
                 events: Vec::new(),
                 complete: true,
@@ -357,49 +485,73 @@ impl Table {
         };
         let result = hand.result();
         let showdown = result.is_some_and(|r| r.showdown);
+        // Hand players to rotated seats.
+        let seat_of = |i: usize| rot(self.dealt[i]);
         let seats = order
             .map(|s| {
-                let shown = s == seat || (showdown && !hand.has_folded(s));
+                let Some(i) = self.hand_index(s) else {
+                    // Not in this hand: an empty seat, or a person sitting
+                    // out (or waiting for the next hand).
+                    let stack = self.stack(s);
+                    return self.seat_state(
+                        s,
+                        stack,
+                        0,
+                        false,
+                        false,
+                        None,
+                        0,
+                        0,
+                        self.seats[s].human,
+                    );
+                };
+                let shown = s == seat || (showdown && !hand.has_folded(i));
                 self.seat_state(
                     s,
-                    result.map_or(hand.stack(s), |r| r.final_stacks[s]),
+                    result.map_or(hand.stack(i), |r| r.final_stacks[i]),
                     if result.is_some() {
                         0
                     } else {
-                        hand.street_bet(s)
+                        hand.street_bet(i)
                     },
-                    hand.has_folded(s),
-                    hand.is_all_in(s),
-                    shown.then(|| cards(hand.deal().hole_cards()[s])),
-                    result.map_or(0, |r| r.payouts[s]),
-                    result.map_or(0, |r| r.net[s]),
+                    hand.has_folded(i),
+                    hand.is_all_in(i),
+                    shown.then(|| cards(hand.deal().hole_cards()[i])),
+                    result.map_or(0, |r| r.payouts[i]),
+                    result.map_or(0, |r| r.net[i]),
+                    false,
                 )
             })
             .collect();
+        let me = self.hand_index(seat);
         TableView {
             hand_number: self.hand_number,
             street: (!hand.is_complete()).then(|| hand.street()),
             board: hand.board().iter().map(Card::to_string).collect(),
             pot: hand.pot(),
             current_bet: hand.current_bet(),
-            button: rot(hand.button()),
+            button: seat_of(hand.button()),
             hero: 0,
             seat,
             small_blind: self.rules.small_blind,
             big_blind: self.rules.big_blind,
             hole_cards: self.rules.variant.hole_cards(),
             pot_limit: self.rules.structure == BettingStructure::PotLimit,
-            to_act: hand.to_act().map(rot),
+            to_act: hand.to_act().map(seat_of),
             legal: hand
                 .legal_actions()
-                .filter(|l| l.seat == seat)
+                .filter(|l| Some(l.seat) == me)
                 .map(|l| LegalActions { seat: 0, ..l }),
             seats,
-            events: hand.events().iter().map(|e| rotate_event(e, rot)).collect(),
+            events: hand
+                .events()
+                .iter()
+                .map(|e| rotate_event(e, seat_of))
+                .collect(),
             complete: hand.is_complete(),
             showdown,
             pots: result.map_or_else(Vec::new, |r| {
-                r.pots.iter().map(|p| rotate_pot(p, rot)).collect()
+                r.pots.iter().map(|p| rotate_pot(p, seat_of)).collect()
             }),
         }
     }
@@ -415,6 +567,7 @@ impl Table {
         cards: Option<Vec<String>>,
         won: u64,
         net: i64,
+        sitting_out: bool,
     ) -> SeatState {
         let seat = &self.seats[s];
         SeatState {
@@ -422,6 +575,8 @@ impl Table {
             id: seat.id.clone(),
             human: seat.human,
             away: seat.human && seat.away,
+            empty: seat.is_empty(),
+            sitting_out,
             stack,
             street_bet,
             folded,
