@@ -314,12 +314,7 @@ fn turn_and_river_values_match_brute_force() {
         &mut BucketCache::default(),
         1,
     );
-    let eval = Evaluator {
-        tree: &game.tree,
-        blueprint: &bp,
-        cards: &cards,
-        tree_big_blind: 2,
-    };
+    let eval = Evaluator::new(&game.tree, &bp, &cards, 2);
     let mut rng = Rng::new(1);
     // The big blind's first turn and river decisions.
     for street in [2, 3] {
@@ -525,12 +520,7 @@ fn flop_values_converge_to_brute_force() {
         &mut BucketCache::default(),
         1,
     );
-    let eval = Evaluator {
-        tree: &game.tree,
-        blueprint: &bp,
-        cards: &cards,
-        tree_big_blind: 2,
-    };
+    let eval = Evaluator::new(&game.tree, &bp, &cards, 2);
     let d = decisions
         .iter()
         .find(|d| d.player == 1 && d.street == 1)
