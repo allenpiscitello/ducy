@@ -131,6 +131,7 @@ fn river_shove(hole: &str, board: &str, last: Event) -> HandRecord {
         history,
         big_blind: 2,
         net: 0,
+        stacks: [200, 200],
     }
 }
 
@@ -177,6 +178,7 @@ fn folding_the_nuts_and_calling_with_air_are_blunders() {
     let d = rev.decisions.last().unwrap();
     assert_eq!(d.grade, Grade::Blunder, "{d:?}");
     assert!((d.bb_lost - 99.0).abs() < 1e-6, "{d:?}");
+    assert_eq!(rev.note, None, "100 big blinds is what the bot plays");
     // Its earlier checks were the blueprint's play.
     assert!(
         rev.decisions[..rev.decisions.len() - 1]
@@ -636,4 +638,17 @@ fn review_log_keeps_hands_and_reviews_each_once() {
     let mut s = hands.lock().unwrap()[0].clone();
     s.rules = TableRules::pot_limit_omaha(1, 2);
     assert!(!log.record(&s));
+}
+
+#[test]
+fn other_stack_depths_get_a_note() {
+    let (cards, config) = setup();
+    let game = Hunl::new(config, Some(&cards));
+    let bp = threshold_blueprint(&game, &cards);
+    let r = reviewer(&game, &cards, &bp);
+    let mut rec = river_shove("As Ks", "Ts Js Qs 4d 2c", Event::Fold { seat: 1 });
+    rec.stacks = [20, 400];
+    let rev = r.review(&rec, &mut BucketCache::default());
+    let note = rev.note.unwrap();
+    assert!(note.contains("10 bb") && note.contains("100 bb"), "{note}");
 }
