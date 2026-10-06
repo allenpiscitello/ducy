@@ -328,3 +328,223 @@ fn any_bot_can_take_a_seat() {
         }
     }
 }
+
+#[test]
+fn reset_stacks_last_into_the_next_hand() {
+    let seats = vec![
+        TableSeat::human("You", "you"),
+        TableSeat::with_bot(
+            "Rando",
+            "random",
+            Box::new(ducy_play::bots::RandomBot::new(Some(1))),
+        ),
+    ];
+    let mut t = Table::new(TableRules::no_limit_holdem(1, 2), seats, 200, 3).unwrap();
+    // Play hands until the stacks have moved.
+    for _ in 0..50 {
+        t.new_hand().unwrap();
+        while t.in_hand() {
+            if t.auto_to_act() {
+                t.advance().unwrap();
+            } else {
+                t.act_default(0).unwrap();
+            }
+        }
+        if t.stack(0) != 200 {
+            break;
+        }
+    }
+    assert_ne!(t.stack(0), 200, "the stacks never moved");
+    t.reset_stack(0).unwrap();
+    t.reset_stack(1).unwrap();
+    assert_eq!((t.stack(0), t.stack(1)), (200, 200));
+    t.new_hand().unwrap();
+    let v = t.view(0);
+    let total = |i: usize| v.seats[i].stack + v.seats[i].street_bet;
+    assert_eq!(
+        total(0) + total(1),
+        400,
+        "both start the hand with the buy-in"
+    );
+    assert_eq!((total(0), total(1)), (200, 200));
+}
+
+/// A table for friends: the host and five empty seats anyone may take,
+/// blinds 1/2, buy-ins from 40 to 200 chips (20 to 100 big blinds).
+fn friends(turn_ms: u64) -> TableHost {
+    let mut seats = vec![TableSeat::human("Host", "you")];
+    seats.extend((0..5).map(|_| TableSeat::empty()));
+    let table = Table::new(TableRules::no_limit_holdem(1, 2), seats, 200, 7).unwrap();
+    TableHost::new(table, vec![false, true, true, true, true, true], turn_ms)
+        .unwrap()
+        .with_bank(40, 200)
+        .unwrap()
+}
+
+fn request(amount: u64) -> Command {
+    Command::RequestChips { amount }
+}
+
+/// The chips view last sent to `client`.
+fn last_chips(out: &[Outgoing], client: &str) -> Option<ducy_play::ChipsView> {
+    out.iter().rev().find_map(|o| match &o.update {
+        Update::State { chips, .. } if o.to == client => chips.clone(),
+        _ => None,
+    })
+}
+
+/// Plays the current hand out: the host and every remote person check or
+/// call (a person who is away is played by the table).
+fn play_out(h: &mut TableHost, players: &[&str], now: u64) {
+    while h.table().in_hand() {
+        let out = run_to_person(h, now);
+        if !h.table().in_hand() {
+            break;
+        }
+        let seat = h.table().to_act().unwrap();
+        let client = players[seat - 1];
+        let (seq, view) =
+            last_view(&out, client).unwrap_or_else(|| (h.seq(), h.table().view(seat)));
+        let legal = view.legal.expect("their turn");
+        let kind = if legal.can_check { "check" } else { "call" };
+        let r = h.handle(client, act(seq.max(h.seq()), kind), now);
+        assert!(!rejected(&r, client), "{client} {kind}");
+    }
+}
+
+#[test]
+fn friends_sit_down_with_no_chips_and_ask_the_host() {
+    let mut h = friends(0);
+    // Only the host: nothing to deal, and the empty seats show as empty.
+    assert!(h.new_hand(0).is_err());
+    let v = h.host_view();
+    assert_eq!(v.seats.len(), 6);
+    assert!(v.seats[1..].iter().all(|s| s.empty && s.stack == 0));
+    // A friend sits down with no chips and isn't dealt in.
+    let out = h.handle("a", join("Ann"), 1);
+    assert!(!rejected(&out, "a"));
+    assert_eq!(h.table().stack(1), 0);
+    assert!(
+        h.host_view().seats[1].sitting_out,
+        "no chips, so not dealt in"
+    );
+    assert!(h.new_hand(2).is_err(), "Ann has no chips yet");
+    // Too much or too little is refused; a fair request waits for the host.
+    assert!(rejected(&h.handle("a", request(300), 3), "a"));
+    assert!(rejected(&h.handle("a", request(10), 3), "a"));
+    let out = h.handle("a", request(150), 4);
+    assert!(!rejected(&out, "a"));
+    let chips = last_chips(&out, "a").unwrap();
+    assert_eq!((chips.min, chips.max, chips.requested), (40, 200, 150));
+    let reqs = h.chip_requests();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(
+        (
+            reqs[0].seat,
+            reqs[0].name.as_str(),
+            reqs[0].amount,
+            reqs[0].stack
+        ),
+        (1, "Ann", 150, 0)
+    );
+    // Denied, then asked again and approved.
+    h.deny_chips(1, 5);
+    assert!(h.chip_requests().is_empty());
+    assert_eq!(h.table().stack(1), 0);
+    h.handle("a", request(150), 6);
+    let out = h.approve_chips(1, 7);
+    assert_eq!(last_chips(&out, "a").unwrap().requested, 0);
+    assert_eq!(h.table().stack(1), 150);
+    // Now the two of them play; the other seats stay empty.
+    h.new_hand(8).unwrap();
+    assert_eq!(h.table().dealt(), &[0, 1]);
+    let v = h.host_view();
+    assert!(v.seats[2..].iter().all(|s| s.empty && s.cards.is_none()));
+    play_out(&mut h, &["a"], 9);
+    // Chips carry over: no one is topped back up.
+    let (s0, s1) = (h.table().stack(0), h.table().stack(1));
+    assert_eq!(s0 + s1, 350);
+    h.new_hand(10).unwrap();
+    let v = h.host_view();
+    let total = |i: usize| v.seats[i].stack + v.seats[i].street_bet;
+    assert_eq!((total(0), total(1)), (s0, s1));
+}
+
+#[test]
+fn chips_approved_mid_hand_arrive_before_the_next_one() {
+    let mut h = friends(0);
+    h.handle("a", join("Ann"), 0);
+    h.handle("a", request(100), 0);
+    h.approve_chips(1, 0);
+    h.new_hand(1).unwrap();
+    // Ann tops up during the hand: it waits for the next deal.
+    h.handle("a", request(40), 2);
+    let out = h.approve_chips(1, 3);
+    assert_eq!(last_chips(&out, "a").unwrap().approved, 40);
+    play_out(&mut h, &["a"], 4);
+    let after_hand = h.table().stack(1);
+    h.new_hand(5).unwrap();
+    let v = h.table().view(1);
+    assert_eq!(v.seats[0].stack + v.seats[0].street_bet, after_hand + 40);
+    // The host tops up too, within the limits.
+    assert!(h.host_chips(1000, 6).is_err());
+}
+
+#[test]
+fn leaving_and_removal_free_the_seat() {
+    let mut h = friends(0);
+    for (c, n) in [("a", "Ann"), ("b", "Bo"), ("c", "Cy")] {
+        h.handle(c, join(n), 0);
+        h.handle(c, request(100), 0);
+    }
+    for seat in 1..=3 {
+        h.approve_chips(seat, 0);
+    }
+    h.new_hand(1).unwrap();
+    assert_eq!(h.table().dealt(), &[0, 1, 2, 3]);
+    // Bo leaves mid-hand, and the host removes Cy: they fold when it's
+    // their turn, and their seats are empty from the next hand.
+    let out = h.handle("b", Command::Leave, 2);
+    assert!(out.iter().all(|o| o.to != "b"), "no more updates for Bo");
+    h.remove(3, 3);
+    play_out(&mut h, &["a", "b", "c"], 4);
+    h.new_hand(5).unwrap();
+    assert_eq!(h.table().dealt(), &[0, 1]);
+    let v = h.host_view();
+    assert!(v.seats[2].empty && v.seats[3].empty);
+    assert_eq!((h.table().stack(2), h.table().stack(3)), (0, 0));
+    // Someone new takes the first free seat, with no chips.
+    play_out(&mut h, &["a"], 6);
+    h.handle("d", join("Di"), 7);
+    assert_eq!(h.table().stack(2), 0);
+    assert!(h.table().view(0).seats[2].human);
+}
+
+#[test]
+fn a_player_who_stays_away_sits_out_then_is_dropped() {
+    let mut h = friends(0);
+    for (c, n) in [("a", "Ann"), ("b", "Bo")] {
+        h.handle(c, join(n), 0);
+        h.handle(c, request(200), 0);
+    }
+    h.approve_chips(1, 0);
+    h.approve_chips(2, 0);
+    // Bo's connection drops: from the next hand Bo sits out.
+    h.disconnected("b", 1);
+    for hand in 0..ducy_play::DROP_AFTER_HANDS {
+        h.new_hand(2 + hand as u64).unwrap();
+        assert_eq!(h.table().dealt(), &[0, 1], "hand {hand}");
+        let v = h.host_view();
+        assert!(v.seats[2].sitting_out && !v.seats[2].empty);
+        play_out(&mut h, &["a", "b"], 2);
+    }
+    // After that many hands away, the seat is given up.
+    h.new_hand(10).unwrap();
+    assert!(h.host_view().seats[2].empty);
+    // Ann comes and goes in time: reconnecting keeps the seat.
+    play_out(&mut h, &["a", "b"], 11);
+    h.disconnected("a", 12);
+    h.handle("a", join("Ann"), 13);
+    assert!(h.new_hand(14).is_ok());
+    assert_eq!(h.table().dealt(), &[0, 1]);
+}
