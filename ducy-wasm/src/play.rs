@@ -265,6 +265,17 @@ impl BotTable {
         to_js(&self.table.view(0))
     }
 
+    /// Puts every seat back to the buy-in for the next hand, so no chips
+    /// carry over (e.g. training against "gto", always at the same depth).
+    /// Only between hands.
+    #[wasm_bindgen(js_name = resetStacks)]
+    pub fn reset_stacks(&mut self) -> Result<(), JsError> {
+        for seat in 0..self.table.num_seats() {
+            self.table.reset_stack(seat).map_err(err)?;
+        }
+        Ok(())
+    }
+
     /// Hands kept for review (heads-up no-limit Hold'em against "gto").
     #[wasm_bindgen(js_name = reviewableHands)]
     pub fn reviewable_hands(&self) -> usize {

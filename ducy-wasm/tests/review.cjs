@@ -85,6 +85,17 @@ assert.equal(
 const ms = (Date.now() - started) / hands;
 console.log(`${hands} hands played and reviewed, ${ms.toFixed(0)} ms per hand`);
 
+// Resetting the stacks puts both players back to the buy-in for the next
+// hand, whatever the last one did.
+table.resetStacks();
+const fresh = table.newHand();
+const behind = s => Number(s.stack) + Number(s.street_bet);
+assert.deepEqual(fresh.seats.map(behind), [200, 200]);
+while (!table.state().complete) {
+  if (table.botToAct()) table.advance();
+  else table.act(table.state().legal.can_check ? "check" : "call", 0n);
+}
+
 table.clearReviews();
 assert.equal(table.reviewableHands(), 0);
 assert.equal(table.reviewLastHand(), null);
