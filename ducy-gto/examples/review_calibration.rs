@@ -106,12 +106,6 @@ fn main() {
         tree_big_blind: config.big_blind,
         config: ReviewConfig::default(),
     };
-    let eval = Evaluator {
-        tree: &tree,
-        blueprint: &blueprint,
-        cards: &cards,
-        tree_big_blind: config.big_blind,
-    };
     println!(
         "{:>14} {:>6} {:>9} {:>9} {:>9} {:>6} {:>6} {:>6} {:>6} {:>9} {:>9}",
         "player",
@@ -166,6 +160,8 @@ fn main() {
                 continue;
             };
             let me = rec.side();
+            // One evaluator per hand, as a review does.
+            let eval = Evaluator::new(&tree, &blueprint, &cards, config.big_blind);
             let mut rng = ducy_gto::Rng::new(1);
             for d in replay(&rec, &tree, &cards, &blueprint, &mut cache, 1) {
                 let Some(node) = d.node.filter(|_| d.player == me) else {

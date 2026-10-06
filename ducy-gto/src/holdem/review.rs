@@ -48,9 +48,10 @@ use crate::rng::Rng;
 /// How a review is done.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReviewConfig {
-    /// Turn and river cards sampled for a flop decision, each pair at most
-    /// once (all 2,162 makes it exact). 0 leaves flop decisions graded on
-    /// the mix alone.
+    /// Turn and river cards sampled for a flop decision: a quarter as many
+    /// turn cards, with several rivers each, each pair at most once (all
+    /// 2,162 makes it exact). 0 leaves flop decisions graded on the mix
+    /// alone.
     pub flop_runouts: usize,
     /// Flop and turn cards sampled for a preflop decision. Each needs every
     /// hand's flop bucket, about 0.2 s with a compact abstraction, so the
@@ -244,6 +245,9 @@ pub struct Evaluator<'a> {
     pub cards: &'a CardAbstraction,
     /// The tree's big blind (chips per big blind in the tree's units).
     pub tree_big_blind: u64,
+    /// Every hand's buckets per board, kept across samples and decisions:
+    /// with a compact abstraction a flop's take about 0.1 s to compute.
+    buckets: std::cell::RefCell<HashMap<Vec<Card>, Vec<u16>>>,
 }
 
 /// What one walk needs: the hero's hand and side, the opponent's possible
@@ -255,11 +259,35 @@ struct Walk<'b> {
     /// Board cards for this runout beyond the current board, in order; the
     /// river is enumerated when it isn't among them.
     planned: Vec<Card>,
-    buckets: HashMap<Vec<Card>, Vec<u16>>,
+    buckets: &'b mut HashMap<Vec<Card>, Vec<u16>>,
     scores: HashMap<Vec<Card>, (u32, Vec<u32>)>,
 }
 
-impl Evaluator<'_> {
+impl<'a> Evaluator<'a> {
+    pub fn new(
+        tree: &'a BettingTree,
+        blueprint: &'a Blueprint,
+        cards: &'a CardAbstraction,
+        tree_big_blind: u64,
+    ) -> Self {
+        Self {
+            tree,
+            blueprint,
+            cards,
+            tree_big_blind,
+            buckets: Default::default(),
+        }
+    }
+
+    /// Hands it every hand's buckets on `board`, already worked out
+    /// elsewhere (e.g. while replaying the hand).
+    pub fn know_buckets(&self, board: &[Card], buckets: &[u16]) {
+        self.buckets
+            .borrow_mut()
+            .entry(board.to_vec())
+            .or_insert_with(|| buckets.to_vec());
+    }
+
     /// The values of every action at `node` (where `side` acts) for `hero`
     /// with `board`, against the opponent's range `opp_range` (by hole
     /// index). `None` when the opponent's range is empty or the street can't
@@ -307,13 +335,14 @@ impl Evaluator<'_> {
         let k = n.actions.len();
         let mut per = vec![Vec::with_capacity(samples.len()); k];
         let mut sums = vec![(0f64, 0f64); k];
+        let mut buckets = self.buckets.borrow_mut();
         for planned in samples {
             let mut w = Walk {
                 hero,
                 side,
                 opp: &opp,
                 planned,
-                buckets: HashMap::new(),
+                buckets: &mut buckets,
                 scores: HashMap::new(),
             };
             for (a, &child) in n.children.iter().enumerate() {
@@ -401,22 +430,26 @@ impl Evaluator<'_> {
             }
             return (v, m);
         }
-        let mut rows: HashMap<u16, Vec<f64>> = HashMap::new();
+        // Every action's reach in one pass, with each bucket's row of
+        // probabilities looked up once.
+        let k = n.children.len();
+        let mut rows = vec![f64::NAN; self.cards.num_buckets(need) * k];
+        let mut next = vec![vec![0.0; reach.len()]; k];
+        for (i, (&r, &bkt)) in reach.iter().zip(&opp_bk).enumerate() {
+            if r == 0.0 {
+                continue;
+            }
+            let row = &mut rows[bkt as usize * k..(bkt as usize + 1) * k];
+            if row[0].is_nan() {
+                row.copy_from_slice(&self.blueprint.probs(node, bkt));
+            }
+            for (x, &p) in next.iter_mut().zip(row.iter()) {
+                x[i] = r * p;
+            }
+        }
         let (mut v, mut m) = (0.0, 0.0);
-        for (a, &child) in n.children.iter().enumerate() {
-            let next: Vec<f64> = reach
-                .iter()
-                .zip(&opp_bk)
-                .map(|(&r, &bkt)| {
-                    if r == 0.0 {
-                        return 0.0;
-                    }
-                    r * rows
-                        .entry(bkt)
-                        .or_insert_with(|| self.blueprint.probs(node, bkt))[a]
-                })
-                .collect();
-            let (cv, cm) = self.walk(child, board, &next, w);
+        for (&child, reach) in n.children.iter().zip(&next) {
+            let (cv, cm) = self.walk(child, board, reach, w);
             v += cv;
             m += cm;
         }
@@ -510,26 +543,29 @@ fn without(reach: &[f64], opp: &[(usize, Card, Card)], cards: u64) -> Vec<f64> {
         .collect()
 }
 
-/// `count` draws of `k` distinct cards from `deck`, in order. With one or
-/// two cards per draw, no draw repeats, as far as the deck allows.
+/// `count` draws of `k` distinct cards from `deck`, in order, each distinct.
+/// Two cards (a turn and a river) come as a quarter as many turn cards with
+/// several rivers each: every pair is as likely as any other, and only that
+/// many turn boards need every hand's bucket, the slow part with a compact
+/// abstraction. Asking for every pair gets every pair.
 fn sample(deck: &[Card], k: usize, count: usize, rng: &mut Rng) -> Vec<Vec<Card>> {
     let mut d = deck.to_vec();
-    if k <= 2 {
-        let mut all: Vec<Vec<Card>> = if k == 1 {
-            d.iter().map(|&c| vec![c]).collect()
-        } else {
-            d.iter()
-                .flat_map(|&a| d.iter().filter(move |&&b| b != a).map(move |&b| vec![a, b]))
-                .collect()
-        };
-        // A partial shuffle: the first `count` are a uniform sample.
-        let take = count.min(all.len());
-        for i in 0..take {
-            let j = i + (rng.next_u64() % (all.len() - i) as u64) as usize;
-            all.swap(i, j);
+    let n = d.len();
+    if k == 1 {
+        shuffle(&mut d, rng);
+        return d.iter().take(count).map(|&c| vec![c]).collect();
+    }
+    if k == 2 && n >= 2 {
+        let turns = count.div_ceil(4).clamp(1, n);
+        let rivers = count.div_ceil(turns).clamp(1, n - 1);
+        shuffle(&mut d, rng);
+        let mut out = Vec::with_capacity(turns * rivers);
+        for &t in &d[..turns] {
+            let mut rest: Vec<Card> = deck.iter().copied().filter(|&c| c != t).collect();
+            shuffle(&mut rest, rng);
+            out.extend(rest[..rivers].iter().map(|&r| vec![t, r]));
         }
-        all.truncate(take);
-        return all;
+        return out;
     }
     (0..count)
         .map(|_| {
@@ -652,12 +688,14 @@ impl Reviewer<'_> {
             self.config.seed,
         );
         let me = rec.side();
-        let eval = Evaluator {
-            tree: self.tree,
-            blueprint: self.blueprint,
-            cards: self.cards,
-            tree_big_blind: self.tree_big_blind,
-        };
+        let eval = Evaluator::new(self.tree, self.blueprint, self.cards, self.tree_big_blind);
+        // The replay worked out every street's buckets already.
+        for n in [0, 3, 4, 5] {
+            if n <= rec.board.len() {
+                let board = &rec.board[..n];
+                eval.know_buckets(board, cache.get(self.cards, board));
+            }
+        }
         let mut rng = Rng::new(self.config.seed ^ 0x7e1e);
         let bb = rec.big_blind.max(1) as f64;
         let mut out = Vec::new();
