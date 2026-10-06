@@ -328,3 +328,43 @@ fn any_bot_can_take_a_seat() {
         }
     }
 }
+
+#[test]
+fn reset_stacks_last_into_the_next_hand() {
+    let seats = vec![
+        TableSeat::human("You", "you"),
+        TableSeat::with_bot(
+            "Rando",
+            "random",
+            Box::new(ducy_play::bots::RandomBot::new(Some(1))),
+        ),
+    ];
+    let mut t = Table::new(TableRules::no_limit_holdem(1, 2), seats, 200, 3).unwrap();
+    // Play hands until the stacks have moved.
+    for _ in 0..50 {
+        t.new_hand().unwrap();
+        while t.in_hand() {
+            if t.auto_to_act() {
+                t.advance().unwrap();
+            } else {
+                t.act_default(0).unwrap();
+            }
+        }
+        if t.stack(0) != 200 {
+            break;
+        }
+    }
+    assert_ne!(t.stack(0), 200, "the stacks never moved");
+    t.reset_stack(0).unwrap();
+    t.reset_stack(1).unwrap();
+    assert_eq!((t.stack(0), t.stack(1)), (200, 200));
+    t.new_hand().unwrap();
+    let v = t.view(0);
+    let total = |i: usize| v.seats[i].stack + v.seats[i].street_bet;
+    assert_eq!(
+        total(0) + total(1),
+        400,
+        "both start the hand with the buy-in"
+    );
+    assert_eq!((total(0), total(1)), (200, 200));
+}

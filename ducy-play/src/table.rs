@@ -129,6 +129,9 @@ pub struct Table {
     button: usize,
     hand: Option<Hand>,
     hand_number: u64,
+    /// Whether `stacks` has taken in the finished hand's result, so a stack
+    /// reset between hands isn't overwritten by it.
+    synced: bool,
     seed: u64,
 }
 
@@ -160,6 +163,7 @@ impl Table {
             button: n - 1,
             hand: None,
             hand_number: 0,
+            synced: false,
             seed,
         })
     }
@@ -193,10 +197,10 @@ impl Table {
     /// Chips behind for `seat`: in the current hand, or between hands.
     pub fn stack(&self, seat: usize) -> u64 {
         match &self.hand {
-            Some(h) => h
+            Some(h) if !self.synced => h
                 .result()
                 .map_or_else(|| h.stack(seat), |r| r.final_stacks[seat]),
-            None => self.stacks[seat],
+            _ => self.stacks[seat],
         }
     }
 
@@ -211,9 +215,14 @@ impl Table {
         Ok(())
     }
 
+    /// Takes in the finished hand's stacks, once.
     fn sync_stacks(&mut self) {
+        if self.synced {
+            return;
+        }
         if let Some(r) = self.hand.as_ref().and_then(|h| h.result()) {
             self.stacks = r.final_stacks.clone();
+            self.synced = true;
         }
     }
 
@@ -241,6 +250,7 @@ impl Table {
             Some(self.seed.wrapping_add(self.hand_number * 7919)),
         )?;
         self.hand = Some(Hand::new(self.rules, &self.stacks, self.button, deal)?);
+        self.synced = false;
         Ok(())
     }
 
