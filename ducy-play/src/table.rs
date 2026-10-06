@@ -473,7 +473,8 @@ impl Table {
                 legal: None,
                 seats: order
                     .map(|s| {
-                        let out = self.seats[s].human && self.seats[s].sitting_out;
+                        // Someone who won't be dealt in (sitting out, or no chips).
+                        let out = self.seats[s].human && !self.will_play(s);
                         self.seat_state(s, self.stacks[s], 0, false, false, None, 0, 0, out)
                     })
                     .collect(),

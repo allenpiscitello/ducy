@@ -192,6 +192,12 @@ impl TableHost {
             return Err(PlayError::InvalidSetup);
         }
         self.table.set_top_up(false);
+        // Empty seats hold no chips.
+        for seat in 1..self.table.num_seats() {
+            if self.table.seat(seat).is_empty() {
+                self.table.set_stack(seat, 0)?;
+            }
+        }
         self.bank = Some(Bank { min, max });
         Ok(self)
     }

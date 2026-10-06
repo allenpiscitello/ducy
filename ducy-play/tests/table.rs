@@ -419,11 +419,15 @@ fn friends_sit_down_with_no_chips_and_ask_the_host() {
     assert!(h.new_hand(0).is_err());
     let v = h.host_view();
     assert_eq!(v.seats.len(), 6);
-    assert!(v.seats[1..].iter().all(|s| s.empty));
+    assert!(v.seats[1..].iter().all(|s| s.empty && s.stack == 0));
     // A friend sits down with no chips and isn't dealt in.
     let out = h.handle("a", join("Ann"), 1);
     assert!(!rejected(&out, "a"));
     assert_eq!(h.table().stack(1), 0);
+    assert!(
+        h.host_view().seats[1].sitting_out,
+        "no chips, so not dealt in"
+    );
     assert!(h.new_hand(2).is_err(), "Ann has no chips yet");
     // Too much or too little is refused; a fair request waits for the host.
     assert!(rejected(&h.handle("a", request(300), 3), "a"));
