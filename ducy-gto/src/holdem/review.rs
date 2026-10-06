@@ -94,6 +94,8 @@ pub struct HandRecord {
     pub big_blind: u64,
     /// The reviewed player's result in chips.
     pub net: i64,
+    /// Both seats' stacks at the start of the hand, by seat.
+    pub stacks: [u64; 2],
 }
 
 impl HandRecord {
@@ -125,6 +127,9 @@ impl HandRecord {
             history: summary.history.clone(),
             big_blind: summary.rules.big_blind,
             net: summary.result.net[summary.seat],
+            stacks: std::array::from_fn(|i| {
+                (summary.result.final_stacks[i] as i64 - summary.result.net[i]).max(0) as u64
+            }),
         })
     }
 
@@ -664,6 +669,9 @@ pub struct HandReview {
     /// What the player actually won or lost, in big blinds: luck included,
     /// so kept apart from the grading.
     pub result: f64,
+    /// A caveat for the whole hand, e.g. stacks deeper or shorter than the
+    /// blueprint was trained for, which makes its grades approximate.
+    pub note: Option<String>,
 }
 
 /// Everything needed to review hands against a blueprint.
@@ -716,7 +724,22 @@ impl Reviewer<'_> {
             bb_lost,
             worst,
             result: rec.net as f64 / bb,
+            note: self.depth_note(rec),
         }
+    }
+
+    /// A note when the hand's effective stack is more than 10% off the
+    /// blueprint's: its all-ins and big bets then mean something else.
+    fn depth_note(&self, rec: &HandRecord) -> Option<String> {
+        let root = &self.tree.nodes[0].betting;
+        let tree_bb = self.tree_big_blind.max(1) as f64;
+        let trained = (root.stack[0] + root.contributed[0]) as f64 / tree_bb;
+        let real = rec.stacks[0].min(rec.stacks[1]) as f64 / rec.big_blind.max(1) as f64;
+        ((real - trained).abs() > 0.1 * trained).then(|| {
+            format!(
+                "stacks were {real:.0} bb, but the bot plays {trained:.0} bb stacks, so these grades are approximate"
+            )
+        })
     }
 
     fn decision(
