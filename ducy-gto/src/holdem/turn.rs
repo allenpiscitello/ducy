@@ -12,10 +12,14 @@
 //! - **Leaves** are where the turn's betting closes with both players still
 //!   in. Each is valued by dealing every river card and playing the river
 //!   out with fixed *continuation strategies* ([`Continuation`]): the
-//!   blueprint's river strategy carried over to the real chips. Showdowns
-//!   and folds on each river are valued in O(n) as in
-//!   [`RiverHands`], so a leaf costs one pass over its river tree per river
-//!   card. An all-in leaf is the same with no betting left.
+//!   blueprint's river strategy carried over to the real chips. Both
+//!   players' river play depends only on buckets, so each leaf keeps, for
+//!   every way its river ends (a fold or a showdown), each player's chance
+//!   of getting there per bucket ([`Ending`], computed once). Valuing a leaf
+//!   on a river card is then one O(n) fold or showdown per ending, as in
+//!   [`RiverHands`], with no walk of the river tree; the opponent's choices
+//!   between continuations share that valuation, since it's linear in their
+//!   reach. An all-in leaf is the same with no betting left.
 //! - **Several continuations.** With a single one the solver may assume the
 //!   opponent keeps playing the blueprint on the river, which they needn't.
 //!   So at each leaf the opponent (the *chooser*) picks, per hand, one of
@@ -194,8 +198,71 @@ impl Continuation {
         Self::new(tree, rows)
     }
 
+    /// Every way the river can end (see [`Ending`]), with each player's
+    /// chance, per bucket and per bias, of their own decisions leading there.
+    fn endings(&self) -> Vec<Ending> {
+        let buckets = self.rows.iter().map(|r| r.len()).max().unwrap_or(1).max(1);
+        let ones = vec![1f32; buckets];
+        let start = std::array::from_fn(|_| std::array::from_fn(|_| ones.clone()));
+        let mut out = Vec::new();
+        self.collect_endings(0, start, &mut out);
+        out
+    }
+
+    fn collect_endings(&self, node: usize, reach: [[Vec<f32>; 4]; 2], out: &mut Vec<Ending>) {
+        let x = &self.tree.nodes[node];
+        let b = &x.betting;
+        if b.folded.is_some() || x.actions.is_empty() {
+            let c = [b.contributed[0] as f32, b.contributed[1] as f32];
+            let win = match b.folded {
+                Some(f) => std::array::from_fn(|p| if f == p { -c[p] } else { c[f] }),
+                None => [c[0].min(c[1]); 2],
+            };
+            out.push(Ending {
+                showdown: b.folded.is_none(),
+                win,
+                reach,
+            });
+            return;
+        }
+        let q = b.to_act;
+        let rows = &self.rows[node];
+        let k = x.actions.len();
+        // Each bias's rows, biased and renormalized, by bucket.
+        let biased: Vec<Vec<Vec<f32>>> = Bias::ALL
+            .iter()
+            .map(|bias| {
+                let factors: Vec<f32> = x.actions.iter().map(|a| bias.factor(a)).collect();
+                rows.iter()
+                    .map(|row| {
+                        let w: Vec<f32> = row.iter().zip(&factors).map(|(p, f)| p * f).collect();
+                        let total: f32 = w.iter().sum();
+                        if total > 0.0 {
+                            w.iter().map(|x| x / total).collect()
+                        } else {
+                            vec![1.0 / k as f32; k]
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        for (a, &child) in x.children.iter().enumerate() {
+            let mut next = reach.clone();
+            for (i, by_bucket) in next[q].iter_mut().enumerate() {
+                for (bk, v) in by_bucket.iter_mut().enumerate() {
+                    *v *= biased[i][bk.min(rows.len() - 1)][a];
+                }
+            }
+            if next[q].iter().all(|t| t.iter().all(|&v| v == 0.0)) {
+                continue;
+            }
+            self.collect_endings(child as usize, next, out);
+        }
+    }
+
     /// Each hand's probabilities at `node` on river `r`, action-major, with
     /// the actions `bias` favours made more likely.
+    #[cfg(test)]
     fn strategy(&self, node: usize, r: &River, bias: Bias) -> Vec<f32> {
         let x = &self.tree.nodes[node];
         let rows = &self.rows[node];
@@ -224,7 +291,9 @@ impl Continuation {
 
     /// Player `p`'s values on river `r` from `node`, by river hand, against
     /// `opp` (the other player's reach there), with both playing this
-    /// continuation, each biased by `bias[player]`.
+    /// continuation, each biased by `bias[player]`. The straightforward walk,
+    /// kept to check [`TurnSolver::leaf_values`] against.
+    #[cfg(test)]
     fn values(&self, r: &River, node: usize, p: usize, opp: &[f32], bias: [Bias; 2]) -> Vec<f32> {
         let x = &self.tree.nodes[node];
         let n = r.hands.len();
@@ -283,9 +352,33 @@ pub enum Bias {
     Raise,
 }
 
+/// One way a leaf's river can end: a fold, or a showdown. `win[p]` is what
+/// player `p` wins (negative: loses) there per unit of opponent weight, and
+/// `reach[p][bias]`, by bucket, is the chance that `p`'s own decisions lead
+/// there when they play the continuation with that [`Bias`].
+///
+/// A leaf's value is linear in the opponent's reach, and both players'
+/// river play depends only on buckets, so these tables (river-card free,
+/// computed once) are all a leaf needs: for each ending, gather the
+/// opponent's reach through their table, value the fold or showdown once,
+/// and weight it by the player's own table. That replaces walking the
+/// river tree, building strategies on the way, for every leaf, river card,
+/// player, bias and iteration; and the four biases share the one valuation.
+#[derive(Clone, Debug)]
+struct Ending {
+    showdown: bool,
+    win: [f32; 2],
+    reach: [[Vec<f32>; 4]; 2],
+}
+
 impl Bias {
     /// The four continuations of Modicum.
     pub const ALL: [Bias; 4] = [Bias::None, Bias::Fold, Bias::Call, Bias::Raise];
+
+    /// Its place in [`Bias::ALL`].
+    fn index(self) -> usize {
+        self as usize
+    }
 
     fn factor(self, a: &HunlAction) -> f32 {
         let favoured = matches!(
@@ -302,7 +395,14 @@ impl Bias {
 /// over the continuations they may pick (choice-major, like actions).
 #[derive(Clone, Debug)]
 struct Leaf {
+    /// The continuation itself, for checking [`TurnSolver::leaf_values`]
+    /// against walking it.
+    #[cfg(test)]
     cont: Continuation,
+    /// The ways its river ends, from the continuation.
+    endings: Vec<Ending>,
+    /// Bucket tables' length: a hand's bucket is clamped below it.
+    buckets: usize,
     /// Whether the river has a decision left; if not (all-in), there's
     /// nothing to choose.
     choice: bool,
@@ -386,8 +486,13 @@ impl TurnSolver {
                 (x.actions.is_empty() && x.betting.folded.is_none()).then(|| {
                     let cont = continuation(i as u32, &x.betting);
                     let choice = cont.tree.nodes.iter().any(|y| !y.actions.is_empty());
+                    let endings = cont.endings();
+                    let buckets = endings.first().map_or(1, |e| e.reach[0][0].len());
                     Leaf {
+                        #[cfg(test)]
                         cont,
+                        endings,
+                        buckets,
                         choice,
                         regret: Vec::new(),
                         sum: Vec::new(),
@@ -612,13 +717,6 @@ impl TurnSolver {
         self.chooser.filter(|_| leaf.choice)
     }
 
-    /// Both players' biases when the chooser `c` picks continuation `i`.
-    fn bias(&self, c: usize, i: usize) -> [Bias; 2] {
-        let mut b = [Bias::None; 2];
-        b[c] = self.biases[i];
-        b
-    }
-
     /// [`walk`](Self::walk) at a leaf: the chooser's regrets over the
     /// continuations are updated like any decision's.
     fn walk_leaf(&mut self, node: usize, p: usize, reach: [&[f32]; 2], d: &Discount) -> Vec<f32> {
@@ -630,21 +728,35 @@ impl TurnSolver {
         let sigma = regret_matching(&self.leaves[node].as_ref().expect("a leaf").regret, n);
         let mut out = vec![0f32; n];
         if p != c {
-            for i in 0..k {
-                let s = &sigma[i * n..(i + 1) * n];
-                let o: Vec<f32> = reach[c].iter().zip(s).map(|(x, y)| x * y).collect();
-                let v = self.leaf_values(node, p, &o, self.bias(c, i), true);
-                out.iter_mut().zip(&v).for_each(|(o, x)| *o += x);
-            }
-            return out;
+            // The chooser's mix over continuations, valued at once.
+            let parts: Vec<Vec<f32>> = (0..k)
+                .map(|i| {
+                    reach[c]
+                        .iter()
+                        .zip(&sigma[i * n..(i + 1) * n])
+                        .map(|(x, y)| x * y)
+                        .collect()
+                })
+                .collect();
+            let opp: Vec<(Bias, &[f32])> = self
+                .biases
+                .iter()
+                .zip(&parts)
+                .map(|(&b, o)| (b, &o[..]))
+                .collect();
+            return self
+                .leaf_values_multi(node, p, &[Bias::None], &opp, true)
+                .pop()
+                .expect("one");
         }
         let mut values = vec![0f32; k * n];
-        for i in 0..k {
-            let v = self.leaf_values(node, p, reach[1 - p], self.bias(c, i), true);
+        let all =
+            self.leaf_values_multi(node, p, &self.biases, &[(Bias::None, reach[1 - p])], true);
+        for (i, v) in all.iter().enumerate() {
             for h in 0..n {
                 out[h] += sigma[i * n + h] * v[h];
             }
-            values[i * n..(i + 1) * n].copy_from_slice(&v);
+            values[i * n..(i + 1) * n].copy_from_slice(v);
         }
         let leaf = self.leaves[node].as_mut().expect("a leaf");
         for j in 0..k * n {
@@ -656,9 +768,10 @@ impl TurnSolver {
     }
 
     /// Player `p`'s values at leaf `node`, by turn hand, against `opp` (the
-    /// other player's reach, by turn hand): the river values on every river
-    /// card, averaged over the cards each pair of hands leaves. With
-    /// `sampled`, only this iteration's draw of rivers, scaled up to match.
+    /// other player's reach, by turn hand), with `bias` each player's
+    /// continuation: the river values on every river card, averaged over
+    /// the cards each pair of hands leaves. With `sampled`, only this
+    /// iteration's draw of rivers, scaled up to match.
     fn leaf_values(
         &self,
         node: usize,
@@ -667,9 +780,25 @@ impl TurnSolver {
         bias: [Bias; 2],
         sampled: bool,
     ) -> Vec<f32> {
+        let mut v = self.leaf_values_multi(node, p, &[bias[p]], &[(bias[1 - p], opp)], sampled);
+        v.pop().expect("one")
+    }
+
+    /// [`leaf_values`](Self::leaf_values) for several of `p`'s biases at
+    /// once (one vector each, in the order of `own`), against an opponent
+    /// whose reach is the sum of `opp`'s parts, each playing its bias. Each
+    /// fold or showdown is valued once for all of them (see [`Ending`]).
+    fn leaf_values_multi(
+        &self,
+        node: usize,
+        p: usize,
+        own: &[Bias],
+        opp: &[(Bias, &[f32])],
+        sampled: bool,
+    ) -> Vec<Vec<f32>> {
         let n = self.hands.len();
-        let mut out = vec![0f32; n];
-        if opp.iter().all(|&x| x == 0.0) {
+        let mut out = vec![vec![0f32; n]; own.len()];
+        if opp.iter().all(|(_, o)| o.iter().all(|&x| x == 0.0)) {
             return out;
         }
         let all: Vec<usize>;
@@ -679,31 +808,70 @@ impl TurnSolver {
             all = (0..self.rivers.len()).collect();
             &all
         };
-        let cont = &self.leaves[node].as_ref().expect("a leaf").cont;
-        let one = |&i: &usize| -> Vec<f32> {
+        let leaf = self.leaves[node].as_ref().expect("a leaf");
+        let one = |&i: &usize| -> Vec<Vec<f32>> {
             let r = &self.rivers[i];
-            let o: Vec<f32> = r.to_turn.iter().map(|&t| opp[t as usize]).collect();
-            cont.values(r, 0, p, &o, bias)
+            let m = r.hands.len();
+            let idx: Vec<usize> = r
+                .buckets
+                .iter()
+                .map(|&b| (b as usize).min(leaf.buckets - 1))
+                .collect();
+            let opp_r: Vec<Vec<f32>> = opp
+                .iter()
+                .map(|(_, o)| r.to_turn.iter().map(|&t| o[t as usize]).collect())
+                .collect();
+            let mut values = vec![vec![0f32; m]; own.len()];
+            let (mut mix, mut w) = (vec![0f32; m], vec![0f32; m]);
+            for e in &leaf.endings {
+                mix.fill(0.0);
+                let mut any = false;
+                for ((bias, _), o) in opp.iter().zip(&opp_r) {
+                    let t = &e.reach[1 - p][bias.index()];
+                    for h in 0..m {
+                        let x = t[idx[h]] * o[h];
+                        mix[h] += x;
+                        any |= x != 0.0;
+                    }
+                }
+                if !any {
+                    continue;
+                }
+                if e.showdown {
+                    r.hands.showdown(&mix, e.win[p], &mut w);
+                } else {
+                    r.hands.fold(&mix, e.win[p], &mut w);
+                }
+                for (bias, v) in own.iter().zip(values.iter_mut()) {
+                    let t = &e.reach[p][bias.index()];
+                    for h in 0..m {
+                        v[h] += t[idx[h]] * w[h];
+                    }
+                }
+            }
+            values
         };
         // Collected in card order and summed in that order, so the result
         // doesn't depend on the thread count.
         #[cfg(feature = "parallel")]
-        let per_card: Vec<Vec<f32>> = {
+        let per_card: Vec<Vec<Vec<f32>>> = {
             use rayon::prelude::*;
             rivers.par_iter().map(one).collect()
         };
         #[cfg(not(feature = "parallel"))]
-        let per_card: Vec<Vec<f32>> = rivers.iter().map(one).collect();
-        for (&i, v) in rivers.iter().zip(per_card) {
-            for (&t, x) in self.rivers[i].to_turn.iter().zip(v) {
-                out[t as usize] += x;
+        let per_card: Vec<Vec<Vec<f32>>> = rivers.iter().map(one).collect();
+        for (&i, vs) in rivers.iter().zip(per_card) {
+            for (o, v) in out.iter_mut().zip(vs) {
+                for (&t, x) in self.rivers[i].to_turn.iter().zip(v) {
+                    o[t as usize] += x;
+                }
             }
         }
         // A pair of hands sees every river card neither holds: 44 of 48. A
         // draw of k of the 48 counts each card 48 / k times on average.
         let total = self.rivers.len() as f32;
         let scale = total / rivers.len() as f32 / (total - 4.0);
-        out.iter_mut().for_each(|x| *x *= scale);
+        out.iter_mut().flatten().for_each(|x| *x *= scale);
         out
     }
 
@@ -808,21 +976,29 @@ impl TurnSolver {
         let k = self.biases.len();
         if c == p {
             let mut out = vec![f32::NEG_INFINITY; n];
-            for i in 0..k {
-                let v = self.leaf_values(node, p, opp, self.bias(c, i), false);
+            for v in self.leaf_values_multi(node, p, &self.biases, &[(Bias::None, opp)], false) {
                 out.iter_mut().zip(&v).for_each(|(o, x)| *o = o.max(*x));
             }
             return out;
         }
         let mix = self.choice_at(node as u32).expect("a choice");
-        let mut out = vec![0f32; n];
-        for i in 0..k {
-            let s = &mix[i * n..(i + 1) * n];
-            let o: Vec<f32> = opp.iter().zip(s).map(|(x, y)| x * y).collect();
-            let v = self.leaf_values(node, p, &o, self.bias(c, i), false);
-            out.iter_mut().zip(&v).for_each(|(o, x)| *o += x);
-        }
-        out
+        let parts: Vec<Vec<f32>> = (0..k)
+            .map(|i| {
+                opp.iter()
+                    .zip(&mix[i * n..(i + 1) * n])
+                    .map(|(x, y)| x * y)
+                    .collect()
+            })
+            .collect();
+        let opp: Vec<(Bias, &[f32])> = self
+            .biases
+            .iter()
+            .zip(&parts)
+            .map(|(&b, o)| (b, &o[..]))
+            .collect();
+        self.leaf_values_multi(node, p, &[Bias::None], &opp, false)
+            .pop()
+            .expect("one")
     }
 
     /// Weight of all pairs of hands the two ranges can hold together.
@@ -875,5 +1051,130 @@ impl TurnSolver {
             bp_root,
             buckets,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{holdem::cards::parse, rng::Rng};
+
+    /// A continuation with a different random row for each of `buckets`
+    /// buckets at every decision.
+    fn random_continuation(
+        leaf: &Betting,
+        config: &HunlConfig,
+        buckets: usize,
+        rng: &mut Rng,
+    ) -> Continuation {
+        let tree = RiverTree::build(leaf, config, &[]);
+        let rows = tree
+            .nodes
+            .iter()
+            .map(|x| {
+                (0..if x.actions.is_empty() { 0 } else { buckets })
+                    .map(|_| {
+                        let w: Vec<f32> = x
+                            .actions
+                            .iter()
+                            .map(|_| rng.next_f64() as f32 + 0.05)
+                            .collect();
+                        let t: f32 = w.iter().sum();
+                        w.iter().map(|v| v / t).collect()
+                    })
+                    .collect()
+            })
+            .collect();
+        Continuation::new(tree, rows)
+    }
+
+    /// The leaf values by walking every river's tree (the reference).
+    fn walked(s: &TurnSolver, node: usize, p: usize, opp: &[f32], bias: [Bias; 2]) -> Vec<f32> {
+        let cont = &s.leaves[node].as_ref().unwrap().cont;
+        let mut out = vec![0f32; s.hands.len()];
+        for r in &s.rivers {
+            let o: Vec<f32> = r.to_turn.iter().map(|&t| opp[t as usize]).collect();
+            for (&t, x) in r.to_turn.iter().zip(cont.values(r, 0, p, &o, bias)) {
+                out[t as usize] += x;
+            }
+        }
+        let total = s.rivers.len() as f32;
+        out.iter_mut().for_each(|x| *x /= total - 4.0);
+        out
+    }
+
+    #[test]
+    fn leaf_values_match_walking_the_river() {
+        let config = HunlConfig::default();
+        let board: [Card; 4] = parse("Qs Td 7h 4c").unwrap().try_into().unwrap();
+        let root = Betting::street_start(2, [140, 140], [60, 60], 2);
+        let mut rng = Rng::new(3);
+        let ranges: Vec<Vec<f64>> = (0..2)
+            .map(|_| (0..NUM_HOLES).map(|_| rng.next_f64()).collect())
+            .collect();
+        let mut crng = Rng::new(9);
+        let s = TurnSolver::new(
+            board,
+            &root,
+            &config,
+            &[],
+            [&ranges[0], &ranges[1]],
+            |_, leaf| random_continuation(leaf, &config, 3, &mut crng),
+            |_| (0..NUM_HOLES).map(|h| (h % 3) as u16).collect(),
+        );
+        let n = s.hands.len();
+        let close = |a: &[f32], b: &[f32]| {
+            let scale = b.iter().fold(1f32, |m, x| m.max(x.abs()));
+            a.iter().zip(b).all(|(x, y)| (x - y).abs() <= 1e-4 * scale)
+        };
+        let mut checked = 0;
+        for node in 0..s.tree.nodes.len() {
+            if s.leaves[node].is_none() {
+                continue;
+            }
+            for p in 0..2 {
+                let opp: Vec<f32> = (0..n).map(|_| rng.next_f64() as f32).collect();
+                for bias in [
+                    [Bias::None; 2],
+                    [Bias::Fold, Bias::None],
+                    [Bias::None, Bias::Raise],
+                    [Bias::Call, Bias::Call],
+                ] {
+                    let fast = s.leaf_values(node, p, &opp, bias, false);
+                    assert!(
+                        close(&fast, &walked(&s, node, p, &opp, bias)),
+                        "leaf {node} player {p} {bias:?}"
+                    );
+                    checked += 1;
+                }
+                // Several of p's biases at once, against a mix of the
+                // opponent's: the sum of the parts.
+                let other: Vec<f32> = (0..n).map(|_| rng.next_f64() as f32).collect();
+                let multi = s.leaf_values_multi(
+                    node,
+                    p,
+                    &Bias::ALL,
+                    &[(Bias::Fold, &opp[..]), (Bias::Raise, &other[..])],
+                    false,
+                );
+                for (i, &mine) in Bias::ALL.iter().enumerate() {
+                    let mut bias = [Bias::None; 2];
+                    bias[p] = mine;
+                    let mut want = {
+                        bias[1 - p] = Bias::Fold;
+                        walked(&s, node, p, &opp, bias)
+                    };
+                    bias[1 - p] = Bias::Raise;
+                    want.iter_mut()
+                        .zip(walked(&s, node, p, &other, bias))
+                        .for_each(|(a, b)| *a += b);
+                    assert!(
+                        close(&multi[i], &want),
+                        "leaf {node} player {p} mixed, own {mine:?}"
+                    );
+                }
+            }
+        }
+        assert!(checked > 20, "{checked} leaf values checked");
     }
 }
