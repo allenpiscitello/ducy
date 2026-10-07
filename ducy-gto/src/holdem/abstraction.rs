@@ -379,7 +379,7 @@ impl CardAbstraction {
     }
 
     /// Every hand's bucket with `board`, indexed by
-    /// [`hole_index`](super::cards::hole_index); `u16::MAX` for hands that
+    /// [`hole_index`]; `u16::MAX` for hands that
     /// use a board card. The same buckets as [`bucket`](Self::bucket), much
     /// faster for all 1,326 hands: on the river and with the quick
     /// abstraction every hand is scored once and the work shared, and a
