@@ -13,7 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -23,14 +23,14 @@ jobs:
   wasm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - run: cargo install wasm-pack
       - run: cd ducy-wasm && wasm-pack build --target web
       - run: cd ducy-play-wasm && wasm-pack build --target web
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - run: cd ducy-play-wasm && wasm-pack build --target nodejs --out-dir pkg-node
