@@ -506,11 +506,20 @@ impl Table {
                 }
             }
         }
-        // People coming back post what they missed, unless the blinds are theirs anyway.
+        // People coming back post what they missed. On the big blind they owe
+        // nothing more; on the small blind it counts for the missed small
+        // blind, and a missed big blind makes it up to a full big blind (live).
         let mut posts = Vec::new();
         for (i, &s) in dealt.iter().enumerate() {
             let (missed_sb, missed_bb) = self.missed[s];
-            if self.returning[s] == Return::Post && s != sb && s != bb && (missed_sb || missed_bb) {
+            let owes = self.returning[s] == Return::Post && (missed_sb || missed_bb);
+            if owes && s == sb && missed_bb {
+                posts.push(Post {
+                    player: i,
+                    dead: 0,
+                    live: self.rules.big_blind - self.rules.small_blind,
+                });
+            } else if owes && s != sb && s != bb {
                 posts.push(Post {
                     player: i,
                     dead: if missed_sb { self.rules.small_blind } else { 0 },
