@@ -481,7 +481,9 @@ impl MultiTable {
         if !name.is_empty() {
             seats[0].name = name;
         }
-        let table = Table::new(rules, seats, buy_in, seed).map_err(err)?;
+        let table = Table::new(rules, seats, buy_in, seed)
+            .map_err(err)?
+            .with_secure_deals();
         let open = std::iter::once(false)
             .chain(open.iter().map(|&o| o != 0))
             .collect();
@@ -526,7 +528,9 @@ impl MultiTable {
             "you",
         )];
         all.extend((1..seats).map(|_| TableSeat::empty()));
-        let table = Table::new(rules, all, host_chips, seed).map_err(err)?;
+        let table = Table::new(rules, all, host_chips, seed)
+            .map_err(err)?
+            .with_secure_deals();
         let open = (0..seats).map(|s| s > 0).collect();
         let host = TableHost::new(table, open, turn_ms)
             .and_then(|h| h.with_bank(min_buy_in, max_buy_in))
@@ -559,7 +563,9 @@ impl MultiTable {
             return Err(JsError::new("a table seats 2 to 10"));
         }
         let all = (0..seats).map(|_| TableSeat::empty()).collect();
-        let table = Table::new(rules, all, min_buy_in, seed).map_err(err)?;
+        let table = Table::new(rules, all, min_buy_in, seed)
+            .map_err(err)?
+            .with_secure_deals();
         let host = TableHost::without_host(table, turn_ms, min_buy_in, max_buy_in).map_err(err)?;
         Ok(MultiTable { host })
     }
