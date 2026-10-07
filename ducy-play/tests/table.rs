@@ -989,3 +989,42 @@ fn coming_back_in_time_stops_the_clock() {
         "back in time, so still seated"
     );
 }
+
+#[test]
+fn coming_back_on_the_small_blind_still_owes_the_big_blind() {
+    // Seat 1 sits out across its big blind, and comes back the hand the
+    // small blind lands on it: it posts the small blind plus enough live to
+    // make a full big blind, so skipping the big blind gains nothing.
+    let mut t = four_people();
+    t.new_hand().unwrap(); // button 0, blinds 1 and 2
+    fold_out(&mut t);
+    t.seat_mut(1).sitting_out = true;
+    t.new_hand().unwrap(); // button 2, blinds 3 and 0: the big blind passed seat 1
+    fold_out(&mut t);
+    t.new_hand().unwrap(); // button 3, blinds 0 and 2
+    fold_out(&mut t);
+    assert!(t.missed_blinds(1).1, "missed the big blind");
+    t.sit_in(1, false);
+    t.new_hand().unwrap(); // button 0: seat 1 is the small blind
+    let events = t.hand().unwrap().events().to_vec();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::SmallBlind { seat: 1, amount: 1 }))
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Event::Post {
+                seat: 1,
+                dead: 0,
+                live: 1
+            }
+        )),
+        "{events:?}"
+    );
+    let v = t.view(1);
+    assert_eq!(v.seats[0].street_bet, 2, "a full big blind in");
+    fold_out(&mut t);
+    assert_eq!(total(&t), 800);
+}
