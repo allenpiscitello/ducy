@@ -39,6 +39,7 @@ mod showdown;
 pub mod stats;
 pub mod strength;
 mod table;
+mod tournament;
 
 pub use bot::{Bot, HandOutcome, HandSummary, Observation, SeatView, fallback_action, play_hand};
 pub use deal::Deal;
@@ -54,3 +55,6 @@ pub use process::ProcessBot;
 pub use rules::{BettingStructure, TableRules, Variant};
 pub use showdown::{Award, Pot};
 pub use table::{SeatState, Table, TableSeat, TableView};
+pub use tournament::{
+    Entrant, Finish, HandReport, Level, Move, SeatRef, Standing, Tournament, TournamentConfig,
+};

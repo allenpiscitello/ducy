@@ -219,6 +219,46 @@ impl Table {
         &self.rules
     }
 
+    /// Changes the game or the blinds from the next hand on, e.g. for a game
+    /// rotation or a tournament's blind levels. Only between hands.
+    pub fn set_rules(&mut self, rules: TableRules) -> Result<(), PlayError> {
+        if self.in_hand() {
+            return Err(PlayError::IllegalAction);
+        }
+        rules.validate()?;
+        self.rules = rules;
+        Ok(())
+    }
+
+    /// The button's seat: in the current (or last) hand, or before the first
+    /// hand the seat it moves on from.
+    pub fn button(&self) -> usize {
+        self.button
+    }
+
+    /// The seat that would post the big blind if the next hand were dealt
+    /// now, or `None` if fewer than two seats would be dealt in.
+    pub fn next_big_blind(&self) -> Option<usize> {
+        let n = self.seats.len();
+        let dealt: Vec<usize> = (0..n).filter(|&s| self.will_play(s)).collect();
+        if dealt.len() < 2 {
+            return None;
+        }
+        let next_after = |from: usize| {
+            (1..=n)
+                .map(|k| (from + k) % n)
+                .find(|s| dealt.contains(s))
+                .expect("two players are in")
+        };
+        let button = next_after(self.button);
+        let small_blind = if dealt.len() == 2 {
+            button
+        } else {
+            next_after(button)
+        };
+        Some(next_after(small_blind))
+    }
+
     pub fn num_seats(&self) -> usize {
         self.seats.len()
     }
