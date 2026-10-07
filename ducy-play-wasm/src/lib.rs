@@ -157,6 +157,11 @@ enum EventJs {
         seat: usize,
         amount: u64,
     },
+    Post {
+        seat: usize,
+        dead: u64,
+        live: u64,
+    },
     Fold {
         seat: usize,
     },
@@ -203,6 +208,11 @@ impl From<&Event> for EventJs {
             Event::BigBlind { seat, amount } => Self::BigBlind {
                 seat: *seat,
                 amount: *amount,
+            },
+            Event::Post { seat, dead, live } => Self::Post {
+                seat: *seat,
+                dead: *dead,
+                live: *live,
             },
             Event::Fold { seat } => Self::Fold { seat: *seat },
             Event::Check { seat } => Self::Check { seat: *seat },

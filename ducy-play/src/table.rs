@@ -10,8 +10,8 @@
 use ducy::deck::{Card, Deck};
 
 use crate::{
-    Action, BettingStructure, Bot, Deal, Event, Hand, LegalActions, PersonalityBot, PlayError, Pot,
-    Street, TableRules, fallback_action,
+    Action, BettingStructure, Bot, Deal, Event, Hand, LegalActions, PersonalityBot, PlayError,
+    Post, Pot, Street, TableRules, fallback_action,
 };
 
 /// One seat: who sits there and the bot that plays it when no one does.
@@ -184,6 +184,23 @@ pub struct Table {
     /// replayed, or from fresh system randomness for every hand when `None`
     /// (see [`Table::with_secure_deals`]).
     seed: Option<u64>,
+    /// Blinds each seat missed while sitting out: (small, big).
+    missed: Vec<(bool, bool)>,
+    /// How each seat comes back after sitting out (see [`Table::sit_in`]).
+    returning: Vec<Return>,
+    /// The seats of the last hand's small and big blinds.
+    last_blinds: Option<(usize, usize)>,
+}
+
+/// How a person comes back after sitting out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Return {
+    /// Nothing owed: dealt in as usual.
+    Ready,
+    /// Dealt in at once, posting the blinds they missed.
+    Post,
+    /// Not dealt in until the big blind reaches them.
+    WaitForBigBlind,
 }
 
 impl Table {
@@ -215,7 +232,37 @@ impl Table {
             synced: false,
             top_up: true,
             seed: Some(seed),
+            missed: vec![(false, false); n],
+            returning: vec![Return::Ready; n],
+            last_blinds: None,
         })
+    }
+
+    /// Brings a person back after sitting out, from the next hand. If they
+    /// missed blinds while out, they either come back at once and post what
+    /// they missed (at most one small blind, dead, and one big blind, live),
+    /// or, with `wait_for_big_blind`, sit out until the big blind reaches
+    /// them and post it then.
+    pub fn sit_in(&mut self, seat: usize, wait_for_big_blind: bool) {
+        self.seats[seat].sitting_out = false;
+        let (sb, bb) = self.missed[seat];
+        self.returning[seat] = if !(sb || bb) {
+            Return::Ready
+        } else if wait_for_big_blind {
+            Return::WaitForBigBlind
+        } else {
+            Return::Post
+        };
+    }
+
+    /// The blinds `seat` missed while sitting out: (small, big).
+    pub fn missed_blinds(&self, seat: usize) -> (bool, bool) {
+        self.missed[seat]
+    }
+
+    /// Whether `seat` is back but waiting for the big blind to deal them in.
+    pub fn waiting_for_big_blind(&self, seat: usize) -> bool {
+        self.returning[seat] == Return::WaitForBigBlind
     }
 
     /// Shuffles every hand from fresh system randomness (the OS, or
@@ -403,10 +450,40 @@ impl Table {
         }
         let n = self.seats.len();
         self.sync_stacks();
-        let dealt: Vec<usize> = (0..n).filter(|&s| self.will_play(s)).collect();
+        // Everyone who could play; people waiting for the big blind are only
+        // dealt in when it reaches them.
+        let able: Vec<usize> = (0..n).filter(|&s| self.will_play(s)).collect();
+        let waiting = |s: usize| self.returning[s] == Return::WaitForBigBlind;
+        let core: Vec<usize> = able.iter().copied().filter(|&s| !waiting(s)).collect();
+        if core.is_empty() || able.len() < 2 {
+            return Err(PlayError::InvalidPlayerCount);
+        }
+        let button = (1..=n)
+            .map(|k| (self.button + k) % n)
+            .find(|s| core.contains(s))
+            .expect("someone is in");
+        let mut cand = able.clone();
+        let (sb, bb) = loop {
+            let (sb, bb) = blind_seats(&cand, button);
+            // Someone waiting can't take the small blind: they're skipped.
+            if waiting(sb) {
+                cand.retain(|&s| s != sb);
+                continue;
+            }
+            break (sb, bb);
+        };
+        let dealt: Vec<usize> = cand
+            .into_iter()
+            .filter(|&s| !waiting(s) || s == bb)
+            .collect();
         if dealt.len() < 2 {
             return Err(PlayError::InvalidPlayerCount);
         }
+        let (sb, bb) = if dealt.len() == 2 {
+            blind_seats(&dealt, button)
+        } else {
+            (sb, bb)
+        };
         if self.top_up {
             for s in &mut self.stacks {
                 if *s == 0 {
@@ -414,10 +491,37 @@ impl Table {
                 }
             }
         }
-        self.button = (1..=n)
-            .map(|k| (self.button + k) % n)
-            .find(|s| dealt.contains(s))
-            .expect("two players are in");
+        // Blinds that passed people sitting out (or waiting) are owed.
+        if let Some((last_sb, last_bb)) = self.last_blinds {
+            for s in 0..n {
+                let present = self.seats[s].human && (self.seats[s].sitting_out || waiting(s));
+                if !present || dealt.contains(&s) {
+                    continue;
+                }
+                if passed(last_sb, sb, s, n) {
+                    self.missed[s].0 = true;
+                }
+                if passed(last_bb, bb, s, n) {
+                    self.missed[s].1 = true;
+                }
+            }
+        }
+        // People coming back post what they missed, unless the blinds are theirs anyway.
+        let mut posts = Vec::new();
+        for (i, &s) in dealt.iter().enumerate() {
+            let (missed_sb, missed_bb) = self.missed[s];
+            if self.returning[s] == Return::Post && s != sb && s != bb && (missed_sb || missed_bb) {
+                posts.push(Post {
+                    player: i,
+                    dead: if missed_sb { self.rules.small_blind } else { 0 },
+                    live: if missed_bb { self.rules.big_blind } else { 0 },
+                });
+            }
+            self.missed[s] = (false, false);
+            self.returning[s] = Return::Ready;
+        }
+        self.button = button;
+        self.last_blinds = Some((sb, bb));
         self.hand_number += 1;
         let deal = Deal::random(
             self.rules.variant,
@@ -426,7 +530,7 @@ impl Table {
         )?;
         let stacks: Vec<u64> = dealt.iter().map(|&s| self.stacks[s]).collect();
         let button = dealt.iter().position(|&s| s == self.button).expect("dealt");
-        self.hand = Some(Hand::new(self.rules, &stacks, button, deal)?);
+        self.hand = Some(Hand::with_posts(self.rules, &stacks, button, deal, &posts)?);
         self.dealt = dealt;
         self.synced = false;
         Ok(())
@@ -647,6 +751,23 @@ impl Table {
     }
 }
 
+/// The small and big blind seats when `dealt` (seat numbers, in order) are
+/// dealt in with the button on `button`, by the hand's rule: heads-up the
+/// button posts the small blind, otherwise the next seat does.
+fn blind_seats(dealt: &[usize], button: usize) -> (usize, usize) {
+    let n = dealt.len();
+    let b = dealt.iter().position(|&s| s == button).unwrap_or(0);
+    let sb = if n == 2 { b } else { (b + 1) % n };
+    (dealt[sb], dealt[(sb + 1) % n])
+}
+
+/// Whether moving a blind from seat `from` to seat `to` (round a table of
+/// `n` seats) passed seat `s`: `s` is after `from` and no later than `to`.
+fn passed(from: usize, to: usize, s: usize, n: usize) -> bool {
+    let d = |x: usize| (x + n - from) % n;
+    from != to && d(s) != 0 && d(s) <= d(to)
+}
+
 fn cards(deck: Deck) -> Vec<String> {
     deck.iter(true).map(|c| c.to_string()).collect()
 }
@@ -657,6 +778,7 @@ fn rotate_event(e: &Event, rot: impl Fn(usize) -> usize) -> Event {
         Event::Ante { seat, .. }
         | Event::SmallBlind { seat, .. }
         | Event::BigBlind { seat, .. }
+        | Event::Post { seat, .. }
         | Event::Fold { seat }
         | Event::Check { seat }
         | Event::Call { seat, .. }

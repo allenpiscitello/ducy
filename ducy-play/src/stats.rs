@@ -87,7 +87,11 @@ impl OpponentModel {
             // Whether `seat` faced a bet larger than what it had put in.
             let facing = |seat: usize, street_bets: &[u64]| current > street_bets[seat];
             match *event {
-                Event::SmallBlind { seat, amount } | Event::BigBlind { seat, amount } => {
+                Event::SmallBlind { seat, amount }
+                | Event::BigBlind { seat, amount }
+                | Event::Post {
+                    seat, live: amount, ..
+                } => {
                     street_bets[seat] += amount;
                     current = current.max(street_bets[seat]);
                 }

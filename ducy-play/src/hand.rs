@@ -108,6 +108,10 @@ pub enum Event {
     SmallBlind { seat: usize, amount: u64 },
     /// A seat posted the big blind (less if all-in).
     BigBlind { seat: usize, amount: u64 },
+    /// A seat coming back after missing blinds posted them: `dead` goes
+    /// into the pot without counting toward their bet, `live` counts as
+    /// their bet (see [`Post`]).
+    Post { seat: usize, dead: u64, live: u64 },
     /// A seat folded.
     Fold { seat: usize },
     /// A seat checked.
@@ -169,6 +173,19 @@ impl Seat {
     }
 }
 
+/// Blinds a player posts on coming back after missing them (see
+/// [`Hand::with_posts`]): `dead` goes straight into the pot (a missed small
+/// blind), `live` counts as their bet for the street (a missed big blind,
+/// so they may check if no one raises). Either may be 0, and both are
+/// capped at the player's stack.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Post {
+    /// The player, as an index into the hand's stacks.
+    pub player: usize,
+    pub dead: u64,
+    pub live: u64,
+}
+
 /// One hand of poker from the blinds to the payout.
 ///
 /// Create it with [`Hand::new`], then repeatedly ask [`Hand::to_act`] /
@@ -214,6 +231,18 @@ impl Hand {
         button: usize,
         deal: Deal,
     ) -> Result<Self, PlayError> {
+        Self::with_posts(rules, stacks, button, deal, &[])
+    }
+
+    /// Like [`Hand::new`], with extra blinds posted after the regular ones:
+    /// players coming back after sitting out who pay the blinds they missed.
+    pub fn with_posts(
+        rules: TableRules,
+        stacks: &[u64],
+        button: usize,
+        deal: Deal,
+        posts: &[Post],
+    ) -> Result<Self, PlayError> {
         rules.validate()?;
         let n = stacks.len();
         if !(2..=MAX_PLAYERS).contains(&n) {
@@ -256,6 +285,21 @@ impl Hand {
             result: None,
         };
         hand.post_forced_bets();
+        for p in posts {
+            if p.player >= n || p.live > rules.big_blind {
+                return Err(PlayError::InvalidSetup);
+            }
+            let s = &mut hand.seats[p.player];
+            let dead = p.dead.min(s.stack);
+            s.stack -= dead;
+            s.contributed += dead;
+            let live = hand.put_in(p.player, p.live);
+            hand.events.push(Event::Post {
+                seat: p.player,
+                dead,
+                live,
+            });
+        }
 
         let first = if n == 2 {
             button

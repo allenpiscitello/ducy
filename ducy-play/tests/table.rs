@@ -176,7 +176,13 @@ fn timeouts_check_or_fold_then_sit_the_player_out() {
     }
     // Away now: the seat plays itself without waiting.
     assert!(h.table().seat(1).away);
-    h.handle("c1", Command::SitIn, now);
+    h.handle(
+        "c1",
+        Command::SitIn {
+            wait_for_big_blind: false,
+        },
+        now,
+    );
     assert!(!h.table().seat(1).away);
 }
 
@@ -701,4 +707,285 @@ fn random_play_at_a_club_table_hides_cards_from_the_host_and_conserves_chips() {
         let at_table: u64 = h.seated().iter().map(|p| p.chips).sum();
         assert_eq!(at_table + left, bought, "hand {n}");
     }
+}
+
+/// Four people at 1/2 with 200 each, chips carrying over.
+fn four_people() -> Table {
+    let seats = (0..4)
+        .map(|i| TableSeat::human(format!("P{i}"), format!("p{i}")))
+        .collect();
+    let mut t = Table::new(TableRules::no_limit_holdem(1, 2), seats, 200, 9).unwrap();
+    t.set_top_up(false);
+    t
+}
+
+/// Everyone to act folds (or checks, when folding isn't allowed) until the
+/// hand is over.
+fn fold_out(t: &mut Table) {
+    while let Some(s) = t.to_act() {
+        let legal = t.view(s).legal.unwrap();
+        let a = if legal.can_fold {
+            ducy_play::Action::Fold
+        } else {
+            ducy_play::Action::Check
+        };
+        t.act(s, a).unwrap();
+    }
+}
+
+fn total(t: &Table) -> u64 {
+    (0..4).map(|s| t.stack(s)).sum()
+}
+
+/// Hands 1 to 3 with seat 3 sitting out from hand 2: the big blind passes
+/// it in hand 2 and the small blind in hand 3.
+fn miss_both_blinds(t: &mut Table) {
+    t.new_hand().unwrap(); // button 0, blinds 1 and 2
+    fold_out(t);
+    t.seat_mut(3).sitting_out = true;
+    t.new_hand().unwrap(); // button 1, blinds 2 and 0: the big blind passed seat 3
+    assert_eq!(t.dealt(), &[0, 1, 2]);
+    fold_out(t);
+    assert_eq!(t.missed_blinds(3), (false, true));
+    t.new_hand().unwrap(); // button 2, blinds 0 and 1: the small blind passed seat 3
+    fold_out(t);
+    assert_eq!(t.missed_blinds(3), (true, true));
+}
+
+#[test]
+fn sitting_out_posts_no_blinds_and_records_what_was_missed() {
+    let mut t = four_people();
+    miss_both_blinds(&mut t);
+    // Seat 3 paid nothing while out.
+    assert_eq!(t.stack(3), 200);
+    assert_eq!(total(&t), 800);
+}
+
+#[test]
+fn coming_back_posts_one_small_blind_dead_and_one_big_blind_live() {
+    let mut t = four_people();
+    miss_both_blinds(&mut t);
+    t.sit_in(3, false);
+    t.new_hand().unwrap(); // button 3: blinds 0 and 1, and seat 3 posts what it missed
+    assert_eq!(t.dealt(), &[0, 1, 2, 3]);
+    let posts: Vec<_> = t
+        .hand()
+        .unwrap()
+        .events()
+        .iter()
+        .filter(|e| matches!(e, Event::Post { .. }))
+        .cloned()
+        .collect();
+    assert_eq!(
+        posts,
+        vec![Event::Post {
+            seat: 3,
+            dead: 1,
+            live: 2
+        }]
+    );
+    // Pot: blinds 1 + 2, plus 1 dead and 2 live.
+    let v = t.view(3);
+    assert_eq!(v.pot, 6, "the pot (bets included)");
+    assert_eq!(t.missed_blinds(3), (false, false));
+    // The live big blind counts: when everyone just calls, seat 3 may check.
+    while let Some(s) = t.to_act() {
+        if s == 3 {
+            let legal = t.view(3).legal.unwrap();
+            assert!(legal.can_check, "the live blind counts toward their bet");
+            break;
+        }
+        let legal = t.view(s).legal.unwrap();
+        t.act(
+            s,
+            if legal.can_check {
+                ducy_play::Action::Check
+            } else {
+                ducy_play::Action::Call
+            },
+        )
+        .unwrap();
+    }
+    fold_out(&mut t);
+    assert_eq!(total(&t), 800);
+}
+
+#[test]
+fn waiting_for_the_big_blind_deals_in_exactly_when_it_arrives() {
+    let mut t = four_people();
+    miss_both_blinds(&mut t);
+    t.sit_in(3, true);
+    assert!(t.waiting_for_big_blind(3));
+    t.new_hand().unwrap(); // button 0, blinds 1 and 2: not seat 3's turn yet
+    assert_eq!(t.dealt(), &[0, 1, 2]);
+    fold_out(&mut t);
+    t.new_hand().unwrap(); // button 1, blinds 2 and 3: seat 3 is the big blind
+    assert_eq!(t.dealt(), &[0, 1, 2, 3]);
+    let events = t.hand().unwrap().events();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::BigBlind { seat: 3, amount: 2 }))
+    );
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Post { .. })),
+        "nothing extra to post"
+    );
+    assert!(!t.waiting_for_big_blind(3));
+    assert_eq!(t.missed_blinds(3), (false, false));
+    fold_out(&mut t);
+    assert_eq!(total(&t), 800);
+}
+
+#[test]
+fn coming_back_into_a_blind_just_posts_it() {
+    let mut t = four_people();
+    t.new_hand().unwrap(); // button 0, blinds 1 and 2
+    fold_out(&mut t);
+    t.seat_mut(2).sitting_out = true;
+    t.new_hand().unwrap(); // button 1, blinds 3 and 0: seat 2 missed the small blind
+    fold_out(&mut t);
+    assert_eq!(t.missed_blinds(2), (true, false));
+    t.sit_in(2, false);
+    t.new_hand().unwrap(); // button 2: seat 2 is on the button, posts its missed small blind dead
+    let posts: Vec<_> = t
+        .hand()
+        .unwrap()
+        .events()
+        .iter()
+        .filter(|e| matches!(e, Event::Post { .. }))
+        .cloned()
+        .collect();
+    assert_eq!(
+        posts,
+        vec![Event::Post {
+            seat: 2,
+            dead: 1,
+            live: 0
+        }]
+    );
+    fold_out(&mut t);
+    assert_eq!(total(&t), 800);
+}
+
+#[test]
+fn random_sitting_out_and_returning_conserves_chips() {
+    let mut rng = StdRng::seed_from_u64(5);
+    let mut t = four_people();
+    for _ in 0..300 {
+        for s in 0..4 {
+            if rng.random_range(0..6) == 0 {
+                if t.seat(s).sitting_out {
+                    t.sit_in(s, rng.random_range(0..2) == 0);
+                } else {
+                    t.seat_mut(s).sitting_out = true;
+                }
+            }
+        }
+        if t.new_hand().is_err() {
+            continue;
+        }
+        while let Some(s) = t.to_act() {
+            let legal = t.view(s).legal.unwrap();
+            let a = match rng.random_range(0..3) {
+                0 if legal.can_fold => ducy_play::Action::Fold,
+                _ if legal.can_check => ducy_play::Action::Check,
+                _ => ducy_play::Action::Call,
+            };
+            t.act(s, a).unwrap();
+        }
+        assert_eq!(total(&t), 800);
+        // No one sitting out (or still waiting) was dealt in.
+        for &s in t.dealt() {
+            assert!(!t.seat(s).sitting_out);
+        }
+    }
+}
+
+/// The `me` status last sent to `client`.
+fn last_me(out: &[Outgoing], client: &str) -> Option<ducy_play::SeatStatus> {
+    out.iter().rev().find_map(|o| match &o.update {
+        Update::State { me, .. } if o.to == client => me.clone(),
+        _ => None,
+    })
+}
+
+/// A club table with three people seated with 100 chips each.
+fn club_of_three() -> TableHost {
+    let mut h = club(0);
+    for (seat, c) in ["a", "b", "c"].iter().enumerate() {
+        h.handle(c, join(c), 0);
+        h.handle(c, request(100), 0);
+        h.approve_chips(seat, 0);
+    }
+    h
+}
+
+#[test]
+fn sit_out_and_back_in_through_the_host() {
+    let mut h = club_of_three();
+    h.new_hand(1).unwrap();
+    play_out_club(&mut h, &["a", "b", "c"], 2);
+    // Between hands, sitting out takes effect at once.
+    let out = h.handle("c", Command::SitOut, 3);
+    assert!(last_me(&out, "c").unwrap().sitting_out);
+    h.new_hand(4).unwrap();
+    assert_eq!(h.table().dealt(), &[0, 1]);
+    play_out_club(&mut h, &["a", "b", "c"], 5);
+    h.new_hand(6).unwrap();
+    play_out_club(&mut h, &["a", "b", "c"], 7);
+    // Back, posting what was missed.
+    let out = h.handle(
+        "c",
+        Command::SitIn {
+            wait_for_big_blind: false,
+        },
+        8,
+    );
+    let me = last_me(&out, "c").unwrap();
+    assert!(!me.sitting_out);
+    assert!(me.missed_small_blind || me.missed_big_blind);
+    h.new_hand(9).unwrap();
+    assert_eq!(h.table().dealt(), &[0, 1, 2]);
+}
+
+#[test]
+fn sitting_out_past_the_limit_gives_the_seat_up_with_the_chips() {
+    let mut h = club_of_three();
+    h.set_sit_out_limit(10 * 60_000);
+    let out = h.handle("c", Command::SitOut, 1_000);
+    assert_eq!(last_me(&out, "c").unwrap().out_ms_left, Some(600_000));
+    // Still there at 9 minutes…
+    assert!(h.tick(1_000 + 9 * 60_000).iter().all(|o| o.to != "c"));
+    assert!(h.seated().iter().any(|p| p.client_id == "c"));
+    // …gone at 10, told why, and the chips are reported as leaving with them.
+    let out = h.tick(1_000 + 10 * 60_000);
+    assert!(rejected(&out, "c"));
+    assert!(h.seated().iter().all(|p| p.client_id != "c"));
+    let gone = h.take_departures();
+    assert_eq!(gone.len(), 1);
+    assert_eq!((gone[0].client_id.as_str(), gone[0].chips), ("c", 100));
+    // Disconnecting counts as sitting out too.
+    h.disconnected("b", 2_000_000);
+    h.tick(2_000_000 + 10 * 60_000);
+    assert!(h.seated().iter().all(|p| p.client_id != "b"));
+}
+
+#[test]
+fn coming_back_in_time_stops_the_clock() {
+    let mut h = club_of_three();
+    h.set_sit_out_limit(60_000);
+    h.handle("c", Command::SitOut, 0);
+    h.handle(
+        "c",
+        Command::SitIn {
+            wait_for_big_blind: true,
+        },
+        30_000,
+    );
+    h.tick(120_000);
+    assert!(
+        h.seated().iter().any(|p| p.client_id == "c"),
+        "back in time, so still seated"
+    );
 }
