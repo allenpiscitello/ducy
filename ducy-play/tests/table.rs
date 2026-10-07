@@ -548,3 +548,157 @@ fn a_player_who_stays_away_sits_out_then_is_dropped() {
     assert!(h.new_hand(14).is_ok());
     assert_eq!(h.table().dealt(), &[0, 1]);
 }
+
+/// A club table: no host seat, four empty seats, blinds 1/2, buy-ins from 40
+/// to 200 chips.
+fn club(turn_ms: u64) -> TableHost {
+    let seats = (0..4).map(|_| TableSeat::empty()).collect();
+    let table = Table::new(TableRules::no_limit_holdem(1, 2), seats, 40, 3).unwrap();
+    TableHost::without_host(table, turn_ms, 40, 200).unwrap()
+}
+
+/// Plays the current hand at a club table: everyone checks or calls.
+/// `players[seat]` is who sits in each seat.
+fn play_out_club(h: &mut TableHost, players: &[&str], now: u64) {
+    while h.table().in_hand() {
+        if h.auto_to_act() {
+            h.advance(now).unwrap();
+            continue;
+        }
+        let seat = h.table().to_act().unwrap();
+        let legal = h.table().view(seat).legal.expect("their turn");
+        let kind = if legal.can_check { "check" } else { "call" };
+        let r = h.handle(players[seat], act(h.seq(), kind), now);
+        assert!(!rejected(&r, players[seat]), "{} {kind}", players[seat]);
+    }
+}
+
+/// No card the host can see is one that hasn't been shown down.
+fn host_sees_no_hidden_cards(h: &TableHost) {
+    let v = h.host_view();
+    assert!(v.legal.is_none(), "the host can't act");
+    for s in &v.seats {
+        if s.cards.is_some() {
+            assert!(v.showdown && !s.folded, "only shown-down cards: {s:?}");
+        }
+    }
+}
+
+#[test]
+fn a_club_table_has_no_host_seat() {
+    let mut h = club(0);
+    assert_eq!(h.open_seats(), 4);
+    assert!(h.host_view().seats.iter().all(|s| s.empty && s.stack == 0));
+    // The first person takes seat 0.
+    h.handle("a", join("Ann"), 0);
+    h.handle("b", join("Bo"), 0);
+    assert_eq!(h.table().seat(0).name, "Ann");
+    for (c, seat) in [("a", 0), ("b", 1)] {
+        h.handle(c, request(100), 0);
+        h.approve_chips(seat, 0);
+    }
+    h.new_hand(1).unwrap();
+    assert_eq!(h.table().dealt(), &[0, 1]);
+    host_sees_no_hidden_cards(&h);
+    // Seat 0 is Ann's: the host can't act for her or give itself chips.
+    assert!(h.host_act("fold", 0, 2).is_err());
+    assert!(h.host_chips(100, 2).is_err());
+    play_out_club(&mut h, &["a", "b"], 3);
+    host_sees_no_hidden_cards(&h);
+    // Everyone else's view still has their own cards.
+    assert!(h.table().view(1).seats[0].cards.is_some());
+}
+
+#[test]
+fn a_club_table_reports_the_chips_people_leave_with() {
+    let mut h = club(0);
+    for (c, n) in [("a", "Ann"), ("b", "Bo")] {
+        h.handle(c, join(n), 0);
+        h.handle(c, request(100), 0);
+    }
+    h.approve_chips(0, 0);
+    h.approve_chips(1, 0);
+    let mut put_in = 200;
+    assert!(h.take_departures().is_empty());
+    h.new_hand(1).unwrap();
+    // Cy joins mid-hand and has chips approved before sitting down.
+    h.handle("c", join("Cy"), 2);
+    h.handle("c", request(60), 2);
+    h.approve_chips(2, 2);
+    put_in += 60;
+    let seated = h.seated();
+    let cy = seated.iter().find(|p| p.client_id == "c").unwrap();
+    assert!(cy.pending && cy.chips == 60);
+    // Bo tops up during the hand, then leaves before it's over.
+    h.handle("b", request(40), 3);
+    h.approve_chips(1, 3);
+    put_in += 40;
+    h.handle("b", Command::Leave, 3);
+    // Cy changes their mind before sitting down.
+    h.handle("c", Command::Leave, 4);
+    play_out_club(&mut h, &["a", "b"], 5);
+    let gone = h.take_departures();
+    let chips = |c: &str| gone.iter().find(|d| d.client_id == c).map(|d| d.chips);
+    assert_eq!(chips("c"), Some(60), "approved chips leave with them");
+    let bo = chips("b").expect("Bo left once the hand ended");
+    let ann = h.seated()[0].chips;
+    assert_eq!(ann + bo + 60, put_in, "every chip is accounted for");
+    assert!(h.take_departures().is_empty(), "reported once");
+    // Ann leaves between hands: her whole stack goes with her.
+    h.handle("a", Command::Leave, 6);
+    assert_eq!(h.take_departures()[0].chips, ann);
+    assert!(h.seated().is_empty());
+    assert!((0..4).all(|s| h.table().stack(s) == 0));
+}
+
+#[test]
+fn random_play_at_a_club_table_hides_cards_from_the_host_and_conserves_chips() {
+    let mut rng = StdRng::seed_from_u64(11);
+    let mut h = club(0);
+    let ids = ["a", "b", "c", "d"];
+    let mut bought = 0;
+    for (i, c) in ids.iter().enumerate() {
+        h.handle(c, join(c), 0);
+        h.handle(c, request(100 + 20 * i as u64), 0);
+        h.approve_chips(i, 0);
+        bought += 100 + 20 * i as u64;
+    }
+    let mut left = 0;
+    for n in 1..30 {
+        if h.new_hand(n).is_err() {
+            break;
+        }
+        while h.table().in_hand() {
+            host_sees_no_hidden_cards(&h);
+            if h.auto_to_act() {
+                h.advance(n).unwrap();
+                continue;
+            }
+            let seat = h.table().to_act().unwrap();
+            let legal = h.table().view(seat).legal.unwrap();
+            let kind = match rng.random_range(0..4) {
+                0 if legal.can_fold => "fold",
+                1 => "allin",
+                _ if legal.can_check => "check",
+                _ => "call",
+            };
+            let client = h
+                .seated()
+                .into_iter()
+                .find(|p| p.seat == seat)
+                .unwrap()
+                .client_id;
+            h.handle(&client, act(h.seq(), kind), n);
+        }
+        host_sees_no_hidden_cards(&h);
+        // Anyone broke leaves.
+        for p in h.seated() {
+            if p.chips == 0 {
+                h.handle(&p.client_id, Command::Leave, n);
+            }
+        }
+        left += h.take_departures().iter().map(|d| d.chips).sum::<u64>();
+        let at_table: u64 = h.seated().iter().map(|p| p.chips).sum();
+        assert_eq!(at_table + left, bought, "hand {n}");
+    }
+}
