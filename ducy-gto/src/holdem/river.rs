@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use super::{
     blueprint::Blueprint,
     cards::{Card, NUM_CARDS, NUM_HOLES, bit, hole_cards, hole_index, mask, score},
-    hunl::{Betting, BettingTree, HunlAction, HunlConfig},
+    hunl::{Betting, BettingTree, HunlAction, HunlConfig, Node},
 };
 
 /// The hands that miss the board, numbered from weakest to strongest so
@@ -137,17 +137,23 @@ impl RiverHands {
     /// Fold values: `amount` times the opponent reach that shares no card
     /// with each hand.
     pub fn fold(&self, opp: &[f32], amount: f32, out: &mut [f32]) {
-        let (mut total, mut per_card) = (0f64, [0f64; NUM_CARDS]);
-        for (c, &w) in self.cards.iter().zip(opp) {
-            total += w as f64;
-            per_card[c[0] as usize] += w as f64;
-            per_card[c[1] as usize] += w as f64;
-        }
-        for (h, c) in self.cards.iter().enumerate() {
-            // The hand itself is in both card sums: add it back once.
-            let other = total - per_card[c[0] as usize] - per_card[c[1] as usize] + opp[h] as f64;
-            out[h] = other as f32 * amount;
-        }
+        fold_values(&self.cards, opp, amount, out);
+    }
+}
+
+/// Fold values over any list of hands: `amount` times the opponent reach
+/// (by position in `cards`) that shares no card with each hand.
+pub fn fold_values(cards: &[[Card; 2]], opp: &[f32], amount: f32, out: &mut [f32]) {
+    let (mut total, mut per_card) = (0f64, [0f64; NUM_CARDS]);
+    for (c, &w) in cards.iter().zip(opp) {
+        total += w as f64;
+        per_card[c[0] as usize] += w as f64;
+        per_card[c[1] as usize] += w as f64;
+    }
+    for (h, c) in cards.iter().enumerate() {
+        // The hand itself is in both card sums: add it back once.
+        let other = total - per_card[c[0] as usize] - per_card[c[1] as usize] + opp[h] as f64;
+        out[h] = other as f32 * amount;
     }
 }
 
@@ -160,25 +166,30 @@ pub struct RiverNode {
     pub children: Vec<u32>,
 }
 
-/// The betting of a river subgame in real chips; node 0 is the root.
+/// The betting of one street of a subgame in real chips; node 0 is the
+/// root. Used for the river, and for the turn up to where the river card
+/// comes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RiverTree {
     pub nodes: Vec<RiverNode>,
 }
 
 impl RiverTree {
-    /// The subgame from `root` (a river betting state) with the sizes of
-    /// `config.menu.postflop`, plus every action of `path` (actions taken
-    /// since `root`, in order) where the menu lacks it.
+    /// The subgame from `root` (a betting state after the flop) to the end
+    /// of `root`'s street, with the sizes of `config.menu.postflop`, plus
+    /// every action of `path` (actions taken since `root`, in order) where
+    /// the menu lacks it. Nodes where the hand ends or the street does have
+    /// no actions.
     pub fn build(root: &Betting, config: &HunlConfig, path: &[HunlAction]) -> Self {
         fn add(
             c: &HunlConfig,
             b: Betting,
+            street: usize,
             path: Option<&[HunlAction]>,
             nodes: &mut Vec<RiverNode>,
         ) -> u32 {
             let id = nodes.len() as u32;
-            let mut actions = if b.is_over() {
+            let mut actions = if b.is_over() || b.street != street {
                 Vec::new()
             } else {
                 b.actions(c)
@@ -186,6 +197,7 @@ impl RiverTree {
             let forced = path.and_then(|p| p.first().copied());
             if let Some(f) = forced
                 && !b.is_over()
+                && b.street == street
                 && !actions.contains(&f)
             {
                 let at = actions
@@ -203,14 +215,14 @@ impl RiverTree {
                 .iter()
                 .map(|&a| {
                     let rest = path.filter(|_| forced == Some(a)).map(|p| &p[1..]);
-                    add(c, b.play(a), rest, nodes)
+                    add(c, b.play(a), street, rest, nodes)
                 })
                 .collect();
             nodes[id as usize].children = children;
             id
         }
         let mut nodes = Vec::new();
-        add(config, root.clone(), Some(path), &mut nodes);
+        add(config, root.clone(), root.street, Some(path), &mut nodes);
         Self { nodes }
     }
 
@@ -264,16 +276,33 @@ const GADGET_FLOOR: f32 = 1e-3;
 /// The resolving gadget: the opponent's alternative value per hand and its
 /// own regrets for taking it (index 0) or playing (1).
 #[derive(Clone, Debug)]
-struct Gadget {
-    player: usize,
+pub(super) struct Gadget {
+    pub(super) player: usize,
     value: Vec<f32>,
     weight: Vec<f32>,
     regret: [Vec<f32>; 2],
 }
 
 impl Gadget {
+    /// The gadget for `player`, whose range is `range`, with alternative
+    /// values `value` (both by hand number).
+    pub(super) fn new(player: usize, range: &[f32], value: Vec<f32>) -> Self {
+        let n = range.len();
+        let top = range.iter().fold(0f32, |m, &x| m.max(x));
+        let weight = range
+            .iter()
+            .map(|&w| if top > 0.0 { w / top } else { 0.0 } + GADGET_FLOOR)
+            .collect();
+        Self {
+            player,
+            value,
+            weight,
+            regret: [vec![0.0; n], vec![0.0; n]],
+        }
+    }
+
     /// The probability each hand plays the subgame.
-    fn enter(&self) -> Vec<f32> {
+    pub(super) fn enter(&self) -> Vec<f32> {
         let [t, f] = &self.regret;
         t.iter()
             .zip(f)
@@ -282,6 +311,22 @@ impl Gadget {
                 if t + f > 0.0 { f / (t + f) } else { 0.5 }
             })
             .collect()
+    }
+
+    /// The gadget player's reach into the subgame: `enter` per hand.
+    pub(super) fn reach(&self, enter: &[f32]) -> Vec<f32> {
+        self.weight.iter().zip(enter).map(|(w, e)| w * e).collect()
+    }
+
+    /// Updates the regrets for taking the value or playing, given the
+    /// subgame's values `v` and this iteration's `enter`.
+    pub(super) fn update(&mut self, v: &[f32], enter: &[f32], d: &Discount) {
+        for h in 0..v.len() {
+            let mixed = (1.0 - enter[h]) * self.value[h] + enter[h] * v[h];
+            for (r, x) in self.regret.iter_mut().zip([self.value[h], v[h]]) {
+                r[h] = d.regret(r[h]) + x - mixed;
+            }
+        }
     }
 }
 
@@ -337,18 +382,7 @@ impl RiverSolver {
     /// counterfactual value by hand number, against the other player's
     /// range) instead of playing.
     pub fn set_gadget(&mut self, player: usize, value: Vec<f32>) {
-        let n = self.hands.len();
-        let top = self.range[player].iter().fold(0f32, |m, &x| m.max(x));
-        let weight = self.range[player]
-            .iter()
-            .map(|&w| if top > 0.0 { w / top } else { 0.0 } + GADGET_FLOOR)
-            .collect();
-        self.gadget = Some(Gadget {
-            player,
-            value,
-            weight,
-            regret: [vec![0.0; n], vec![0.0; n]],
-        });
+        self.gadget = Some(Gadget::new(player, &self.range[player], value));
     }
 
     /// Fixes the strategy at `node` (action-major, as in [`Strategy`]): for
@@ -368,29 +402,19 @@ impl RiverSolver {
     /// One iteration: an update for each player in turn.
     pub fn iterate(&mut self) {
         self.iterations += 1;
-        let t = self.iterations as f64;
-        let d = Discount {
-            positive: (t.powf(ALPHA) / (t.powf(ALPHA) + 1.0)) as f32,
-            negative: 0.5,
-            sum: ((t / (t + 1.0)).powf(GAMMA)) as f32,
-        };
+        let d = Discount::at(self.iterations);
         for p in 0..2 {
             let mut reach = self.range.clone();
             let enter = self.gadget.as_ref().map(|g| {
                 let e = g.enter();
-                reach[g.player] = g.weight.iter().zip(&e).map(|(w, e)| w * e).collect();
+                reach[g.player] = g.reach(&e);
                 e
             });
             let v = self.walk(0, p, [&reach[0], &reach[1]], &d);
             if let (Some(g), Some(e)) = (self.gadget.as_mut(), enter)
                 && g.player == p
             {
-                for h in 0..v.len() {
-                    let mixed = (1.0 - e[h]) * g.value[h] + e[h] * v[h];
-                    for (r, x) in g.regret.iter_mut().zip([g.value[h], v[h]]) {
-                        r[h] = d.regret(r[h]) + x - mixed;
-                    }
-                }
+                g.update(&v, &e, &d);
             }
         }
     }
@@ -473,21 +497,7 @@ impl RiverSolver {
         if let Some(f) = &self.frozen[node] {
             return f.clone();
         }
-        let n = self.hands.len();
-        let regret = &self.regret[node];
-        let k = regret.len() / n;
-        let mut s = vec![0f32; k * n];
-        for h in 0..n {
-            let total: f32 = (0..k).map(|a| regret[a * n + h].max(0.0)).sum();
-            for a in 0..k {
-                s[a * n + h] = if total > 0.0 {
-                    regret[a * n + h].max(0.0) / total
-                } else {
-                    1.0 / k as f32
-                };
-            }
-        }
-        s
+        regret_matching(&self.regret[node], self.hands.len())
     }
 
     /// The average strategy at `node`, action-major.
@@ -496,21 +506,7 @@ impl RiverSolver {
         if let Some(f) = &self.frozen[node] {
             return f.clone();
         }
-        let n = self.hands.len();
-        let sum = &self.sum[node];
-        let k = sum.len() / n;
-        let mut s = vec![0f32; k * n];
-        for h in 0..n {
-            let total: f32 = (0..k).map(|a| sum[a * n + h]).sum();
-            for a in 0..k {
-                s[a * n + h] = if total > 0.0 {
-                    sum[a * n + h] / total
-                } else {
-                    1.0 / k as f32
-                };
-            }
-        }
-        s
+        normalized(&self.sum[node], self.hands.len(), |x| x)
     }
 
     /// The average strategy everywhere.
@@ -649,66 +645,108 @@ impl RiverSolver {
         bp_root: u32,
         buckets: &[u16],
     ) -> Strategy {
-        let n = self.hands.len();
-        let mut out: Strategy = self
-            .tree
-            .nodes
-            .iter()
-            .map(|x| vec![0.0; x.actions.len() * n])
-            .collect();
-        let mut stack = vec![(0u32, Some(bp_root))];
-        while let Some((node, bp)) = stack.pop() {
-            let x = &self.tree.nodes[node as usize];
+        blueprint_strategy(
+            &self.tree,
+            &self.hands.cards,
+            blueprint,
+            bp_tree,
+            bp_root,
+            buckets,
+        )
+    }
+}
+
+/// The blueprint node each subgame node corresponds to, following actions
+/// from `bp_root` (matched to the root) with the nearest pot fraction.
+/// `None` below a node the blueprint can't follow: a decision node matches
+/// only a blueprint decision on the same street with the same player to
+/// act. A node where the street ends gets the blueprint node after the
+/// matching action, whatever it is.
+pub fn match_blueprint(tree: &RiverTree, bp_tree: &BettingTree, bp_root: u32) -> Vec<Option<u32>> {
+    let mut out = vec![None; tree.nodes.len()];
+    let mut stack = vec![(0u32, Some(bp_root))];
+    while let Some((node, bp)) = stack.pop() {
+        out[node as usize] = bp;
+        let x = &tree.nodes[node as usize];
+        let y = bp
+            .map(|b| &bp_tree.nodes[b as usize])
+            .filter(|y| same_spot(x, y));
+        for (a, &child) in x.actions.iter().zip(&x.children) {
+            let next = y.map(|y| y.children[nearest(&x.betting, a, &y.betting, &y.actions)]);
+            stack.push((child, next));
+        }
+    }
+    out
+}
+
+/// Whether blueprint node `y` is a decision like subgame node `x`.
+pub fn same_spot(x: &RiverNode, y: &Node) -> bool {
+    !x.actions.is_empty()
+        && !y.actions.is_empty()
+        && y.betting.street == x.betting.street
+        && y.betting.to_act == x.betting.to_act
+}
+
+/// Blueprint probabilities at `y` moved onto the actions of subgame node
+/// `x`: each blueprint action's mass goes to the nearest subgame action.
+pub fn map_probs(x: &RiverNode, y: &Node, probs: &[f64]) -> Vec<f32> {
+    let mut out = vec![0f32; x.actions.len()];
+    for (a, &p) in y.actions.iter().zip(probs) {
+        out[nearest(&y.betting, a, &x.betting, &x.actions)] += p as f32;
+    }
+    out
+}
+
+/// The index of the check or call at `x` (the first action if neither).
+pub fn passive(x: &RiverNode) -> usize {
+    x.actions
+        .iter()
+        .position(|a| matches!(a, HunlAction::Check | HunlAction::Call))
+        .unwrap_or(0)
+}
+
+/// The blueprint's strategy carried over to subgame `tree` for the hands
+/// `cards`: see [`RiverSolver::blueprint_strategy`].
+pub fn blueprint_strategy(
+    tree: &RiverTree,
+    cards: &[[Card; 2]],
+    blueprint: &Blueprint,
+    bp_tree: &BettingTree,
+    bp_root: u32,
+    buckets: &[u16],
+) -> Strategy {
+    let n = cards.len();
+    let matched = match_blueprint(tree, bp_tree, bp_root);
+    tree.nodes
+        .iter()
+        .zip(&matched)
+        .map(|(x, bp)| {
+            let mut s = vec![0f32; x.actions.len() * n];
             if x.actions.is_empty() {
-                continue;
+                return s;
             }
-            let bp = bp.filter(|&b| {
-                let y = &bp_tree.nodes[b as usize];
-                !y.actions.is_empty()
-                    && y.betting.street == 3
-                    && y.betting.to_act == x.betting.to_act
-            });
-            let s = &mut out[node as usize];
-            match bp {
+            match bp.filter(|&b| same_spot(x, &bp_tree.nodes[b as usize])) {
                 Some(b) => {
                     let y = &bp_tree.nodes[b as usize];
-                    // Each blueprint action's mass goes to its nearest
-                    // subgame action.
-                    let to_sub: Vec<usize> = y
-                        .actions
-                        .iter()
-                        .map(|a| nearest(&y.betting, a, &x.betting, &x.actions))
-                        .collect();
-                    let mut rows: HashMap<u16, Vec<f64>> = HashMap::new();
-                    for (h, c) in self.hands.cards.iter().enumerate() {
+                    let mut rows: HashMap<u16, Vec<f32>> = HashMap::new();
+                    for (h, c) in cards.iter().enumerate() {
                         let bucket = buckets[hole_index(c[0], c[1])];
-                        let probs = rows
+                        let row = rows
                             .entry(bucket)
-                            .or_insert_with(|| blueprint.probs(b, bucket));
-                        for (i, &p) in probs.iter().enumerate() {
-                            s[to_sub[i] * n + h] += p as f32;
+                            .or_insert_with(|| map_probs(x, y, &blueprint.probs(b, bucket)));
+                        for (a, &p) in row.iter().enumerate() {
+                            s[a * n + h] = p;
                         }
-                    }
-                    for (a, &child) in x.actions.iter().zip(&x.children) {
-                        let j = nearest(&x.betting, a, &y.betting, &y.actions);
-                        stack.push((child, Some(y.children[j])));
                     }
                 }
                 None => {
-                    let passive = x
-                        .actions
-                        .iter()
-                        .position(|a| matches!(a, HunlAction::Check | HunlAction::Call))
-                        .unwrap_or(0);
-                    s[passive * n..(passive + 1) * n].fill(1.0);
-                    for &child in &x.children {
-                        stack.push((child, None));
-                    }
+                    let a = passive(x);
+                    s[a * n..(a + 1) * n].fill(1.0);
                 }
             }
-        }
-        out
-    }
+            s
+        })
+        .collect()
 }
 
 /// The index in `to` (actions at betting `tb`) of the action closest to `a`
@@ -742,15 +780,49 @@ fn nearest(fb: &Betting, a: &HunlAction, tb: &Betting, to: &[HunlAction]) -> usi
     }
 }
 
+/// Regret matching over `k` actions per hand, action-major: each hand plays
+/// its actions in proportion to positive regret, or uniformly if none.
+pub(super) fn regret_matching(regret: &[f32], n: usize) -> Vec<f32> {
+    normalized(regret, n, |r| r.max(0.0))
+}
+
+/// Each hand's row of `x` (action-major over `n` hands) scaled by `f` to
+/// sum to 1, uniform where it sums to 0.
+pub(super) fn normalized(x: &[f32], n: usize, f: impl Fn(f32) -> f32) -> Vec<f32> {
+    let k = x.len() / n.max(1);
+    let mut s = vec![0f32; k * n];
+    for h in 0..n {
+        let total: f32 = (0..k).map(|a| f(x[a * n + h])).sum();
+        for a in 0..k {
+            s[a * n + h] = if total > 0.0 {
+                f(x[a * n + h]) / total
+            } else {
+                1.0 / k as f32
+            };
+        }
+    }
+    s
+}
+
 /// Discounted CFR's factors for one iteration.
-struct Discount {
+pub(super) struct Discount {
     positive: f32,
     negative: f32,
-    sum: f32,
+    pub(super) sum: f32,
 }
 
 impl Discount {
-    fn regret(&self, r: f32) -> f32 {
+    /// The factors for iteration `t` (from 1).
+    pub(super) fn at(t: usize) -> Self {
+        let t = t as f64;
+        Self {
+            positive: (t.powf(ALPHA) / (t.powf(ALPHA) + 1.0)) as f32,
+            negative: 0.5,
+            sum: ((t / (t + 1.0)).powf(GAMMA)) as f32,
+        }
+    }
+
+    pub(super) fn regret(&self, r: f32) -> f32 {
         r * if r > 0.0 {
             self.positive
         } else {
