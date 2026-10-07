@@ -140,6 +140,16 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
     Ok(seats)
 }
 
+/// The bot with id `id` (a personality, or "gto" once loaded), for a
+/// restored table.
+fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
+    if id == GTO_ID {
+        return gto_seat(seed)?.bot.ok_or_else(|| JsError::new("no bot"));
+    }
+    let p = Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
+    Ok(Box::new(p.bot(Some(seed))))
+}
+
 fn action(kind: &str, amount: u64) -> Result<Action, JsError> {
     Ok(match kind {
         "fold" => Action::Fold,
@@ -683,5 +693,47 @@ impl MultiTable {
     pub fn remove(&mut self, seat: usize, now: f64) -> Result<JsValue, JsError> {
         let out = self.host.remove(seat, now as u64);
         self.result(&out, now as u64)
+    }
+
+    /// The whole table as JSON, the hand in progress included, for
+    /// `restore` after the page closes or the browser restarts. It holds
+    /// every card of the hand in progress: keep it where only the host can
+    /// read it.
+    pub fn save(&self, now: f64) -> Result<String, JsError> {
+        serde_json::to_string(&self.host.snapshot(now as u64)).map_err(err)
+    }
+
+    /// Loads a table saved with `save`, paused: its clocks stand still
+    /// until `resume`. No one is connected; people get their seats back by
+    /// joining again, and aren't folded for meanwhile. Fails for a snapshot
+    /// from another version, or one that doesn't play out to what was saved.
+    pub fn restore(json: &str, now: f64) -> Result<MultiTable, JsError> {
+        let s: ducy_play::HostSnapshot = serde_json::from_str(json).map_err(err)?;
+        let mut n = 0;
+        let host = TableHost::restore(&s, now as u64, |id| {
+            n += 1;
+            bot_for(id, (now as u64).wrapping_add(n)).ok()
+        })
+        .map_err(err)?;
+        Ok(MultiTable { host })
+    }
+
+    /// Stops the clocks (no turn runs out, no sit-out time counts), e.g.
+    /// while no one can be reached.
+    pub fn pause(&mut self, now: f64) {
+        self.host.pause(now as u64);
+    }
+
+    /// Starts the clocks again where they stopped; returns the updates
+    /// carrying the time left.
+    pub fn resume(&mut self, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.resume(now as u64);
+        self.result(&out, now as u64)
+    }
+
+    /// Whether the clocks are stopped.
+    #[wasm_bindgen(js_name = isPaused)]
+    pub fn is_paused(&self) -> bool {
+        self.host.is_paused()
     }
 }

@@ -21,7 +21,10 @@
 //! A stack after a request must be between the table's minimum and maximum
 //! buy-in. Without one, every seat is topped back up to the buy-in.
 
-use crate::{Action, PlayError, Table, TableView};
+use crate::{
+    Action, Bot, PlayError, Table, TableView,
+    snapshot::{HostSnapshot, PlayerSnapshot, SNAPSHOT_VERSION},
+};
 
 /// A message from a player to the host.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -215,6 +218,8 @@ pub struct TableHost {
     has_host: bool,
     /// People who left with chips since [`Self::take_departures`].
     departed: Vec<Departure>,
+    /// When the table was paused ([`Self::pause`]): its clocks stand still.
+    paused_at: Option<u64>,
     /// Milliseconds a person may sit out before the seat is given up (0: no limit).
     sit_out_limit_ms: u64,
 }
@@ -268,6 +273,7 @@ impl TableHost {
             has_host,
             departed: Vec::new(),
             sit_out_limit_ms: 0,
+            paused_at: None,
         }
     }
 
@@ -429,7 +435,142 @@ impl TableHost {
 
     /// Time left for the person acting, if any.
     pub fn turn_ms_left(&self, now: u64) -> Option<u64> {
+        let now = self.clock(now);
         self.deadline.map(|d| d.saturating_sub(now))
+    }
+
+    /// The time on the table's clocks: `now`, or while paused, the moment it
+    /// was paused.
+    fn clock(&self, now: u64) -> u64 {
+        self.paused_at.unwrap_or(now)
+    }
+
+    /// Stops the table's clocks, e.g. while the host can't reach anyone: no
+    /// turn runs out and no one's sit-out time counts until
+    /// [`Self::resume`]. Play itself isn't blocked; the app decides whether
+    /// to deal or let bots act meanwhile. A restored table starts paused.
+    pub fn pause(&mut self, now: u64) {
+        self.paused_at.get_or_insert(now);
+    }
+
+    /// Starts the clocks again where they stopped, and sends everyone the
+    /// time left.
+    pub fn resume(&mut self, now: u64) -> Vec<Outgoing> {
+        let Some(at) = self.paused_at.take() else {
+            return Vec::new();
+        };
+        let gap = now.saturating_sub(at);
+        if let Some(d) = &mut self.deadline {
+            *d += gap;
+        }
+        for p in &mut self.players {
+            if let Some(t) = &mut p.out_since {
+                *t += gap;
+            }
+        }
+        self.updates(now)
+    }
+
+    /// Whether the clocks are stopped (see [`Self::pause`]).
+    pub fn is_paused(&self) -> bool {
+        self.paused_at.is_some()
+    }
+
+    /// The whole table as saved data at time `now`, the hand in progress
+    /// included, for [`Self::restore`]. See [`crate::snapshot`].
+    pub fn snapshot(&self, now: u64) -> HostSnapshot {
+        let now = self.clock(now);
+        HostSnapshot {
+            version: SNAPSHOT_VERSION,
+            table: self.table.snapshot(),
+            open: self.open.clone(),
+            players: self
+                .players
+                .iter()
+                .map(|p| PlayerSnapshot {
+                    client_id: p.client_id.clone(),
+                    name: p.name.clone(),
+                    seat: p.seat,
+                    timeouts: p.timeouts,
+                    pending: p.pending,
+                    leaving: p.leaving,
+                    missed: p.missed,
+                    requested: p.requested,
+                    approved: p.approved,
+                    out_by_choice: p.out_by_choice,
+                    out_ms: p.out_since.map(|t| now.saturating_sub(t)),
+                })
+                .collect(),
+            seq: self.seq,
+            turn_ms: self.turn_ms,
+            turn_ms_left: self.deadline.map(|d| d.saturating_sub(now)),
+            turn: self.turn,
+            bot_ids: self.bot_ids.clone(),
+            bank: self.bank.map(|b| (b.min, b.max)),
+            host_approved: self.host_approved,
+            has_host: self.has_host,
+            departed: self.departed.clone(),
+            sit_out_limit_ms: self.sit_out_limit_ms,
+        }
+    }
+
+    /// Loads a saved table at time `now`, paused (see [`Self::pause`]):
+    /// call [`Self::resume`] once players are back. No one is connected yet;
+    /// people keep their seats and get them back by joining again with the
+    /// same id (or name), and until then they're waited for, not folded.
+    /// `bot(id)` gives the bot for each seat that had one, by its id.
+    pub fn restore(
+        s: &HostSnapshot,
+        now: u64,
+        mut bot: impl FnMut(&str) -> Option<Box<dyn Bot>>,
+    ) -> Result<Self, PlayError> {
+        let bad = PlayError::InvalidSnapshot;
+        if s.version != SNAPSHOT_VERSION {
+            return Err(bad);
+        }
+        let n = s.table.seats.len();
+        if s.open.len() != n || s.bot_ids.len() != n || s.players.iter().any(|p| p.seat >= n) {
+            return Err(bad);
+        }
+        let table = Table::restore(&s.table, |seat| bot(&s.bot_ids[seat]))?;
+        let bank = match s.bank {
+            Some((min, max)) if min == 0 || max < min => return Err(bad),
+            b => b.map(|(min, max)| Bank { min, max }),
+        };
+        let players = s
+            .players
+            .iter()
+            .map(|p| Player {
+                client_id: p.client_id.clone(),
+                name: p.name.clone(),
+                seat: p.seat,
+                connected: false,
+                timeouts: p.timeouts,
+                pending: p.pending,
+                leaving: p.leaving,
+                missed: p.missed,
+                requested: p.requested,
+                approved: p.approved,
+                out_by_choice: p.out_by_choice,
+                out_since: p.out_ms.map(|ms| now.saturating_sub(ms)),
+            })
+            .collect();
+        Ok(Self {
+            table,
+            open: s.open.clone(),
+            players,
+            seq: s.seq,
+            turn_ms: s.turn_ms,
+            deadline: s.turn_ms_left.map(|ms| now + ms),
+            turn: s.turn,
+            bot_ids: s.bot_ids.clone(),
+            bank,
+            host_approved: s.host_approved,
+            has_host: s.has_host,
+            departed: s.departed.clone(),
+            sit_out_limit_ms: s.sit_out_limit_ms,
+            paused_at: Some(now),
+        })
     }
 
     /// Whether the seat to act plays without waiting for a person, so the
@@ -538,9 +679,10 @@ impl TableHost {
                 }
             }
             (Command::SitOut, Some(i)) => {
+                let clock = self.clock(now);
                 let p = &mut self.players[i];
                 p.out_by_choice = true;
-                p.out_since.get_or_insert(now);
+                p.out_since.get_or_insert(clock);
                 let (seat, pending) = (p.seat, p.pending);
                 // Out from the next hand; between hands, at once.
                 if !pending && !self.table.in_hand() {
@@ -619,11 +761,12 @@ impl TableHost {
     /// A player's connection dropped: their seat checks or folds until they
     /// come back.
     pub fn disconnected(&mut self, client_id: &str, now: u64) -> Vec<Outgoing> {
+        let clock = self.clock(now);
         let Some(p) = self.players.iter_mut().find(|p| p.client_id == client_id) else {
             return Vec::new();
         };
         p.connected = false;
-        p.out_since.get_or_insert(now);
+        p.out_since.get_or_insert(clock);
         let seat = p.seat;
         if !p.pending {
             self.table.seat_mut(seat).away = true;
@@ -720,6 +863,9 @@ impl TableHost {
     /// Runs the turn clock: a person out of time checks or folds, and after
     /// two timeouts in a row they're away until they sit back in.
     pub fn tick(&mut self, now: u64) -> Vec<Outgoing> {
+        if self.is_paused() {
+            return Vec::new();
+        }
         let mut out = self.expire_sit_outs(now);
         let Some(deadline) = self.deadline else {
             return out;
@@ -862,7 +1008,8 @@ impl TableHost {
         if turn != self.turn {
             self.turn = turn;
             let person = self.table.to_act().is_some() && !self.table.auto_to_act();
-            self.deadline = (person && self.turn_ms > 0).then(|| now + self.turn_ms);
+            let clock = self.clock(now);
+            self.deadline = (person && self.turn_ms > 0).then(|| clock + self.turn_ms);
         }
         self.updates(now)
     }
@@ -870,6 +1017,7 @@ impl TableHost {
     /// Every connected player's current view.
     pub fn updates(&self, now: u64) -> Vec<Outgoing> {
         let turn_ms_left = self.turn_ms_left(now);
+        let now = self.clock(now);
         self.players
             .iter()
             .filter(|p| p.connected)
