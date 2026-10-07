@@ -12,6 +12,7 @@ use ducy::deck::{Card, Deck};
 use crate::{
     Action, BettingStructure, Bot, Deal, Event, Hand, LegalActions, PersonalityBot, PlayError,
     Post, Pot, Street, TableRules, fallback_action,
+    snapshot::{SeatSnapshot, TableSnapshot},
 };
 
 /// One seat: who sits there and the bot that plays it when no one does.
@@ -795,4 +796,127 @@ fn rotate_pot(p: &Pot, rot: impl Fn(usize) -> usize) -> Pot {
     p.eligible.iter_mut().for_each(|s| *s = rot(*s));
     p.awards.iter_mut().for_each(|a| a.seat = rot(a.seat));
     p
+}
+
+impl Return {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Post => "post",
+            Self::WaitForBigBlind => "wait_for_big_blind",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "ready" => Self::Ready,
+            "post" => Self::Post,
+            "wait_for_big_blind" => Self::WaitForBigBlind,
+            _ => return None,
+        })
+    }
+}
+
+impl Table {
+    /// The table as saved data, the hand in progress included (see
+    /// [`crate::snapshot`]). Bots aren't saved; [`Self::restore`] asks for
+    /// them again.
+    pub fn snapshot(&self) -> TableSnapshot {
+        TableSnapshot {
+            rules: self.rules,
+            seats: self
+                .seats
+                .iter()
+                .map(|s| SeatSnapshot {
+                    name: s.name.clone(),
+                    id: s.id.clone(),
+                    has_bot: s.bot.is_some(),
+                    bot_name: s.bot_name.clone(),
+                    human: s.human,
+                    away: s.away,
+                    sitting_out: s.sitting_out,
+                })
+                .collect(),
+            stacks: self.stacks.clone(),
+            buy_in: self.buy_in,
+            button: self.button,
+            hand: self.hand.as_ref().map(Hand::snapshot),
+            dealt: self.dealt.clone(),
+            hand_number: self.hand_number,
+            synced: self.synced,
+            top_up: self.top_up,
+            seed: self.seed.map(|s| s.to_string()),
+            missed: self.missed.clone(),
+            returning: self.returning.iter().map(|r| r.name().into()).collect(),
+            last_blinds: self.last_blinds,
+        }
+    }
+
+    /// Loads a saved table. `bot(seat)` gives the bot for each seat that had
+    /// one; a seat whose bot can't be given back fails the load.
+    pub fn restore(
+        s: &TableSnapshot,
+        mut bot: impl FnMut(usize) -> Option<Box<dyn Bot>>,
+    ) -> Result<Self, PlayError> {
+        let bad = PlayError::InvalidSnapshot;
+        let n = s.seats.len();
+        if !(2..=crate::MAX_PLAYERS).contains(&n)
+            || [s.stacks.len(), s.missed.len(), s.returning.len()] != [n; 3]
+            || s.button >= n
+            || s.dealt.iter().any(|&d| d >= n)
+            || s.last_blinds.is_some_and(|(a, b)| a >= n || b >= n)
+        {
+            return Err(bad);
+        }
+        s.rules.validate().map_err(|_| bad)?;
+        let mut seats = Vec::with_capacity(n);
+        for (i, seat) in s.seats.iter().enumerate() {
+            let bot = if seat.has_bot {
+                Some(bot(i).ok_or(bad)?)
+            } else {
+                None
+            };
+            seats.push(TableSeat {
+                name: seat.name.clone(),
+                id: seat.id.clone(),
+                bot,
+                bot_name: seat.bot_name.clone(),
+                human: seat.human,
+                away: seat.away,
+                sitting_out: seat.sitting_out,
+            });
+        }
+        let hand = s.hand.as_ref().map(Hand::restore).transpose()?;
+        if hand
+            .as_ref()
+            .is_some_and(|h| h.num_seats() != s.dealt.len())
+        {
+            return Err(bad);
+        }
+        let seed = match &s.seed {
+            Some(t) => Some(t.parse().map_err(|_| bad)?),
+            None => None,
+        };
+        let returning = s
+            .returning
+            .iter()
+            .map(|r| Return::from_name(r).ok_or(bad))
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            rules: s.rules,
+            seats,
+            stacks: s.stacks.clone(),
+            buy_in: s.buy_in,
+            button: s.button,
+            hand,
+            dealt: s.dealt.clone(),
+            hand_number: s.hand_number,
+            synced: s.synced,
+            top_up: s.top_up,
+            seed,
+            missed: s.missed.clone(),
+            returning,
+            last_blinds: s.last_blinds,
+        })
+    }
 }

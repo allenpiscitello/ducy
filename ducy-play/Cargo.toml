@@ -32,3 +32,7 @@ required-features = ["process"]
 [[example]]
 name = "bot_match"
 required-features = ["process"]
+
+[[test]]
+name = "snapshot"
+required-features = ["serde"]

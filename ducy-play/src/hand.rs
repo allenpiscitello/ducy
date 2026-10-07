@@ -1,10 +1,11 @@
-use ducy::deck::Card;
+use ducy::deck::{Card, Deck};
 
 use crate::{
     deal::Deal,
     error::PlayError,
     rules::{BettingStructure, TableRules},
     showdown::{Pot, best_hands, build_pots, split},
+    snapshot::HandSnapshot,
 };
 
 /// Most players at one table.
@@ -699,5 +700,76 @@ impl Hand {
     /// Everything that has happened, in order.
     pub fn events(&self) -> &[Event] {
         &self.events
+    }
+}
+
+impl Hand {
+    /// The hand as saved data: how it started and what has happened since.
+    pub fn snapshot(&self) -> HandSnapshot {
+        HandSnapshot {
+            rules: self.rules,
+            stacks: self.seats.iter().map(|s| s.starting_stack).collect(),
+            button: self.button,
+            hole_cards: self
+                .deal
+                .hole_cards()
+                .iter()
+                .map(|d| d.iter(false).collect())
+                .collect(),
+            board: self.deal.board().to_vec(),
+            events: self.events.clone(),
+        }
+    }
+
+    /// Loads a saved hand by playing its actions again. Fails with
+    /// [`PlayError::InvalidSnapshot`] unless that gives exactly the events
+    /// that were saved.
+    pub fn restore(s: &HandSnapshot) -> Result<Self, PlayError> {
+        let bad = |_| PlayError::InvalidSnapshot;
+        let hole_cards = s
+            .hole_cards
+            .iter()
+            .map(|cards| {
+                let mut d = Deck::empty();
+                for &c in cards {
+                    d |= c;
+                }
+                d
+            })
+            .collect();
+        let board: [Card; 5] = s
+            .board
+            .clone()
+            .try_into()
+            .map_err(|_| PlayError::InvalidSnapshot)?;
+        let deal = Deal::new(s.rules.variant, hole_cards, board).map_err(bad)?;
+        let posts: Vec<Post> = s
+            .events
+            .iter()
+            .filter_map(|e| match *e {
+                Event::Post { seat, dead, live } => Some(Post {
+                    player: seat,
+                    dead,
+                    live,
+                }),
+                _ => None,
+            })
+            .collect();
+        let mut hand = Self::with_posts(s.rules, &s.stacks, s.button, deal, &posts).map_err(bad)?;
+        for e in &s.events {
+            let action = match *e {
+                Event::Fold { .. } => Action::Fold,
+                Event::Check { .. } => Action::Check,
+                Event::Call { .. } => Action::Call,
+                Event::Bet { to, .. } => Action::Bet(to),
+                Event::Raise { to, .. } => Action::Raise(to),
+                _ => continue,
+            };
+            hand.act(action).map_err(bad)?;
+        }
+        if hand.events != s.events {
+            return Err(PlayError::InvalidSnapshot);
+        }
+        Ok(hand)
     }
 }

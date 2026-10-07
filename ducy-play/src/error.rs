@@ -18,6 +18,9 @@ pub enum PlayError {
     /// The action isn't allowed for the player to act (for example checking
     /// while facing a bet, or a raise outside the legal range).
     IllegalAction,
+    /// A saved table can't be loaded: another version, or it doesn't play
+    /// out to what was saved.
+    InvalidSnapshot,
 }
 
 impl fmt::Display for PlayError {
@@ -32,6 +35,7 @@ impl fmt::Display for PlayError {
             Self::NotEnoughCards => "not enough cards for this many players",
             Self::HandComplete => "the hand is complete",
             Self::IllegalAction => "that action is not legal now",
+            Self::InvalidSnapshot => "the saved table can't be loaded",
         };
         f.write_str(msg)
     }

@@ -36,6 +36,7 @@ pub mod personality;
 mod process;
 mod rules;
 mod showdown;
+pub mod snapshot;
 pub mod stats;
 pub mod strength;
 mod table;
@@ -57,6 +58,7 @@ pub use personality::{Personality, PersonalityBot, Style, position_strength, sca
 pub use process::ProcessBot;
 pub use rules::{BettingStructure, TableRules, Variant};
 pub use showdown::{Award, Pot};
+pub use snapshot::{HandSnapshot, HostSnapshot, SNAPSHOT_VERSION, TableSnapshot};
 pub use table::{SeatState, Table, TableSeat, TableView};
 pub use tournament::{
     Entrant, Finish, HandReport, Level, Move, SeatRef, Standing, Tournament, TournamentConfig,

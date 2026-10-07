@@ -53,4 +53,26 @@ while (!r.state.complete) {
 assert.equal(r.playersIn, 1);
 assert.throws(() => host.newHand(t()), "only the host is left");
 assert.ok(host.state(t()).state.seats[1].empty);
+
+// Saved mid-hand and restored, as after the host's browser restarts: the
+// same hand, paused until people are back.
+const club = MultiTable.club(4, 40n, 200n, 1n, 2n, 5n, undefined, 30000n);
+for (const [seat, id] of ["ann", "bo"].entries()) {
+  club.handle(id, { type: "join", name: id }, t());
+  club.handle(id, { type: "request_chips", amount: 100 }, t());
+  club.approveChips(seat, t());
+}
+const before = club.newHand(t()).state;
+const saved = club.save(t());
+assert.throws(() => MultiTable.restore(saved.replace('"version":1', '"version":99'), t()));
+const back = MultiTable.restore(saved, t());
+assert.ok(back.isPaused());
+r = back.state(t());
+assert.deepEqual([r.state.hand_number, r.state.pot, r.state.to_act], [before.hand_number, before.pot, before.to_act]);
+assert.equal(r.turnMsLeft, 30000 - 10, "the clock stood still");
+for (const id of ["ann", "bo"]) r = back.handle(id, { type: "join", name: id }, t());
+const cards = id => r.out.filter(m => m.to === id && m.data.type === "state").pop().data.view.seats[0].cards;
+assert.equal(cards("ann").length, 2, "they get their cards back");
+r = back.resume(t());
+assert.ok(!back.isPaused());
 console.log("ok");
