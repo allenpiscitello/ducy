@@ -640,6 +640,130 @@ fn review_log_keeps_hands_and_reviews_each_once() {
     assert!(!log.record(&s));
 }
 
+fn deck(cards: &str) -> ducy::deck::Deck {
+    let mut d = ducy::deck::Deck::empty();
+    for s in cards.split(' ') {
+        d |= c(s);
+    }
+    d
+}
+
+/// A heads-up hand at 1/2 with 100 big blinds: the button (seat 0) holds
+/// `villain`, the big blind (seat 1) `As Kd`, the flop is `Ts Js 3h`, and the
+/// turn and river are `turn_river`. Preflop the button calls and the big
+/// blind checks; on the flop the big blind bets 4.
+fn flop_bet(villain: &str, turn_river: &str) -> ducy_play::Hand {
+    let tr: Vec<&str> = turn_river.split(' ').collect();
+    let deal = ducy_play::Deal::new(
+        ducy_play::Variant::Holdem,
+        vec![deck(villain), deck("As Kd")],
+        [c("Ts"), c("Js"), c("3h"), c(tr[0]), c(tr[1])],
+    )
+    .unwrap();
+    let mut hand =
+        ducy_play::Hand::new(TableRules::no_limit_holdem(1, 2), &[200, 200], 0, deal).unwrap();
+    hand.act(ducy_play::Action::Call).unwrap();
+    hand.act(ducy_play::Action::Check).unwrap();
+    hand.act(ducy_play::Action::Bet(4)).unwrap();
+    hand
+}
+
+#[test]
+fn a_decision_review_never_sees_the_bots_cards_or_the_cards_to_come() {
+    let (cards, config) = setup();
+    let game = Hunl::new(config, Some(&cards));
+    let bp = random_blueprint(&game, &cards, 11);
+    let mut r = reviewer(&game, &cards, &bp);
+    r.config.flop_runouts = 4;
+    let a = flop_bet("2c 2d", "4d 5c");
+    let b = flop_bet("Qh Qd", "Kh 9c");
+    let ra = HandRecord::in_progress(&a, 1).unwrap();
+    let rb = HandRecord::in_progress(&b, 1).unwrap();
+    // Nothing of the bot's hand or the turn and river is in the record.
+    assert_eq!(ra, rb);
+    assert_eq!(ra.board.len(), 3);
+    assert_eq!(ra.stacks, [200, 200]);
+    let da = r
+        .review_last_decision(&ra, &mut BucketCache::default())
+        .unwrap();
+    let db = r
+        .review_last_decision(&rb, &mut BucketCache::default())
+        .unwrap();
+    assert_eq!(da, db);
+    assert_eq!(da.street, "flop");
+    assert!(da.action.starts_with("bet"), "{da:?}");
+    // Only Hold'em heads-up no-limit is reviewed.
+    let three = ducy_play::Hand::new(
+        TableRules::no_limit_holdem(1, 2),
+        &[200, 200, 200],
+        0,
+        ducy_play::Deal::random(ducy_play::Variant::Holdem, 3, Some(1)).unwrap(),
+    )
+    .unwrap();
+    assert!(HandRecord::in_progress(&three, 0).is_none());
+}
+
+#[test]
+fn a_decision_review_matches_the_whole_hand_review() {
+    let (cards, config) = setup();
+    let game = Hunl::new(config, Some(&cards));
+    let bp = threshold_blueprint(&game, &cards);
+    let r = reviewer(&game, &cards, &bp);
+    // River decisions are exact, so the two agree completely.
+    for last in [
+        Event::Fold { seat: 1 },
+        Event::Call {
+            seat: 1,
+            amount: 198,
+            all_in: true,
+        },
+    ] {
+        let rec = river_shove("As Ks", "Ts Js Qs 4d 2c", last);
+        let whole = r.review(&rec, &mut BucketCache::default());
+        let one = r
+            .review_last_decision(&rec, &mut BucketCache::default())
+            .unwrap();
+        assert_eq!(&one, whole.decisions.last().unwrap());
+    }
+    // A flop decision, with fewer samples: within the sampling error.
+    let mut fast = reviewer(&game, &cards, &bp);
+    fast.config.flop_runouts = 16;
+    let full = river_shove("9h 9d", "Ts Js 3h 4d 2c", Event::Fold { seat: 1 });
+    let flop_end = full
+        .history
+        .iter()
+        .position(|e| matches!(e, Event::Check { seat: 1 }))
+        .and_then(|first| {
+            full.history[first + 1..]
+                .iter()
+                .position(|e| matches!(e, Event::Check { seat: 1 }))
+                .map(|k| first + 1 + k)
+        })
+        .unwrap();
+    let mut so_far = full.clone();
+    so_far.history.truncate(flop_end + 1);
+    so_far.board.truncate(3);
+    let one = fast
+        .review_last_decision(&so_far, &mut BucketCache::default())
+        .unwrap();
+    let whole = r.review(&full, &mut BucketCache::default());
+    let same = whole.decisions.iter().find(|d| d.street == "flop").unwrap();
+    assert_eq!(one.street, "flop");
+    assert_eq!(one.action, same.action);
+    if let (Some(a), Some(b)) = (one.ev_loss, same.ev_loss) {
+        let tol = 4.0 * (one.stderr + same.stderr) + 1e-9;
+        assert!((a - b).abs() <= tol, "{a} vs {b} (± {tol})");
+    }
+    // Before the reviewed player has acted there's nothing to review.
+    let mut start = full.clone();
+    start.history.truncate(2);
+    start.board.clear();
+    assert!(
+        r.review_last_decision(&start, &mut BucketCache::default())
+            .is_none()
+    );
+}
+
 #[test]
 fn other_stack_depths_get_a_note() {
     let (cards, config) = setup();

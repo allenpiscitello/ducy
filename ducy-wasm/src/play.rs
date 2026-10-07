@@ -21,7 +21,8 @@ use ducy_gto::holdem::{
     blueprint::Blueprint,
     bot::GtoBot,
     hunl::{BettingTree, Hunl, HunlConfig},
-    review::{HandReview, ReviewConfig, ReviewLog, Reviewer, SessionReview},
+    range::BucketCache,
+    review::{HandRecord, HandReview, ReviewConfig, ReviewLog, Reviewer, SessionReview},
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -162,6 +163,8 @@ pub struct BotTable {
     reviews: ReviewLog,
     /// The last hand number recorded for review.
     recorded: u64,
+    /// Buckets for reviewing decisions as they're made, kept across calls.
+    decision_cache: BucketCache,
 }
 
 #[derive(Serialize)]
@@ -170,8 +173,19 @@ struct SessionResult {
     summary: SessionReview,
 }
 
+/// Turn and river samples for reviewing one decision as it's made: fewer
+/// than a whole hand's review, so the feedback comes quickly.
+const DECISION_FLOP_RUNOUTS: usize = 8;
+
 /// Runs `f` with a reviewer for the loaded GTO bot.
 fn with_reviewer<T>(f: impl FnOnce(&Reviewer) -> T) -> Result<T, JsError> {
+    with_reviewer_config(ReviewConfig::default(), f)
+}
+
+fn with_reviewer_config<T>(
+    config: ReviewConfig,
+    f: impl FnOnce(&Reviewer) -> T,
+) -> Result<T, JsError> {
     GTO.with(|g| {
         let g = g.borrow();
         let g = g
@@ -182,7 +196,7 @@ fn with_reviewer<T>(f: impl FnOnce(&Reviewer) -> T) -> Result<T, JsError> {
             blueprint: &g.blueprint,
             cards: &g.cards,
             tree_big_blind: HunlConfig::default().big_blind,
-            config: ReviewConfig::default(),
+            config,
         };
         Ok(f(&reviewer))
     })
@@ -213,6 +227,7 @@ impl BotTable {
             table,
             reviews: ReviewLog::default(),
             recorded: 0,
+            decision_cache: BucketCache::default(),
         })
     }
 
@@ -288,8 +303,12 @@ impl BotTable {
     /// blueprint's actions with how often it plays each (and their values
     /// when valued), the big blinds lost, a grade (fine, inaccuracy,
     /// mistake, blunder, deviation or unknown) and a note.
+    /// Null at tables without the GTO bot (review isn't available there).
     #[wasm_bindgen(js_name = reviewLastHand)]
     pub fn review_last_hand(&mut self) -> Result<JsValue, JsError> {
+        if self.reviews.is_empty() {
+            return Ok(JsValue::NULL);
+        }
         let reviews = &mut self.reviews;
         let r = with_reviewer(|rv| reviews.last(rv).cloned())?;
         match r {
@@ -312,9 +331,46 @@ impl BotTable {
     pub fn clear_reviews(&mut self) {
         self.reviews.clear();
     }
+
+    /// The review of the person's most recent decision in the current hand
+    /// (or the last hand, once it's over), for feedback straight after each
+    /// action: the same fields as a decision in `reviewLastHand`. It uses
+    /// only what the person could see then: their cards, the board so far
+    /// and the bot's range, never the bot's cards or the cards to come.
+    /// Uses fewer samples than `reviewLastHand`, so a flop decision's value
+    /// is rougher (see its `stderr`). Null before the person's first
+    /// decision, and at tables without the GTO bot.
+    #[wasm_bindgen(js_name = reviewLastDecision)]
+    pub fn review_last_decision(&mut self) -> Result<JsValue, JsError> {
+        if !self.against_gto() {
+            return Ok(JsValue::NULL);
+        }
+        // Every seat of a bot table is dealt in, so the person is player 0.
+        let Some(rec) = self
+            .table
+            .hand()
+            .and_then(|hand| HandRecord::in_progress(hand, 0))
+        else {
+            return Ok(JsValue::NULL);
+        };
+        let config = ReviewConfig {
+            flop_runouts: DECISION_FLOP_RUNOUTS,
+            ..ReviewConfig::default()
+        };
+        let cache = &mut self.decision_cache;
+        match with_reviewer_config(config, |rv| rv.review_last_decision(&rec, cache))? {
+            Some(r) => to_js(&r),
+            None => Ok(JsValue::NULL),
+        }
+    }
 }
 
 impl BotTable {
+    /// Whether the person plays the GTO bot heads-up, where review works.
+    fn against_gto(&self) -> bool {
+        self.table.num_seats() == 2 && self.table.seat(1).id == GTO_ID
+    }
+
     /// Keeps a just-finished hand for review when the person played it
     /// heads-up against the GTO bot.
     fn keep_for_review(&mut self) {
@@ -326,8 +382,7 @@ impl BotTable {
             return;
         }
         self.recorded = number;
-        if self.table.num_seats() == 2
-            && self.table.seat(1).id == GTO_ID
+        if self.against_gto()
             && let Some(summary) = hand.summary(0)
         {
             self.reviews.record(&summary);

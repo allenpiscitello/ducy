@@ -85,6 +85,45 @@ assert.equal(
 const ms = (Date.now() - started) / hands;
 console.log(`${hands} hands played and reviewed, ${ms.toFixed(0)} ms per hand`);
 
+// Live feedback: each of the person's decisions is reviewed right after it,
+// mid-hand, and agrees with the end-of-hand review of the same decision.
+{
+  let reviewed = 0;
+  let slowest = 0;
+  for (let h = 0; h < 20 && reviewed < 6; h++) {
+    let state = table.newHand();
+    assert.equal(table.reviewLastDecision(), null, "nothing decided yet this hand");
+    const live = [];
+    while (!state.complete) {
+      if (table.botToAct()) {
+        state = table.advance();
+        continue;
+      }
+      state = table.act(state.legal.can_check ? "check" : "call", 0n);
+      const t0 = Date.now();
+      const d = table.reviewLastDecision();
+      slowest = Math.max(slowest, Date.now() - t0);
+      assert.ok(d, "a review after each decision");
+      assert.ok(["preflop", "flop", "turn", "river"].includes(d.street));
+      assert.ok(d.bb_lost >= 0);
+      assert.ok(d.action === "check" || d.action.startsWith("call"), d.action);
+      live.push(d);
+    }
+    const whole = table.reviewLastHand();
+    assert.equal(whole.decisions.length, live.length);
+    live.forEach((d, i) => {
+      const w = whole.decisions[i];
+      assert.equal(d.street, w.street);
+      assert.equal(d.action, w.action);
+      // The same grade, unless sampling error puts it near a threshold.
+      if (d.stderr === 0 && w.stderr === 0) assert.equal(d.grade, w.grade);
+    });
+    reviewed += live.length;
+  }
+  assert.ok(reviewed >= 6, `only ${reviewed} decisions to review`);
+  console.log(`${reviewed} decisions reviewed live, slowest ${slowest} ms`);
+}
+
 // Resetting the stacks puts both players back to the buy-in for the next
 // hand, whatever the last one did.
 table.resetStacks();
@@ -104,5 +143,8 @@ assert.equal(table.reviewLastHand(), null);
 const other = new ducy.BotTable(["doug_poker"], 200n, 1n, 2n, 7n, undefined);
 playHand(other);
 assert.equal(other.reviewableHands(), 0);
+// Review isn't available there: null, never an error.
+assert.equal(other.reviewLastHand(), null);
+assert.equal(other.reviewLastDecision(), null);
 
 console.log("ok");
