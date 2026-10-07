@@ -180,7 +180,10 @@ pub struct Table {
     synced: bool,
     /// Whether a seat out of chips gets the buy-in again.
     top_up: bool,
-    seed: u64,
+    /// Deals come from this seed (and the hand number), so a session can be
+    /// replayed, or from fresh system randomness for every hand when `None`
+    /// (see [`Table::with_secure_deals`]).
+    seed: Option<u64>,
 }
 
 impl Table {
@@ -211,8 +214,23 @@ impl Table {
             hand_number: 0,
             synced: false,
             top_up: true,
-            seed,
+            seed: Some(seed),
         })
+    }
+
+    /// Shuffles every hand from fresh system randomness (the OS, or
+    /// `crypto.getRandomValues` in a browser) instead of the seed: use this
+    /// whenever people play each other. A seeded table's deals all follow
+    /// from one number, so a player who works out the seed from a few hands
+    /// they've seen knows every later hand; here each deal is independent.
+    pub fn with_secure_deals(mut self) -> Self {
+        self.seed = None;
+        self
+    }
+
+    /// Whether deals come from system randomness rather than a seed.
+    pub fn secure_deals(&self) -> bool {
+        self.seed.is_none()
     }
 
     pub fn rules(&self) -> &TableRules {
@@ -404,7 +422,7 @@ impl Table {
         let deal = Deal::random(
             self.rules.variant,
             dealt.len(),
-            Some(self.seed.wrapping_add(self.hand_number * 7919)),
+            self.seed.map(|s| s.wrapping_add(self.hand_number * 7919)),
         )?;
         let stacks: Vec<u64> = dealt.iter().map(|&s| self.stacks[s]).collect();
         let button = dealt.iter().position(|&s| s == self.button).expect("dealt");
