@@ -17,12 +17,22 @@
 //! Equity against the range is exact on the river and sampled over runouts
 //! before it. What LBR wins on average, over both seats, is how much the
 //! blueprint can be exploited at the least; a true best response wins more.
+//!
+//! [`local_best_response_with`] measures the bot that solves the river in
+//! real time instead: on reaching the river it solves the subgame the way
+//! the bot does (both ranges, the gadget against the blueprint's river), and
+//! LBR plays against that solution there. LBR's own bets are on the menu, so
+//! the bot never needs to re-solve.
+
+use std::collections::HashMap;
 
 use super::{
     abstraction::CardAbstraction,
     blueprint::Blueprint,
-    cards::{Card, NUM_CARDS, NUM_HOLES, bit, hole_cards, mask, score},
+    cards::{Card, NUM_CARDS, bit, hole_cards, hole_index, mask, score},
     hunl::{Hunl, HunlAction, HunlState},
+    range::{Range, StreetBuckets, board_for},
+    river::RiverSolver,
 };
 use crate::{
     game::{Game, Turn},
@@ -50,10 +60,49 @@ pub fn local_best_response(
     hands: usize,
     seed: u64,
 ) -> LbrResult {
+    local_best_response_with(game, cards, blueprint, hands, seed, 0)
+}
+
+/// LBR against the blueprint with the river solved in real time,
+/// `river_iterations` per solve (0 plays the blueprint's river).
+pub fn local_best_response_with(
+    game: &Hunl,
+    cards: &CardAbstraction,
+    blueprint: &Blueprint,
+    hands: usize,
+    seed: u64,
+    river_iterations: usize,
+) -> LbrResult {
+    LbrResult::of(&lbr_hands(
+        game,
+        cards,
+        blueprint,
+        hands,
+        seed,
+        river_iterations,
+    ))
+}
+
+/// LBR's result in each hand, in milli-big-blinds. Hand `i` is dealt and
+/// played the same way up to the river whatever `river_iterations` is, so
+/// runs with and without river solving can be compared hand by hand.
+pub fn lbr_hands(
+    game: &Hunl,
+    cards: &CardAbstraction,
+    blueprint: &Blueprint,
+    hands: usize,
+    seed: u64,
+    river_iterations: usize,
+) -> Vec<f64> {
     let one = |i: usize| -> f64 {
         let mut rng = Rng::for_iteration(seed, i as u64);
         let seat = i % 2;
-        play_hand(game, cards, blueprint, seat, &mut rng) / game.config.big_blind as f64 * 1000.0
+        let mut opp = Opponent {
+            blueprint,
+            river: None,
+            iterations: river_iterations,
+        };
+        play_hand(game, cards, &mut opp, seat, &mut rng) / game.config.big_blind as f64 * 1000.0
     };
     #[cfg(feature = "parallel")]
     let results: Vec<f64> = {
@@ -62,80 +111,110 @@ pub fn local_best_response(
     };
     #[cfg(not(feature = "parallel"))]
     let results: Vec<f64> = (0..hands).map(one).collect();
-    let n = results.len().max(1) as f64;
-    let mean = results.iter().sum::<f64>() / n;
-    let var = results.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0);
-    LbrResult {
-        hands,
-        mbb_per_hand: mean,
-        ci95: 1.96 * (var / n).sqrt(),
+    results
+}
+
+impl LbrResult {
+    /// The mean and its 95% interval over per-hand results.
+    pub fn of(results: &[f64]) -> Self {
+        let n = results.len().max(1) as f64;
+        let mean = results.iter().sum::<f64>() / n;
+        let var = results.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0);
+        Self {
+            hands: results.len(),
+            mbb_per_hand: mean,
+            ci95: 1.96 * (var / n).sqrt(),
+        }
     }
 }
 
-/// The blueprint's range: a weight per hole-card hand, and each hand's
-/// bucket on the current street.
-struct Range {
-    weight: Vec<f64>,
-    bucket: Vec<u16>,
-    street: usize,
+/// The strategy LBR plays against: the blueprint, or on the river a solve
+/// of it with the tree's nodes mapped to the subgame's.
+struct Opponent<'a> {
+    blueprint: &'a Blueprint,
+    river: Option<(RiverSolver, HashMap<u32, u32>)>,
+    iterations: usize,
 }
 
-impl Range {
-    fn new(blocked: u64) -> Self {
-        let weight = (0..NUM_HOLES)
-            .map(|h| {
-                let (a, b) = hole_cards(h);
-                if blocked & (bit(a) | bit(b)) != 0 {
-                    0.0
-                } else {
-                    1.0
-                }
-            })
-            .collect();
-        Self {
-            weight,
-            bucket: vec![0; NUM_HOLES],
-            street: usize::MAX,
+impl Opponent<'_> {
+    /// Action probabilities at tree node `node` for hole index `hole` (in
+    /// `bucket`).
+    fn probs(&self, node: u32, hole: usize, bucket: u16) -> Vec<f64> {
+        if let Some((s, map)) = &self.river
+            && let Some(&sub) = map.get(&node)
+            && let Some(p) = s.probs(sub, hole)
+        {
+            return p;
+        }
+        self.blueprint.probs(node, bucket)
+    }
+
+    /// Updates `range` for action `a` at `node`.
+    fn update(&self, range: &mut Range, node: u32, a: usize, buckets: &[u16]) {
+        if self.river.as_ref().is_some_and(|r| r.1.contains_key(&node)) {
+            range.update_by(|h| match buckets[h] {
+                u16::MAX => 0.0,
+                b => self.probs(node, h, b)[a],
+            });
+        } else {
+            range.update(self.blueprint, node, a, buckets);
         }
     }
 
-    /// Recomputes buckets for `board` when the street changes, and drops
-    /// hands that collide with new board cards.
-    fn on_street(&mut self, cards: &CardAbstraction, street: usize, board: &[Card]) {
-        if self.street == street {
+    /// Solves the river from tree node `node`, the way the bot does with
+    /// `bot` playing the solution.
+    fn solve(
+        &mut self,
+        game: &Hunl,
+        s: &HunlState,
+        ranges: &[Range; 2],
+        bot: usize,
+        buckets: &[u16],
+    ) {
+        if self.iterations == 0 || ranges.iter().any(|r| r.total() <= 0.0) {
             return;
         }
-        self.street = street;
-        let bm = mask(board);
-        for h in 0..NUM_HOLES {
-            if self.weight[h] == 0.0 {
+        let root = &game.tree.nodes[s.node as usize].betting;
+        let mut solver = RiverSolver::new(
+            s.board,
+            root,
+            &game.config,
+            &[],
+            [&ranges[0].weight, &ranges[1].weight],
+        );
+        let reference = solver.blueprint_strategy(self.blueprint, &game.tree, s.node, buckets);
+        let target = solver.best_response(1 - bot, &reference);
+        solver.set_gadget(1 - bot, target);
+        solver.run(self.iterations);
+        // Same betting and menu: the subtrees match node for node.
+        let mut map = HashMap::new();
+        let mut stack = vec![(s.node, 0u32)];
+        while let Some((t, r)) = stack.pop() {
+            let (x, y) = (&game.tree.nodes[t as usize], &solver.tree.nodes[r as usize]);
+            if x.actions != y.actions {
                 continue;
             }
-            let (a, b) = hole_cards(h);
-            if bm & (bit(a) | bit(b)) != 0 {
-                self.weight[h] = 0.0;
-                continue;
-            }
-            self.bucket[h] = cards.bucket([a, b], board);
+            map.insert(t, r);
+            stack.extend(x.children.iter().copied().zip(y.children.iter().copied()));
         }
+        self.river = Some((solver, map));
     }
-}
-
-fn board_for(street: usize, board: &[Card; 5]) -> &[Card] {
-    &board[..[0, 3, 4, 5][street]]
 }
 
 /// One hand, LBR in `seat` (0 is the button). Returns LBR's chip result.
 fn play_hand(
     game: &Hunl,
     cards: &CardAbstraction,
-    blueprint: &Blueprint,
+    opp: &mut Opponent,
     seat: usize,
     rng: &mut Rng,
 ) -> f64 {
     let mut s = game.sample_chance(&game.root(), rng);
     let me = s.hole[seat];
-    let mut range = Range::new(bit(me[0]) | bit(me[1]));
+    // Public ranges: both players' as the other sees them.
+    let mut ranges = [Range::new(0), Range::new(0)];
+    let mut buckets = StreetBuckets::default();
+    let mut street = usize::MAX;
     loop {
         match game.turn(&s) {
             Turn::Terminal => {
@@ -146,19 +225,32 @@ fn play_hand(
             Turn::Player(p) => {
                 let b = game.betting(&s).clone();
                 let board = board_for(b.street, &s.board);
-                range.on_street(cards, b.street, board);
-                let a = if p == seat {
-                    lbr_action(game, blueprint, &s, &range, me, board, rng)
-                } else {
-                    // The blueprint acts with its real hand; LBR updates the
-                    // range with every hand's probability of that action.
-                    let probs = blueprint.probs(s.node, s.buckets[p][b.street]);
-                    let a = rng.sample(&probs);
-                    for h in 0..NUM_HOLES {
-                        if range.weight[h] > 0.0 {
-                            range.weight[h] *= blueprint.probs(s.node, range.bucket[h])[a];
-                        }
+                let bk = buckets.on(cards, b.street, &s.board);
+                if b.street != street {
+                    street = b.street;
+                    for r in &mut ranges {
+                        r.remove(mask(board));
                     }
+                    if street == 3 {
+                        opp.solve(game, &s, &ranges, 1 - seat, bk);
+                    }
+                }
+                let a = if p == seat {
+                    // LBR's view of the opponent's range leaves out its cards.
+                    let mut view = ranges[1 - seat].clone();
+                    view.remove(bit(me[0]) | bit(me[1]));
+                    let a = lbr_action(game, opp, &s, &view.weight, bk, me, board, rng);
+                    if opp.iterations > 0 && street < 3 {
+                        opp.update(&mut ranges[seat], s.node, a, bk);
+                    }
+                    a
+                } else {
+                    // The bot acts with its real hand; LBR updates the range
+                    // with every hand's probability of that action.
+                    let hole = hole_index(s.hole[p][0], s.hole[p][1]);
+                    let probs = opp.probs(s.node, hole, s.buckets[p][b.street]);
+                    let a = rng.sample(&probs);
+                    opp.update(&mut ranges[p], s.node, a, bk);
                     a
                 };
                 s = game.apply(&s, a);
@@ -214,11 +306,13 @@ fn equity(me: [Card; 2], board: &[Card], w: &[f64], rng: &mut Rng) -> f64 {
     if total > 0.0 { won / total } else { 0.5 }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn lbr_action(
     game: &Hunl,
-    blueprint: &Blueprint,
+    opp: &Opponent,
     s: &HunlState,
-    range: &Range,
+    range: &[f64],
+    buckets: &[u16],
     me: [Card; 2],
     board: &[Card],
     rng: &mut Rng,
@@ -227,7 +321,7 @@ fn lbr_action(
     let b = &node.betting;
     let pot = b.pot() as f64;
     let call = b.to_call() as f64;
-    let wp = equity(me, board, &range.weight, rng);
+    let wp = equity(me, board, range, rng);
     let mut best = (0usize, f64::NEG_INFINITY);
     for (i, a) in node.actions.iter().enumerate() {
         let ev = match *a {
@@ -239,16 +333,14 @@ fn lbr_action(
                 let child = node.children[i];
                 let reply = &game.tree.nodes[child as usize];
                 let fold = reply.actions.iter().position(|x| *x == HunlAction::Fold);
-                let mut calling = range.weight.clone();
+                let mut calling = range.to_vec();
                 let (mut folded, mut total) = (0.0, 0.0);
-                for (c, (&w, &bucket)) in calling
-                    .iter_mut()
-                    .zip(range.weight.iter().zip(&range.bucket))
-                {
+                for (h, c) in calling.iter_mut().enumerate() {
+                    let w = range[h];
                     if w <= 0.0 {
                         continue;
                     }
-                    let f = fold.map_or(0.0, |k| blueprint.probs(child, bucket)[k]);
+                    let f = fold.map_or(0.0, |k| opp.probs(child, h, buckets[h])[k]);
                     folded += w * f;
                     total += w;
                     *c = w * (1.0 - f);

@@ -11,6 +11,9 @@
 //! `--only NAME` plays one opponent: `equity`, `calling`, `self` or a
 //! personality id. `--lbr N` also runs Local Best Response for N hands: a
 //! lower bound on how much the blueprint can be exploited.
+//! `--river-solve N` makes the measured bot solve the river in real time
+//! with N iterations per solve (the opponents, `self` included, keep playing
+//! the blueprint), and runs LBR against the river-solving bot too.
 //!
 //! Duplicate mode plays every deal twice with the seats swapped, which
 //! cancels most of the luck of the cards. The interval comes from the
@@ -23,9 +26,9 @@ use ducy_gto::{
     holdem::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
-        bot::GtoBot,
+        bot::{GtoBot, RiverSolving},
         hunl::{BettingTree, Hunl, HunlConfig},
-        lbr::local_best_response,
+        lbr::{LbrResult, lbr_hands},
     },
 };
 use ducy_play::{
@@ -45,6 +48,7 @@ fn main() {
     let mut seed = 1u64;
     let mut only: Option<String> = None;
     let mut lbr = 0usize;
+    let mut river = 0usize;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut v = || it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
@@ -55,6 +59,7 @@ fn main() {
             "--seed" => seed = v().parse().expect("--seed"),
             "--only" => only = Some(v()),
             "--lbr" => lbr = v().replace('_', "").parse().expect("--lbr"),
+            "--river-solve" => river = v().parse().expect("--river-solve"),
             f => panic!("unknown option {f}"),
         }
     }
@@ -80,15 +85,32 @@ fn main() {
             Blueprint::from_profile(&game, &cards, &m.average())
         }
     };
-    if lbr > 0 {
+    let runs = if river > 0 { vec![0, river] } else { vec![0] };
+    let mut per_hand = Vec::new();
+    for &iterations in runs.iter().filter(|_| lbr > 0) {
         let t = Instant::now();
-        let r = local_best_response(&game, &cards, &blueprint, lbr, 99);
+        let hands = lbr_hands(&game, &cards, &blueprint, lbr, 99, iterations);
+        let r = LbrResult::of(&hands);
+        let what = match iterations {
+            0 => "the blueprint".to_string(),
+            n => format!("river solving ({n} iterations)"),
+        };
         println!(
-            "LBR over {} hands: {:.0} ± {:.0} mbb/hand ({:.0}s)",
+            "LBR vs {what} over {} hands: {:.0} ± {:.0} mbb/hand ({:.0}s)",
             r.hands,
             r.mbb_per_hand,
             r.ci95,
             t.elapsed().as_secs_f64()
+        );
+        per_hand.push(hands);
+    }
+    if let [plain, solving] = &per_hand[..] {
+        // The same hands up to the river: compare them pairwise.
+        let diff: Vec<f64> = solving.iter().zip(plain).map(|(a, b)| a - b).collect();
+        let r = LbrResult::of(&diff);
+        println!(
+            "LBR change from river solving: {:+.0} ± {:.0} mbb/hand (paired)",
+            r.mbb_per_hand, r.ci95
         );
     }
     let blueprint = Arc::new(blueprint);
@@ -130,7 +152,8 @@ fn main() {
         let mut rates = Vec::with_capacity(BLOCKS);
         let mut hands = 0;
         // One bot pair for the whole match, so adaptive opponents keep learning.
-        let mut bots: Vec<Box<dyn Bot>> = vec![Box::new(gto(1000)), make(2000)];
+        let me = gto(1000).with_river_solving(RiverSolving::new(river));
+        let mut bots: Vec<Box<dyn Bot>> = vec![Box::new(me), make(2000)];
         for b in 0..BLOCKS {
             let m = MatchConfig::new(rules, per_block, 7919 * b as u64 + 1)
                 .with_starting_stack(config.stack)

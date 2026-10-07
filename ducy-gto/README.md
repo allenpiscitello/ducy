@@ -36,6 +36,9 @@ crate finds equilibria and measures exploitability exactly.
   configurable bet menu (`BetMenu`) and the card abstraction for information
   sets. Its betting follows ducy-play's rules exactly (fuzz-tested against
   `ducy_play::Hand`).
+- `holdem::river`: an exact river solver with safe re-solving, and
+  `holdem::range`: ranges tracked through a hand, for solving the river in
+  real time (see [below](#solving-the-river-in-real-time)).
 - `games::kuhn` and `games::leduc`: Kuhn poker and Leduc hold'em, small games
   with known equilibrium values, for checking the solver.
 
@@ -216,6 +219,93 @@ and decisions average 6 ms (57 ms at worst, a flop bucket computed on the fly).
 Table seats now accept any bot (`TableSeat::with_bot`), not only personality
 bots.
 
+## Solving the river in real time
+
+The blueprint plays the river with 200 buckets and a betting tree whose chip
+amounts can be off from the real hand's. Once the river card is out, the rest
+of the hand is small enough to solve exactly while playing.
+`GtoBot::with_river_solving(RiverSolving::new(200))` does that for every
+river decision:
+
+- **Ranges** (`holdem::range`): both players' ranges are tracked through the
+  hand as the blueprint plays them. Each action multiplies every hand's
+  weight by the blueprint's probability of that action for the hand's
+  bucket. That takes every hand's bucket on each street
+  (`CardAbstraction::buckets`): instant with the full tables, and with the
+  compact abstraction one pass over the runouts builds every hand's equity
+  histogram at once (about 0.2 s for a flop on one core, spread over the
+  cores with the `parallel` feature, instead of 1,081 × 13 ms).
+- **The subgame** (`holdem::river`) starts at the river with the real pot and
+  stacks and the blueprint's post-flop sizes, plus any real bet already made
+  on the river, at its real size.
+- **The solver** runs Discounted CFR on vectors over the 1,081 hands the
+  board allows, every hand kept separate. Showdowns and folds are valued in
+  O(n) from hands sorted by strength, with running per-card sums to leave
+  out opponent hands that share a card.
+- **Safe re-solving:** a resolving gadget (Burch, Johanson and Bowling 2014)
+  lets each opponent hand take, instead of playing the subgame, what a best
+  response gets against the blueprint's own river strategy. At the gadget's
+  equilibrium no opponent hand gains against the solution compared with the
+  blueprint, so solving can't make the bot more exploitable on the river.
+- **Off-tree bets:** when the opponent bets a size the solution doesn't
+  have, the bot solves again with that size added, its own earlier river
+  actions frozen at the strategy it played them with.
+
+`cargo run --release -p ducy-gto --example river_solve` times it with random
+ranges for both players (one core, 200 iterations):
+
+| Board | Pot | Behind | Decisions | 100 iterations | 200 iterations | 1,000 iterations |
+|---|---|---|---|---|---|---|
+| Qs Td 7h 4c 2s | 20 | 190 | 28 | 0.53% (170 ms) | 0.21% (288 ms) | 0.018% (1.3 s) |
+| Ah Kh 8d 8c 3h | 60 | 170 | 20 | 0.29% (122 ms) | 0.10% (215 ms) | 0.008% (1.1 s) |
+| 9s 8s 7d 2c 2h | 120 | 140 | 12 | 0.09% (47 ms) | 0.04% (90 ms) | 0.003% (0.4 s) |
+| Kc Jd 5s 4h 3d | 200 | 100 | 8 | 0.03% (28 ms) | 0.01% (56 ms) | 0.001% (0.3 s) |
+
+Exploitability is in percent of the pot, with the time so far in brackets.
+Deep stacks and a small pot leave the most betting, so they take longest.
+
+The tests check it on known spots:
+
+- **Polar range against a bluff catcher:** for a pot-sized bet, the polar
+  player bluffs one hand for every two value bets, and the bluff catcher
+  calls half the time; exploitability is under 0.05% of the pot.
+- **Exploitability falls toward 0** with random ranges (under 0.25% of the
+  pot after 200 iterations).
+- **The gadget:** no opponent hand does better against the re-solved
+  strategy than against the reference it was given.
+- **Showdown and fold values** match brute force over every pair of hands,
+  ties and shared cards included.
+
+`gto_match --river-solve N` measures it with the real blueprint: a duplicate
+match of the river-solving bot against the plain one (`--only self`), and
+with `--lbr` a paired LBR comparison on the same deals.
+`gto_stress -- DEALS N` checks legality: **0 illegal actions** against every
+opponent with river solving on.
+
+### Measuring it
+
+Measuring river solving against the trained blueprint takes long runs, best
+done on a local machine rather than a cloud session. The trained model is
+in the `gto-hunl-300m` release (`cards.bin` is the compact abstraction):
+
+```sh
+gh release download gto-hunl-300m -p cards.bin -p blueprint.bin
+# Paired LBR on the same deals: the blueprint, then river solving.
+cargo run --release -p ducy-gto --example gto_match -- \
+    --cards cards.bin --blueprint blueprint.bin --only self --deals 10 \
+    --lbr 20000 --river-solve 200
+# Duplicate match: the river-solving bot against the plain blueprint bot.
+cargo run --release -p ducy-gto --example gto_match -- \
+    --cards cards.bin --blueprint blueprint.bin --only self --deals 20000 \
+    --river-solve 200
+```
+
+A short run so far (4 cores) is far too small to tell the two apart: LBR
+wins −237 ± 1,082 mbb/hand against the blueprint and −251 ± 1,077 against
+river solving over 2,000 hands, a paired change of −14 ± 293. With the
+compact abstraction a river solve costs about 0.25 s in all (ranges, then
+200 iterations), so the duplicate match plays about 7 hands a second.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
@@ -225,4 +315,5 @@ bots.
 5. **Done:** Train and store the blueprint strategy (#89)
 6. **Done:** `GtoBot`: play the blueprint in ducy-play, with action translation (#90)
 7. Evaluation: Local Best Response and duplicate matches against the built-in bots (#91)
-8. Real-time depth-limited subgame solving (#92)
+8. Real-time depth-limited subgame solving (#92): **the river is done**;
+   depth-limited solving of the turn is next
