@@ -23,6 +23,11 @@
 //! the bot does (both ranges, the gadget against the blueprint's river), and
 //! LBR plays against that solution there. LBR's own bets are on the menu, so
 //! the bot never needs to re-solve.
+//!
+//! [`lbr_hands_solving`] adds depth-limited turn solving the same way: on
+//! reaching the turn the bot solves its betting (LBR picking among the
+//! biased river continuations, the gadget against the blueprint's turn), and
+//! the river solve then starts from the ranges that solution played.
 
 use std::collections::HashMap;
 
@@ -32,7 +37,8 @@ use super::{
     cards::{Card, NUM_CARDS, bit, hole_cards, hole_index, mask, score},
     hunl::{Hunl, HunlAction, HunlState},
     range::{Range, StreetBuckets, board_for},
-    river::RiverSolver,
+    river::{RiverSolver, RiverTree},
+    turn::{Bias, TurnSolver},
 };
 use crate::{
     game::{Game, Turn},
@@ -94,13 +100,34 @@ pub fn lbr_hands(
     seed: u64,
     river_iterations: usize,
 ) -> Vec<f64> {
+    lbr_hands_solving(game, cards, blueprint, hands, seed, 0, river_iterations)
+}
+
+/// [`lbr_hands`] against a bot that also solves the turn, depth-limited,
+/// with `turn_iterations` per solve (0 plays the blueprint's turn) and 8
+/// rivers dealt per iteration, as `TurnSolving::new` does. Hand `i` is
+/// dealt and played the same way up to the turn whatever the iterations.
+pub fn lbr_hands_solving(
+    game: &Hunl,
+    cards: &CardAbstraction,
+    blueprint: &Blueprint,
+    hands: usize,
+    seed: u64,
+    turn_iterations: usize,
+    river_iterations: usize,
+) -> Vec<f64> {
     let one = |i: usize| -> f64 {
         let mut rng = Rng::for_iteration(seed, i as u64);
         let seat = i % 2;
         let mut opp = Opponent {
             blueprint,
+            cards,
+            turn: None,
             river: None,
+            turn_iterations,
             iterations: river_iterations,
+            // Not drawn from `rng`, so the hand plays the same up to the turn.
+            seed: Rng::for_iteration(seed ^ 0x7475_726e, i as u64).next_u64(),
         };
         play_hand(game, cards, &mut opp, seat, &mut rng) / game.config.big_blind as f64 * 1000.0
     };
@@ -128,19 +155,41 @@ impl LbrResult {
     }
 }
 
-/// The strategy LBR plays against: the blueprint, or on the river a solve
-/// of it with the tree's nodes mapped to the subgame's.
+/// The strategy LBR plays against: the blueprint, or on the turn and river
+/// a solve of it with the tree's nodes mapped to the subgame's.
 struct Opponent<'a> {
     blueprint: &'a Blueprint,
+    cards: &'a CardAbstraction,
+    turn: Option<(TurnSolver, HashMap<u32, u32>)>,
     river: Option<(RiverSolver, HashMap<u32, u32>)>,
+    /// Iterations per turn and river solve (0 for none).
+    turn_iterations: usize,
     iterations: usize,
+    /// Draws the turn solver's sampled rivers.
+    seed: u64,
 }
 
 impl Opponent<'_> {
+    /// Whether the bot solves any street, so both ranges must be tracked.
+    fn solving(&self) -> bool {
+        self.turn_iterations > 0 || self.iterations > 0
+    }
+
+    fn solved(&self, node: u32) -> bool {
+        self.river.as_ref().is_some_and(|r| r.1.contains_key(&node))
+            || self.turn.as_ref().is_some_and(|t| t.1.contains_key(&node))
+    }
+
     /// Action probabilities at tree node `node` for hole index `hole` (in
     /// `bucket`).
     fn probs(&self, node: u32, hole: usize, bucket: u16) -> Vec<f64> {
         if let Some((s, map)) = &self.river
+            && let Some(&sub) = map.get(&node)
+            && let Some(p) = s.probs(sub, hole)
+        {
+            return p;
+        }
+        if let Some((s, map)) = &self.turn
             && let Some(&sub) = map.get(&node)
             && let Some(p) = s.probs(sub, hole)
         {
@@ -151,7 +200,7 @@ impl Opponent<'_> {
 
     /// Updates `range` for action `a` at `node`.
     fn update(&self, range: &mut Range, node: u32, a: usize, buckets: &[u16]) {
-        if self.river.as_ref().is_some_and(|r| r.1.contains_key(&node)) {
+        if self.solved(node) {
             range.update_by(|h| match buckets[h] {
                 u16::MAX => 0.0,
                 b => self.probs(node, h, b)[a],
@@ -186,19 +235,63 @@ impl Opponent<'_> {
         let target = solver.best_response(1 - bot, &reference);
         solver.set_gadget(1 - bot, target);
         solver.run(self.iterations);
-        // Same betting and menu: the subtrees match node for node.
-        let mut map = HashMap::new();
-        let mut stack = vec![(s.node, 0u32)];
-        while let Some((t, r)) = stack.pop() {
-            let (x, y) = (&game.tree.nodes[t as usize], &solver.tree.nodes[r as usize]);
-            if x.actions != y.actions {
-                continue;
-            }
-            map.insert(t, r);
-            stack.extend(x.children.iter().copied().zip(y.children.iter().copied()));
-        }
+        let map = node_map(game, s.node, &solver.tree);
         self.river = Some((solver, map));
     }
+
+    /// Solves the turn from tree node `node`, the way the bot does with
+    /// `bot` playing the solution and the other player choosing among the
+    /// river continuations.
+    fn solve_turn(
+        &mut self,
+        game: &Hunl,
+        s: &HunlState,
+        ranges: &[Range; 2],
+        bot: usize,
+        buckets: &[u16],
+    ) {
+        if self.turn_iterations == 0 || ranges.iter().any(|r| r.total() <= 0.0) {
+            return;
+        }
+        let root = &game.tree.nodes[s.node as usize].betting;
+        let board: [Card; 4] = s.board[..4].try_into().expect("a turn board");
+        let mut solver = TurnSolver::from_blueprint(
+            board,
+            root,
+            &game.config,
+            &[],
+            [&ranges[0].weight, &ranges[1].weight],
+            self.cards,
+            self.blueprint,
+            &game.tree,
+            s.node,
+        );
+        solver.set_chooser(1 - bot, &Bias::ALL);
+        solver.set_river_samples(8, self.seed);
+        let reference = solver.blueprint_strategy(self.blueprint, &game.tree, s.node, buckets);
+        let target = solver.best_response(1 - bot, &reference);
+        solver.set_gadget(1 - bot, target);
+        solver.run(self.turn_iterations);
+        let map = node_map(game, s.node, &solver.tree);
+        self.turn = Some((solver, map));
+    }
+}
+
+/// The blueprint tree's nodes from `root` mapped to a subgame tree's: with
+/// the same betting and menu they match node for node, down to the
+/// subgame's leaves.
+fn node_map(game: &Hunl, root: u32, sub: &RiverTree) -> HashMap<u32, u32> {
+    let mut map = HashMap::new();
+    let mut stack = vec![(root, 0u32)];
+    while let Some((t, r)) = stack.pop() {
+        let (x, y) = (&game.tree.nodes[t as usize], &sub.nodes[r as usize]);
+        if x.actions != y.actions {
+            continue;
+        }
+        map.insert(t, r);
+        stack.extend(x.children.iter().copied().zip(y.children.iter().copied()));
+    }
+    map
 }
 
 /// One hand, LBR in `seat` (0 is the button). Returns LBR's chip result.
@@ -231,8 +324,10 @@ fn play_hand(
                     for r in &mut ranges {
                         r.remove(mask(board));
                     }
-                    if street == 3 {
-                        opp.solve(game, &s, &ranges, 1 - seat, bk);
+                    match street {
+                        2 => opp.solve_turn(game, &s, &ranges, 1 - seat, bk),
+                        3 => opp.solve(game, &s, &ranges, 1 - seat, bk),
+                        _ => {}
                     }
                 }
                 let a = if p == seat {
@@ -240,7 +335,7 @@ fn play_hand(
                     let mut view = ranges[1 - seat].clone();
                     view.remove(bit(me[0]) | bit(me[1]));
                     let a = lbr_action(game, opp, &s, &view.weight, bk, me, board, rng);
-                    if opp.iterations > 0 && street < 3 {
+                    if opp.solving() && street < 3 {
                         opp.update(&mut ranges[seat], s.node, a, bk);
                     }
                     a

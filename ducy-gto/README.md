@@ -406,10 +406,22 @@ rivers per iteration:
 | Ah Kh 8d 8c | 60 | 170 | 19 | 1.6% (2.7 s) | 0.50% (5.8 s) | 0.48% (15.9 s) |
 | Kc Jd 5s 4h | 120 | 140 | 11 | 0.46% (1.3 s) | 0.21% (2.4 s) | 0.28% (8.2 s) |
 
-Exploitability is in the depth-limited game, in percent of the pot. That is
-too slow to play at a table yet: the next step is making a leaf cheaper
-(fewer passes per river, no per-node allocation), then measuring the bot
-with LBR and against the plain blueprint bot as for the river.
+Exploitability is in the depth-limited game, in percent of the pot. Those
+times are from before leaves were valued from per-bucket tables: as the bot
+uses it (the real model, 200 river buckets, the opponent choosing, 8
+rivers), an iteration now takes 60–70 ms, down from 180–330 ms
+(`examples/turn_bench`).
+
+To measure the bot, `gto_match --turn-solve N` (with `--river-solve`) runs
+LBR against turn and river solving paired with river solving alone
+(`lbr::lbr_hands_solving`), and adds a `river-solve` opponent for a
+duplicate match of the two:
+
+```sh
+cargo run --release -p ducy-gto --example gto_match -- \
+    --cards cards.bin --blueprint blueprint.bin --only river-solve \
+    --deals 2000 --lbr 4000 --turn-solve 50 --river-solve 200
+```
 
 The tests check that check-down leaf values match brute force over every
 pair of hands and river, that exploitability falls toward 0 (with all rivers

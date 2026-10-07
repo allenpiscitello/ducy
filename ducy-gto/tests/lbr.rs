@@ -4,7 +4,7 @@ use ducy_gto::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
         hunl::{Hunl, HunlAction, HunlConfig},
-        lbr::local_best_response,
+        lbr::{lbr_hands, lbr_hands_solving, local_best_response},
     },
 };
 
@@ -55,4 +55,27 @@ fn lbr_beats_a_random_strategy() {
     let r = local_best_response(&game, &cards, &uniform, 200, 4);
     println!("{r:?}");
     assert!(r.mbb_per_hand > 1000.0, "{r:?}");
+}
+
+#[test]
+fn lbr_against_turn_solving_pairs_hands_up_to_the_turn() {
+    let cards = CardAbstraction::quick(6);
+    let game = Hunl::new(HunlConfig::default(), Some(&cards));
+    let uniform = Blueprint::from_profile(&game, &cards, &Profile::new());
+    let plain = lbr_hands(&game, &cards, &uniform, 200, 5, 5);
+    let solving = lbr_hands_solving(&game, &cards, &uniform, 200, 5, 5, 5);
+    assert_eq!(solving.len(), 200);
+    assert!(solving.iter().all(|x| x.is_finite()));
+    // Same seeds, same run.
+    assert_eq!(
+        solving,
+        lbr_hands_solving(&game, &cards, &uniform, 200, 5, 5, 5)
+    );
+    // With no turn iterations it's the river-solving run.
+    assert_eq!(
+        plain,
+        lbr_hands_solving(&game, &cards, &uniform, 200, 5, 0, 5)
+    );
+    // Some hands reach the turn and play differently against the solve.
+    assert_ne!(plain, solving);
 }
