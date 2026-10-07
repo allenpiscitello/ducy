@@ -31,7 +31,7 @@
 
 use std::collections::HashMap;
 
-use ducy_play::{BettingStructure, Event, HandSummary, Variant};
+use ducy_play::{BettingStructure, Event, Hand, HandSummary, Variant};
 
 use super::{
     abstraction::CardAbstraction,
@@ -129,6 +129,44 @@ impl HandRecord {
             net: summary.result.net[summary.seat],
             stacks: std::array::from_fn(|i| {
                 (summary.result.final_stacks[i] as i64 - summary.result.net[i]).max(0) as u64
+            }),
+        })
+    }
+
+    /// The hand being played, as `seat` has seen it so far: their own cards,
+    /// the board dealt so far and every action so far. Nothing else of the
+    /// deal, so neither the other player's cards nor the cards to come can
+    /// affect a review. `None` unless it's heads-up no-limit Hold'em.
+    pub fn in_progress(hand: &Hand, seat: usize) -> Option<Self> {
+        let rules = hand.rules();
+        if hand.num_seats() != 2
+            || seat >= 2
+            || rules.variant != Variant::Holdem
+            || rules.structure != BettingStructure::NoLimit
+        {
+            return None;
+        }
+        let hole: Vec<Card> = hand.deal().hole_cards()[seat]
+            .iter(false)
+            .map(from_ducy)
+            .collect();
+        let history = hand.events().to_vec();
+        let button = history.iter().find_map(|e| match *e {
+            Event::SmallBlind { seat, .. } => Some(seat),
+            _ => None,
+        })?;
+        let result = hand.result();
+        Some(Self {
+            seat,
+            button,
+            hole: hole.try_into().ok()?,
+            board: hand.board().iter().copied().map(from_ducy).collect(),
+            history,
+            big_blind: rules.big_blind,
+            net: result.map_or(0, |r| r.net[seat]),
+            stacks: std::array::from_fn(|i| match result {
+                Some(r) => (r.final_stacks[i] as i64 - r.net[i]).max(0) as u64,
+                None => hand.stack(i) + hand.contributed(i),
             }),
         })
     }
@@ -696,14 +734,7 @@ impl Reviewer<'_> {
             self.config.seed,
         );
         let me = rec.side();
-        let eval = Evaluator::new(self.tree, self.blueprint, self.cards, self.tree_big_blind);
-        // The replay worked out every street's buckets already.
-        for n in [0, 3, 4, 5] {
-            if n <= rec.board.len() {
-                let board = &rec.board[..n];
-                eval.know_buckets(board, cache.get(self.cards, board));
-            }
-        }
+        let eval = self.evaluator(rec, cache);
         let mut rng = Rng::new(self.config.seed ^ 0x7e1e);
         let bb = rec.big_blind.max(1) as f64;
         let mut out = Vec::new();
@@ -726,6 +757,42 @@ impl Reviewer<'_> {
             result: rec.net as f64 / bb,
             note: self.depth_note(rec),
         }
+    }
+
+    /// Reviews only the player's most recent decision in `rec`, e.g. a hand
+    /// still being played ([`HandRecord::in_progress`]), so feedback can
+    /// follow each action. `None` before the player's first decision. The
+    /// grade matches [`Self::review`]'s for the same decision, within the
+    /// sampling error.
+    pub fn review_last_decision(
+        &self,
+        rec: &HandRecord,
+        cache: &mut BucketCache,
+    ) -> Option<DecisionReview> {
+        let decisions = replay(
+            rec,
+            self.tree,
+            self.cards,
+            self.blueprint,
+            cache,
+            self.config.seed,
+        );
+        let d = decisions.iter().rev().find(|d| d.player == rec.side())?;
+        let eval = self.evaluator(rec, cache);
+        let mut rng = Rng::new(self.config.seed ^ 0x7e1e);
+        Some(self.decision(rec, d, &eval, &mut rng, rec.big_blind.max(1) as f64))
+    }
+
+    /// An evaluator that knows every street's buckets the replay worked out.
+    fn evaluator(&self, rec: &HandRecord, cache: &mut BucketCache) -> Evaluator<'_> {
+        let eval = Evaluator::new(self.tree, self.blueprint, self.cards, self.tree_big_blind);
+        for n in [0, 3, 4, 5] {
+            if n <= rec.board.len() {
+                let board = &rec.board[..n];
+                eval.know_buckets(board, cache.get(self.cards, board));
+            }
+        }
+        eval
     }
 
     /// A note when the hand's effective stack is more than 10% off the
