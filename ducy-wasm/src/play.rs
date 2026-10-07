@@ -11,8 +11,8 @@
 //! the page passes it each player's messages and sends back what it returns.
 
 use ducy_play::{
-    Action, ChipRequest, Command, Outgoing, Personality, Table, TableHost, TableRules, TableSeat,
-    Variant,
+    Action, ChipRequest, Command, Departure, Outgoing, Personality, SeatedPlayer, Table, TableHost,
+    TableRules, TableSeat, Variant,
 };
 use std::{cell::RefCell, sync::Arc};
 
@@ -371,6 +371,10 @@ struct HostResult<'a> {
     buy_in: Option<BuyIn>,
     #[serde(rename = "hostPendingChips")]
     host_pending_chips: u64,
+    /// People at the table and their chips, and people who left (with a
+    /// bank) and the chips they took, since the last call.
+    players: Vec<SeatedPlayer>,
+    departed: Vec<Departure>,
     out: Vec<Message<'a>>,
 }
 
@@ -475,8 +479,41 @@ impl MultiTable {
         Ok(MultiTable { host })
     }
 
-    fn result(&self, out: &[Outgoing], now: u64) -> Result<JsValue, JsError> {
+    /// A club table: `seats` empty seats (2 to 10) for people, and no seat
+    /// for the host, who only watches (the host's view shows no cards before
+    /// they're shown down). Chips are real: people ask for them within
+    /// `min_buy_in` to `max_buy_in`, the page approves or denies each request
+    /// against the player's club balance, and `departed` in each result says
+    /// what everyone who leaves takes with them.
+    #[allow(clippy::too_many_arguments)]
+    pub fn club(
+        seats: usize,
+        min_buy_in: u64,
+        max_buy_in: u64,
+        small_blind: u64,
+        big_blind: u64,
+        seed: u64,
+        game: Option<String>,
+        turn_ms: u64,
+    ) -> Result<MultiTable, JsError> {
+        let rules = rules_for(game.as_deref(), small_blind, big_blind)?;
+        if small_blind == 0 || big_blind < small_blind || min_buy_in < big_blind {
+            return Err(JsError::new("invalid blinds or buy-in"));
+        }
+        if !(2..=ducy_play::MAX_PLAYERS).contains(&seats) {
+            return Err(JsError::new("a table seats 2 to 10"));
+        }
+        let all = (0..seats).map(|_| TableSeat::empty()).collect();
+        let table = Table::new(rules, all, min_buy_in, seed).map_err(err)?;
+        let host = TableHost::without_host(table, turn_ms, min_buy_in, max_buy_in).map_err(err)?;
+        Ok(MultiTable { host })
+    }
+
+    fn result(&mut self, out: &[Outgoing], now: u64) -> Result<JsValue, JsError> {
+        let departed = self.host.take_departures();
         to_js(&HostResult {
+            players: self.host.seated(),
+            departed,
             seq: self.host.seq(),
             state: self.host.host_view(),
             bot_to_act: self.host.auto_to_act(),
@@ -500,7 +537,7 @@ impl MultiTable {
     }
 
     /// The host's view, with no messages.
-    pub fn state(&self, now: f64) -> Result<JsValue, JsError> {
+    pub fn state(&mut self, now: f64) -> Result<JsValue, JsError> {
         self.result(&[], now as u64)
     }
 

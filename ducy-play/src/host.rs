@@ -98,6 +98,33 @@ pub struct ChipRequest {
     pub stack: u64,
 }
 
+/// Someone who gave their seat back at a table with a bank, and the chips
+/// they took with them: their stack plus any chips approved but not yet
+/// added. The app returns these to wherever the player's chips came from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Departure {
+    pub client_id: String,
+    pub seat: usize,
+    pub chips: u64,
+}
+
+/// A person at the table and the chips that are theirs: their stack (none
+/// yet if they sit down at the next hand) plus chips approved but not yet
+/// added. Between hands this is everything they'd leave with; during a hand
+/// it leaves out what they've put in the pot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SeatedPlayer {
+    pub client_id: String,
+    pub seat: usize,
+    pub chips: u64,
+    /// Sits down at the next hand.
+    pub pending: bool,
+    /// Gives the seat back once this hand is over.
+    pub leaving: bool,
+}
+
 /// An update and the client it's for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outgoing {
@@ -149,6 +176,10 @@ pub struct TableHost {
     bank: Option<Bank>,
     /// The host's own chips approved during a hand they're in.
     host_approved: u64,
+    /// Whether seat 0 is the host's (see [`Self::without_host`]).
+    has_host: bool,
+    /// People who left with chips since [`Self::take_departures`].
+    departed: Vec<Departure>,
 }
 
 /// Most characters kept from a player's name.
@@ -166,10 +197,27 @@ impl TableHost {
         if (1..open.len()).any(|s| !open[s] && table.seat(s).is_empty()) {
             return Err(PlayError::InvalidPlayerCount);
         }
+        Ok(Self::build(table, open, turn_ms, true))
+    }
+
+    /// Hosts `table` with no seat for the host, e.g. a club table the host
+    /// runs without playing: every seat is open to people and starts empty,
+    /// and chips are real, within `min` to `max` (see [`Self::with_bank`]).
+    /// The host only watches: [`Self::host_view`] shows no cards that
+    /// haven't been shown down, and the host can't act or take chips.
+    pub fn without_host(table: Table, turn_ms: u64, min: u64, max: u64) -> Result<Self, PlayError> {
+        if (0..table.num_seats()).any(|s| !table.seat(s).is_empty()) {
+            return Err(PlayError::InvalidPlayerCount);
+        }
+        let open = vec![true; table.num_seats()];
+        Self::build(table, open, turn_ms, false).with_bank(min, max)
+    }
+
+    fn build(table: Table, open: Vec<bool>, turn_ms: u64, has_host: bool) -> Self {
         let bot_ids = (0..table.num_seats())
             .map(|s| table.seat(s).id.clone())
             .collect();
-        Ok(Self {
+        Self {
             table,
             open,
             players: Vec::new(),
@@ -180,7 +228,9 @@ impl TableHost {
             bot_ids,
             bank: None,
             host_approved: 0,
-        })
+            has_host,
+            departed: Vec::new(),
+        }
     }
 
     /// Makes chips real: stacks carry over, people sit down with no chips,
@@ -192,8 +242,9 @@ impl TableHost {
             return Err(PlayError::InvalidSetup);
         }
         self.table.set_top_up(false);
-        // Empty seats hold no chips.
-        for seat in 1..self.table.num_seats() {
+        // Empty seats hold no chips (seat 0 too, without a host).
+        let first = usize::from(self.has_host);
+        for seat in first..self.table.num_seats() {
             if self.table.seat(seat).is_empty() {
                 self.table.set_stack(seat, 0)?;
             }
@@ -258,6 +309,9 @@ impl TableHost {
     /// The host adds chips to their own seat, within the limits: now, or
     /// before the next hand if they're in this one.
     pub fn host_chips(&mut self, amount: u64, now: u64) -> Result<Vec<Outgoing>, PlayError> {
+        if !self.has_host {
+            return Err(PlayError::IllegalAction);
+        }
         let stack = self.table.stack(0) + self.host_approved;
         self.check_request(stack, amount)?;
         if self.playing(0) {
@@ -297,9 +351,42 @@ impl TableHost {
         self.seq
     }
 
-    /// The host's own view (seat 0).
+    /// The host's own view (seat 0). Without a host seat, a spectator's view
+    /// from seat 0: no one's cards until they're shown down, and nothing to
+    /// act on.
     pub fn host_view(&self) -> TableView {
-        self.table.view(0)
+        let mut view = self.table.view(0);
+        if !self.has_host {
+            view.legal = None;
+            let s = &mut view.seats[0];
+            if !(view.showdown && !s.folded) {
+                s.cards = None;
+            }
+        }
+        view
+    }
+
+    /// People at the table and their chips (see [`SeatedPlayer`]).
+    pub fn seated(&self) -> Vec<SeatedPlayer> {
+        self.players
+            .iter()
+            .map(|p| SeatedPlayer {
+                client_id: p.client_id.clone(),
+                seat: p.seat,
+                chips: if p.pending {
+                    0
+                } else {
+                    self.table.stack(p.seat)
+                } + p.approved,
+                pending: p.pending,
+                leaving: p.leaving,
+            })
+            .collect()
+    }
+
+    /// People who left with chips since the last call, oldest first.
+    pub fn take_departures(&mut self) -> Vec<Departure> {
+        std::mem::take(&mut self.departed)
     }
 
     /// Time left for the person acting, if any.
@@ -492,6 +579,10 @@ impl TableHost {
         amount: u64,
         now: u64,
     ) -> Result<Vec<Outgoing>, PlayError> {
+        // Without a host seat, seat 0 is someone else's.
+        if !self.has_host {
+            return Err(PlayError::IllegalAction);
+        }
         let action = parse_action(kind, amount).ok_or(PlayError::IllegalAction)?;
         self.table.act(0, action)?;
         Ok(self.changed(now))
@@ -605,6 +696,18 @@ impl TableHost {
 
     fn release_seat(&mut self, i: usize) {
         let p = self.players.remove(i);
+        if self.bank.is_some() {
+            let stack = if p.pending {
+                0
+            } else {
+                self.table.stack(p.seat)
+            };
+            self.departed.push(Departure {
+                client_id: p.client_id.clone(),
+                seat: p.seat,
+                chips: stack + p.approved,
+            });
+        }
         if p.pending {
             return;
         }
