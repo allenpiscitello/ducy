@@ -40,8 +40,17 @@ pub enum Command {
         #[cfg_attr(feature = "serde", serde(default))]
         amount: u64,
     },
-    /// Back after being away (timed out twice).
-    SitIn,
+    /// Sit out of upcoming hands, keeping the seat: no blinds while out,
+    /// and the seat is given up after the table's sit-out limit (see
+    /// [`TableHost::set_sit_out_limit`]).
+    SitOut,
+    /// Back after sitting out or being away. Blinds missed while out are
+    /// posted at once (one small blind dead, one big blind live), or, with
+    /// `wait_for_big_blind`, by waiting until the big blind comes round.
+    SitIn {
+        #[cfg_attr(feature = "serde", serde(default))]
+        wait_for_big_blind: bool,
+    },
     /// Give the seat back (to its bot, or empty).
     Leave,
     /// Ask the host for `amount` more chips (0 withdraws the request). The
@@ -68,6 +77,12 @@ pub enum Update {
             serde(default, skip_serializing_if = "Option::is_none")
         )]
         chips: Option<ChipsView>,
+        /// Your seat: sitting out, missed blinds, time left before it's given up.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        me: Option<SeatStatus>,
     },
     /// Your command was refused.
     Rejected { reason: String },
@@ -85,6 +100,21 @@ pub struct ChipsView {
     pub requested: u64,
     /// Chips approved, added before the next hand.
     pub approved: u64,
+}
+
+/// A player's own seat, sent with each state.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SeatStatus {
+    /// Out by choice, timed out or disconnected: not dealt in.
+    pub sitting_out: bool,
+    /// Back, but waiting for the big blind to be dealt in.
+    pub waiting_for_big_blind: bool,
+    /// Blinds missed while out, posted on coming back.
+    pub missed_small_blind: bool,
+    pub missed_big_blind: bool,
+    /// Time left before the seat is given up, while out (with a sit-out limit).
+    pub out_ms_left: Option<u64>,
 }
 
 /// A request for chips, for the host to approve or deny.
@@ -149,6 +179,11 @@ struct Player {
     requested: u64,
     /// Chips approved during a hand they're in, added before the next.
     approved: u64,
+    /// Sitting out by choice ([`Command::SitOut`]).
+    out_by_choice: bool,
+    /// When they last went out (by choice, timing out or disconnecting),
+    /// for the sit-out limit.
+    out_since: Option<u64>,
 }
 
 /// A table's buy-in limits, in chips.
@@ -180,6 +215,8 @@ pub struct TableHost {
     has_host: bool,
     /// People who left with chips since [`Self::take_departures`].
     departed: Vec<Departure>,
+    /// Milliseconds a person may sit out before the seat is given up (0: no limit).
+    sit_out_limit_ms: u64,
 }
 
 /// Most characters kept from a player's name.
@@ -230,6 +267,7 @@ impl TableHost {
             host_approved: 0,
             has_host,
             departed: Vec::new(),
+            sit_out_limit_ms: 0,
         }
     }
 
@@ -422,10 +460,14 @@ impl TableHost {
         let idx = self.players.iter().position(|p| p.client_id == client_id);
         match (command, idx) {
             (Command::Join { .. }, Some(i)) => {
-                // Reconnecting: same seat, back in action.
+                // Reconnecting: same seat, back in action (unless they chose
+                // to sit out).
                 let p = &mut self.players[i];
                 p.connected = true;
                 p.timeouts = 0;
+                if !p.out_by_choice {
+                    p.out_since = None;
+                }
                 let seat = p.seat;
                 let pending = p.pending;
                 if !pending {
@@ -466,6 +508,8 @@ impl TableHost {
                     missed: 0,
                     requested: 0,
                     approved: 0,
+                    out_by_choice: false,
+                    out_since: None,
                 });
                 if !pending {
                     self.take_seat(seat, name);
@@ -493,12 +537,26 @@ impl TableHost {
                     Err(_) => reject("illegal action"),
                 }
             }
-            (Command::SitIn, Some(i)) => {
+            (Command::SitOut, Some(i)) => {
+                let p = &mut self.players[i];
+                p.out_by_choice = true;
+                p.out_since.get_or_insert(now);
+                let (seat, pending) = (p.seat, p.pending);
+                // Out from the next hand; between hands, at once.
+                if !pending && !self.table.in_hand() {
+                    self.table.seat_mut(seat).sitting_out = true;
+                }
+                self.changed(now)
+            }
+            (Command::SitIn { wait_for_big_blind }, Some(i)) => {
                 let p = &mut self.players[i];
                 p.timeouts = 0;
+                p.out_by_choice = false;
+                p.out_since = None;
                 let seat = p.seat;
                 if !p.pending && !p.leaving {
                     self.table.seat_mut(seat).away = false;
+                    self.table.sit_in(seat, wait_for_big_blind);
                 }
                 self.changed(now)
             }
@@ -565,11 +623,19 @@ impl TableHost {
             return Vec::new();
         };
         p.connected = false;
+        p.out_since.get_or_insert(now);
         let seat = p.seat;
         if !p.pending {
             self.table.seat_mut(seat).away = true;
         }
         self.changed(now)
+    }
+
+    /// How long a person may sit out (by choice, timed out or disconnected)
+    /// before their seat is given up, in milliseconds; 0 for no limit.
+    /// Checked by [`Self::tick`].
+    pub fn set_sit_out_limit(&mut self, ms: u64) {
+        self.sit_out_limit_ms = ms;
     }
 
     /// The host's own action (seat 0).
@@ -635,7 +701,7 @@ impl TableHost {
                 }
             }
             // Away (disconnected, or timed out twice): not dealt in.
-            let away = self.table.seat(seat).away;
+            let away = self.table.seat(seat).away || self.players[i].out_by_choice;
             self.table.seat_mut(seat).sitting_out = away;
         }
         self.table.new_hand()?;
@@ -654,25 +720,62 @@ impl TableHost {
     /// Runs the turn clock: a person out of time checks or folds, and after
     /// two timeouts in a row they're away until they sit back in.
     pub fn tick(&mut self, now: u64) -> Vec<Outgoing> {
+        let mut out = self.expire_sit_outs(now);
         let Some(deadline) = self.deadline else {
-            return Vec::new();
+            return out;
         };
         if now < deadline {
-            return Vec::new();
+            return out;
         }
         let Some(seat) = self.table.to_act() else {
-            return Vec::new();
+            return out;
         };
         if self.table.act_default(seat).is_err() {
-            return Vec::new();
+            return out;
         }
         if let Some(p) = self.players.iter_mut().find(|p| p.seat == seat) {
             p.timeouts += 1;
             if p.timeouts >= 2 {
                 self.table.seat_mut(seat).away = true;
+                p.out_since.get_or_insert(now);
             }
         }
-        self.changed(now)
+        out.extend(self.changed(now));
+        out
+    }
+
+    /// People out longer than the sit-out limit give their seat up (with
+    /// their chips, at a table with a bank); they're told why first.
+    fn expire_sit_outs(&mut self, now: u64) -> Vec<Outgoing> {
+        if self.sit_out_limit_ms == 0 {
+            return Vec::new();
+        }
+        let limit = self.sit_out_limit_ms;
+        let expired: Vec<String> = self
+            .players
+            .iter()
+            .filter(|p| !p.leaving && p.out_since.is_some_and(|t| now.saturating_sub(t) >= limit))
+            .map(|p| p.client_id.clone())
+            .collect();
+        if expired.is_empty() {
+            return Vec::new();
+        }
+        let mut out: Vec<Outgoing> = expired
+            .iter()
+            .map(|c| Outgoing {
+                to: c.clone(),
+                update: Update::Rejected {
+                    reason: "sat out too long: your seat was given up".to_string(),
+                },
+            })
+            .collect();
+        for c in &expired {
+            if let Some(i) = self.players.iter().position(|p| &p.client_id == c) {
+                self.remove_player(i);
+            }
+        }
+        out.extend(self.changed(now));
+        out
     }
 
     fn take_seat(&mut self, seat: usize, name: String) {
@@ -783,6 +886,18 @@ impl TableHost {
                     requested: p.requested,
                     approved: p.approved,
                 });
+                let seat = self.table.seat(p.seat);
+                let (missed_small_blind, missed_big_blind) = self.table.missed_blinds(p.seat);
+                let me = SeatStatus {
+                    sitting_out: p.out_by_choice || seat.away || seat.sitting_out,
+                    waiting_for_big_blind: self.table.waiting_for_big_blind(p.seat),
+                    missed_small_blind,
+                    missed_big_blind,
+                    out_ms_left: p
+                        .out_since
+                        .filter(|_| self.sit_out_limit_ms > 0)
+                        .map(|t| self.sit_out_limit_ms.saturating_sub(now.saturating_sub(t))),
+                };
                 Outgoing {
                     to: p.client_id.clone(),
                     update: Update::State {
@@ -790,6 +905,7 @@ impl TableHost {
                         view: Box::new(view),
                         turn_ms_left,
                         chips,
+                        me: Some(me),
                     },
                 }
             })

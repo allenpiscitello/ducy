@@ -648,6 +648,14 @@ impl MultiTable {
         self.result(&out, now as u64)
     }
 
+    /// How long a person may sit out before their seat is given up (and,
+    /// with a bank, their chips leave with them), in milliseconds; 0 for no
+    /// limit. Checked on each `tick`.
+    #[wasm_bindgen(js_name = setSitOutLimit)]
+    pub fn set_sit_out_limit(&mut self, ms: f64) {
+        self.host.set_sit_out_limit(ms as u64);
+    }
+
     /// Approves the chips the player in `seat` asked for.
     #[wasm_bindgen(js_name = approveChips)]
     pub fn approve_chips(&mut self, seat: usize, now: f64) -> Result<JsValue, JsError> {

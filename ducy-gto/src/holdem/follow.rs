@@ -114,6 +114,14 @@ impl Follower {
     ) {
         match *e {
             Event::Ante { seat, amount } => self.real.contributed[side(seat)] += amount,
+            // Heads-up GTO tables have no sitting out, but follow it anyway:
+            // the dead part is like an ante, the live part like a blind.
+            Event::Post { seat, dead, live } => {
+                let p = side(seat);
+                self.real.contributed[p] += dead + live;
+                self.real.street_bet[p] += live;
+                self.real.current_bet = self.real.current_bet.max(self.real.street_bet[p]);
+            }
             Event::SmallBlind { seat, amount } | Event::BigBlind { seat, amount } => {
                 let p = side(seat);
                 self.real.street_bet[p] += amount;
