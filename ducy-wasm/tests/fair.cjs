@@ -25,4 +25,38 @@ const all = [...deal.hole_cards.flat(), ...deal.board];
 assert.equal(new Set(all).size, all.length, 'no card twice');
 
 assert.throws(() => w.fairSeed(['xyz']), /hex/);
+
+// A club table (MultiTable) dealing from the seed (#170): each player gets
+// exactly the cards fairDeal gives their seat, through a save and restore.
+let now = 1000;
+const t = () => (now += 10);
+const ids = ['ann', 'bo', 'cy'];
+const table = w.MultiTable.club(4, 40n, 200n, 1n, 2n, 5n, undefined, 30000n);
+ids.forEach((id, seat) => {
+  table.handle(id, {type: 'join', name: id}, t());
+  table.handle(id, {type: 'request_chips', amount: 100}, t());
+  table.approveChips(seat, t());
+});
+// A hand is a set of cards: fairDeal lists them in deck order, views as dealt.
+const myCards = (r, id) => [...r.out.filter(m => m.to === id && m.data.type === 'state').pop().data.view.seats[0].cards].sort();
+const expected = w.fairDeal('nlhe', 3, seed).hole_cards.map(h => [...h].sort());
+let r = table.newHand(t(), seed);
+assert.equal(r.seed, seed, 'the result names the seed');
+ids.forEach((id, i) => assert.deepEqual(myCards(r, id), expected[i], `${id} holds the seed's cards`));
+
+const back = w.MultiTable.restore(table.save(t()), t());
+for (const id of ids) r = back.handle(id, {type: 'join', name: id}, t());
+ids.forEach((id, i) => assert.deepEqual(myCards(r, id), expected[i], `${id} keeps them after a restore`));
+
+// Without a seed, a secure deal as before, and the result says so.
+const plain = w.MultiTable.club(4, 40n, 200n, 1n, 2n, 5n, undefined, 30000n);
+ids.slice(0, 2).forEach((id, seat) => {
+  plain.handle(id, {type: 'join', name: id}, t());
+  plain.handle(id, {type: 'request_chips', amount: 100}, t());
+  plain.approveChips(seat, t());
+});
+r = plain.newHand(t());
+assert.equal(r.seed, null, 'no seed: a secure deal');
+assert.equal(plain.state(t()).seed, undefined, 'other results carry no seed');
+assert.throws(() => w.MultiTable.club(4, 40n, 200n, 1n, 2n, 5n, undefined, 30000n).newHand(t(), 'nothex'), /hex/);
 console.log('fair deals ok');

@@ -595,6 +595,10 @@ struct HostResult<'a> {
     /// the last call: the app returns them to the player (ducy-play Refund).
     refunds: Vec<Refund>,
     out: Vec<Message<'a>>,
+    /// Only from `newHand`: the fair-deal seed the hand was dealt from (hex),
+    /// or null for a secure random deal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seed: Option<Option<String>>,
 }
 
 #[derive(Serialize)]
@@ -735,6 +739,15 @@ impl MultiTable {
     }
 
     fn result(&mut self, out: &[Outgoing], now: u64) -> Result<JsValue, JsError> {
+        self.result_with_seed(out, now, None)
+    }
+
+    fn result_with_seed(
+        &mut self,
+        out: &[Outgoing],
+        now: u64,
+        seed: Option<Option<String>>,
+    ) -> Result<JsValue, JsError> {
         let departed = self.host.take_departures();
         let refunds = self.host.take_refunds();
         to_js(&HostResult {
@@ -760,6 +773,7 @@ impl MultiTable {
                     data: &o.update,
                 })
                 .collect(),
+            seed,
         })
     }
 
@@ -789,11 +803,21 @@ impl MultiTable {
         self.result(&out, now as u64)
     }
 
-    /// Deals the next hand.
+    /// Deals the next hand. With `seed` (64 hex digits, from `fairSeed`), it's
+    /// dealt from that seed, card for card as `fairDeal` gives it, so everyone
+    /// can check it; without, from secure randomness as before. The result's
+    /// `seed` says which: the seed, or null.
     #[wasm_bindgen(js_name = newHand)]
-    pub fn new_hand(&mut self, now: f64) -> Result<JsValue, JsError> {
-        let out = self.host.new_hand(now as u64).map_err(err)?;
-        self.result(&out, now as u64)
+    pub fn new_hand(&mut self, now: f64, seed: Option<String>) -> Result<JsValue, JsError> {
+        let out = match &seed {
+            Some(s) => {
+                let bytes = crate::fair::bytes32(s)?;
+                self.host.new_hand_from_seed(now as u64, &bytes)
+            }
+            None => self.host.new_hand(now as u64),
+        }
+        .map_err(err)?;
+        self.result_with_seed(&out, now as u64, Some(seed.map(|s| s.to_lowercase())))
     }
 
     /// Lets a bot (or an away player) act.

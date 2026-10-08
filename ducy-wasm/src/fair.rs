@@ -14,7 +14,7 @@ fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
-fn bytes32(s: &str) -> Result<Bytes32, JsError> {
+pub(crate) fn bytes32(s: &str) -> Result<Bytes32, JsError> {
     let bad = || JsError::new("expected 64 hex digits");
     if s.len() != 64 {
         return Err(bad());
