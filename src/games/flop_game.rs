@@ -49,16 +49,10 @@ impl FlopGameState {
         self.remaining_cards_in_deck
     }
 
+    /// Board cards still to come: 5 minus those known (a partial flop of
+    /// one or two cards counts too).
     pub(crate) fn cards_needed(&self) -> usize {
-        if self.flop.is_empty() {
-            5
-        } else if self.turn.is_none() {
-            2
-        } else if self.river.is_none() {
-            1
-        } else {
-            0
-        }
+        5 - self.community_cards.num_cards() as usize
     }
 
     /// Number of boards `enumerate_runout_community_cards` yields.
@@ -141,7 +135,8 @@ impl FlopGame for FlopGameState {
     }
 
     fn set_flop(&mut self, cards: Deck) -> Result<(), DucyError> {
-        if cards.num_cards() != 3 {
+        // One or two cards is a partial flop: the rest comes with each runout.
+        if !(1..=3).contains(&cards.num_cards()) || !self.flop.is_empty() {
             return Err(DucyError::IncorrectCardCount);
         }
         if !self.remaining_cards_in_deck.has_cards(&cards) {
@@ -155,7 +150,7 @@ impl FlopGame for FlopGameState {
     }
 
     fn set_turn(&mut self, card: Card) -> Result<(), DucyError> {
-        if self.flop.is_empty() {
+        if self.flop.num_cards() < 3 {
             return Err(DucyError::FlopNotSet);
         }
         if !self.remaining_cards_in_deck.has_card(&card) {
@@ -199,32 +194,17 @@ impl FlopGame for FlopGameState {
     }
 
     fn get_final_states<'a>(&'a self) -> impl Iterator<Item = Self> + 'a {
-        if self.flop.is_empty() {
-            FlopGameStateIterator::AllCards {
-                iterator: CommunityCardIterator {
-                    base_state: *self,
-                    iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(5)),
-                },
-            }
-        } else if self.turn.is_none() {
-            FlopGameStateIterator::AllCards {
-                iterator: CommunityCardIterator {
-                    base_state: *self,
-                    iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(2)),
-                },
-            }
-        } else if self.river.is_none() {
-            FlopGameStateIterator::AllCards {
-                iterator: CommunityCardIterator {
-                    base_state: *self,
-                    iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(1)),
-                },
-            }
-        } else {
-            FlopGameStateIterator::Complete {
+        match self.cards_needed() {
+            0 => FlopGameStateIterator::Complete {
                 game_state: *self,
                 iterated: false,
-            }
+            },
+            needed => FlopGameStateIterator::AllCards {
+                iterator: CommunityCardIterator {
+                    base_state: *self,
+                    iterator: Box::new(self.remaining_cards_in_deck.enumerate_combinations(needed)),
+                },
+            },
         }
     }
 }
@@ -282,7 +262,8 @@ pub trait FlopGame {
     fn get_community_cards(&self) -> Deck;
     /// Adds a player with the given hole cards.
     fn add_player(&mut self, cards: Deck) -> Result<(), DucyError>;
-    /// Sets the three flop cards.
+    /// Sets the flop: three cards, or one or two known flop cards, in which
+    /// case runouts deal the rest of the flop too.
     fn set_flop(&mut self, cards: Deck) -> Result<(), DucyError>;
     /// Sets the turn card (requires flop to be set).
     fn set_turn(&mut self, card: Card) -> Result<(), DucyError>;

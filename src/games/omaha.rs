@@ -443,4 +443,37 @@ mod test {
             BoardTone::FourFlush { suit: Suit::Hearts }
         );
     }
+
+    #[test]
+    pub fn test_partial_flop_sampling_matches_exact() {
+        // Two known flop cards: exact equity over every completion of the
+        // board, against seeded sampling, which deals the rest of the flop
+        // on every sample.
+        let mut state = OmahaGameState::new(4);
+        state
+            .add_player(Deck::parse("As Ad Kh Qh").unwrap())
+            .unwrap();
+        state
+            .add_player(Deck::parse("Jc Tc 9d 8d").unwrap())
+            .unwrap();
+        state.set_flop(Deck::parse("Jh 7c").unwrap()).unwrap();
+        let eval = OmahaGameEvaluation {};
+        let exact = eval.evaluate_equity(&state);
+        let sampled = eval.sample_equity_seeded(&state, 40_000, Some(3));
+        for (e, s) in exact.iter().zip(&sampled) {
+            assert!(
+                (e - s).abs() < dec!(0.01),
+                "exact {exact:?} sampled {sampled:?}"
+            );
+        }
+        assert_eq!(
+            sampled,
+            eval.sample_equity_seeded(&state, 40_000, Some(3)),
+            "seeded"
+        );
+        assert!(
+            state.set_turn(Card::parse("2c").unwrap()).is_err(),
+            "no turn before a full flop"
+        );
+    }
 }

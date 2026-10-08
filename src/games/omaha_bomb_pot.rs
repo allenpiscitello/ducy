@@ -55,16 +55,10 @@ impl BoardState {
         }
     }
 
+    /// Board cards still to come: 5 minus those known (a partial flop of
+    /// one or two cards counts too).
     fn cards_needed(&self) -> u32 {
-        if self.flop.is_empty() {
-            5
-        } else if self.turn.is_none() {
-            2
-        } else if self.river.is_none() {
-            1
-        } else {
-            0
-        }
+        5 - self.community_cards.num_cards()
     }
 }
 
@@ -111,7 +105,8 @@ impl OmahaBombPotGameState {
         if board_index >= self.num_boards {
             return Err(DucyError::InvalidBoardIndex);
         }
-        if cards.num_cards() != 3 {
+        // One or two cards is a partial flop: the rest comes with each runout.
+        if !(1..=3).contains(&cards.num_cards()) || !self.boards[board_index].flop.is_empty() {
             return Err(DucyError::IncorrectCardCount);
         }
         if !self.remaining_cards.has_cards(&cards) {
@@ -129,7 +124,7 @@ impl OmahaBombPotGameState {
         if board_index >= self.num_boards {
             return Err(DucyError::InvalidBoardIndex);
         }
-        if self.boards[board_index].flop.is_empty() {
+        if self.boards[board_index].flop.num_cards() < 3 {
             return Err(DucyError::FlopNotSet);
         }
         if !self.remaining_cards.has_card(&card) {
