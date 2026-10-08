@@ -41,6 +41,7 @@ impl Dealer for Deal {
 /// themselves come from outside, e.g. a trustless shuffle (#134).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HiddenDeal {
+    /// How many players are dealt in.
     pub players: usize,
 }
 
