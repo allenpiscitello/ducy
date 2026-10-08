@@ -36,6 +36,10 @@ pub struct HandSnapshot {
     /// All five board cards, dealt or not.
     pub(crate) board: Vec<Card>,
     pub(crate) events: Vec<Event>,
+    /// Dealt hidden (a trustless shuffle): the engine knows only the cards in
+    /// its events (the board so far, and hands shown at showdown).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) hidden: bool,
 }
 
 /// One seat of a [`TableSnapshot`]. A bot isn't saved: the seat records that

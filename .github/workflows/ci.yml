@@ -43,6 +43,7 @@ jobs:
       - run: node ducy-wasm/tests/omaha-hand.cjs
       - run: node ducy-wasm/tests/fair.cjs
       - run: node ducy-wasm/tests/shuffle.cjs
+      - run: node ducy-wasm/tests/hidden.cjs
       - run: node ducy-wasm/tests/replay.cjs
       - run: node ducy-wasm/tests/partial-board.cjs
       - run: cargo run -p ducy-gto --example tiny_model -- target/tiny-model

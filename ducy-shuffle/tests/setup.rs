@@ -150,6 +150,62 @@ fn a_full_setup_deals_each_player_their_own_cards_only() {
     assert_eq!(audit(&t), Ok(()));
 }
 
+/// The next hand's deck is set up while the current hand is played, so no
+/// player may learn their next-hand cards before it's dealt. The host holds
+/// the finished deck and sends each player their hole cards (carrying only
+/// that player's lock) when the hand starts. Until then nothing a player has
+/// been sent opens with their key: they never see their own hole cards with
+/// the other locks off.
+#[test]
+fn nothing_a_player_is_sent_during_setup_opens_their_next_hand_cards() {
+    let mut rng = StdRng::seed_from_u64(5);
+    let players: Vec<u32> = (1..=6).collect();
+    let mut setup = DeckSetup::new(players.clone(), HOST, 2, 5, b"table T3/hand 7");
+    let mut parties: HashMap<u32, SetupParty> = HashMap::new();
+    let mut sent: HashMap<u32, Vec<ducy_shuffle::Masked>> = HashMap::new();
+    while setup.ready().is_none() {
+        match setup.request() {
+            Request::Keys => {
+                for p in players.iter().copied().chain([HOST]) {
+                    let party = SetupParty::new(&setup.context_for(&p).unwrap(), &mut rng);
+                    setup.key(&p, party.key());
+                    parties.insert(p, party);
+                }
+            }
+            Request::Shuffle { to, deck } => {
+                sent.entry(to).or_default().extend(&deck);
+                let (out, proof) = parties.get_mut(&to).unwrap().shuffle(&deck, &mut rng);
+                assert_eq!(setup.shuffled(&to, out, &proof), Step::Next);
+            }
+            Request::Unlock { to, cards, .. } => {
+                sent.entry(to).or_default().extend(&cards);
+                let (out, proof) = parties[&to].unlock(&cards, &mut rng);
+                assert_eq!(setup.unlocked(&to, out, &proof), Step::Next);
+            }
+            Request::Done => break,
+        }
+    }
+    let ready = setup.ready().unwrap();
+    for (i, p) in ready.players.iter().enumerate() {
+        let got = &sent[p];
+        let mine: Vec<_> = ready.layout.hole(i).map(|pos| ready.deck[pos]).collect();
+        for card in &mine {
+            assert!(
+                !got.contains(card),
+                "player {p} was never sent their hole cards"
+            );
+        }
+        for card in got {
+            assert!(
+                parties[p].open(&[*card]).is_none(),
+                "nothing player {p} was sent opens with their key"
+            );
+        }
+        // Once the hand starts and the host sends them, they open.
+        assert!(parties[p].open(&mine).is_some());
+    }
+}
+
 #[test]
 fn a_bad_proof_leaves_that_player_out_and_starts_again() {
     let mut rng = StdRng::seed_from_u64(2);

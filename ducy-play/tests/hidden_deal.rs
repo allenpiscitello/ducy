@@ -208,10 +208,43 @@ fn an_all_in_runout_waits_for_each_street_then_the_reveals() {
 }
 
 #[test]
-fn a_hidden_hand_is_not_saved_for_resuming() {
+fn a_hidden_hand_is_saved_and_resumed_at_any_point() {
+    // Saved after every step, restored, and played on from the copy.
     let mut hand = hidden(&[100, 100], 0);
+    let check = |h: &Hand| {
+        let snap: HandSnapshot = h.snapshot();
+        let back = Hand::restore(&snap).expect("a hidden hand restores");
+        assert_eq!(back.events(), h.events());
+        assert_eq!(back.awaiting(), h.awaiting());
+        back
+    };
     hand.act(Action::Call).unwrap();
-    let snap: HandSnapshot = hand.snapshot();
+    hand = check(&hand);
+    hand.act(Action::Check).unwrap();
+    for street in ["2c 7d 9h", "Jc", "3s"] {
+        hand = check(&hand);
+        hand.deal_board(&cards(street)).unwrap();
+        hand = check(&hand);
+        hand.act(Action::Check).unwrap();
+        hand = check(&hand);
+        hand.act(Action::Check).unwrap();
+    }
+    hand = check(&hand);
+    assert_eq!(hand.awaiting(), Some(&Awaiting::Reveals(vec![0, 1])));
+    hand.reveal(1, deck("Jh Js")).unwrap();
+    hand = check(&hand);
+    hand.forfeit(0).unwrap();
+    let hand = check(&hand);
+    assert_eq!(
+        hand.result().unwrap().payouts,
+        vec![0, 4],
+        "the shown hand wins"
+    );
+    // A saved hand edited so it no longer plays out is refused: here the
+    // shown hand claims a board card.
+    let json = serde_json::to_string(&hand.snapshot()).unwrap();
+    assert!(json.contains("\"Jh\""));
+    let snap: HandSnapshot = serde_json::from_str(&json.replace("\"Jh\"", "\"2c\"")).unwrap();
     assert_eq!(Hand::restore(&snap).err(), Some(PlayError::InvalidSnapshot));
 }
 

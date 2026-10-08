@@ -1,7 +1,7 @@
 use ducy::deck::{Card, Deck};
 
 use crate::{
-    deal::{Deal, Dealer},
+    deal::{Deal, Dealer, HiddenDeal},
     error::PlayError,
     rules::{BettingStructure, TableRules},
     showdown::{Pot, best_hands, build_pots, split},
@@ -297,6 +297,8 @@ pub struct Hand {
     hole: Vec<Option<Deck>>,
     /// Seats that didn't show at showdown.
     forfeited: Vec<bool>,
+    /// Dealt by a dealer that hid cards from the engine.
+    hidden: bool,
     /// The board cards known so far, in order (all five up front with a
     /// [`Deal`]).
     board: Vec<Card>,
@@ -361,6 +363,7 @@ impl Hand {
         }
         let hole: Vec<Option<Deck>> = (0..n).map(|i| dealer.hole_cards(i)).collect();
         let board = dealer.board().map(|b| b.to_vec()).unwrap_or_default();
+        let hidden = board.len() < 5 || hole.iter().any(Option::is_none);
         // The cards the engine knows: the right number each, none twice.
         let mut seen = Deck::empty();
         for h in hole.iter().flatten() {
@@ -395,6 +398,7 @@ impl Hand {
             deal: None,
             hole,
             forfeited: vec![false; n],
+            hidden,
             board,
             awaiting: None,
             button,
@@ -957,9 +961,8 @@ impl Hand {
 
 impl Hand {
     /// The hand as saved data: how it started and what has happened since.
-    /// A hand with hidden cards saves only what the engine knows, which
-    /// [`Hand::restore`] refuses: those can't be resumed yet (the trustless
-    /// shuffle will keep its own state, #139).
+    /// A hand with hidden cards saves only what the engine knows: its
+    /// events carry the board dealt so far and the hands shown.
     pub fn snapshot(&self) -> HandSnapshot {
         HandSnapshot {
             rules: self.rules,
@@ -972,6 +975,7 @@ impl Hand {
                 .collect(),
             board: self.board.clone(),
             events: self.events.clone(),
+            hidden: self.hidden,
         }
     }
 
@@ -980,6 +984,9 @@ impl Hand {
     /// that were saved.
     pub fn restore(s: &HandSnapshot) -> Result<Self, PlayError> {
         let bad = |_| PlayError::InvalidSnapshot;
+        if s.hidden {
+            return Self::restore_hidden(s);
+        }
         let hole_cards = s
             .hole_cards
             .iter()
@@ -997,18 +1004,7 @@ impl Hand {
             .try_into()
             .map_err(|_| PlayError::InvalidSnapshot)?;
         let deal = Deal::new(s.rules.variant, hole_cards, board).map_err(bad)?;
-        let posts: Vec<Post> = s
-            .events
-            .iter()
-            .filter_map(|e| match *e {
-                Event::Post { seat, dead, live } => Some(Post {
-                    player: seat,
-                    dead,
-                    live,
-                }),
-                _ => None,
-            })
-            .collect();
+        let posts = posts_of(s);
         let mut hand = Self::with_posts(s.rules, &s.stacks, s.button, deal, &posts).map_err(bad)?;
         for e in &s.events {
             let action = match *e {
@@ -1026,4 +1022,55 @@ impl Hand {
         }
         Ok(hand)
     }
+
+    /// A hidden hand, played again from its events: the actions, and the
+    /// board cards and shown hands as they came in.
+    fn restore_hidden(s: &HandSnapshot) -> Result<Self, PlayError> {
+        let bad = |_| PlayError::InvalidSnapshot;
+        let dealer = HiddenDeal {
+            players: s.stacks.len(),
+        };
+        let mut hand =
+            Self::with_dealer(s.rules, &s.stacks, s.button, &dealer, &posts_of(s)).map_err(bad)?;
+        for e in &s.events {
+            match e {
+                Event::Fold { .. } => hand.act(Action::Fold),
+                Event::Check { .. } => hand.act(Action::Check),
+                Event::Call { .. } => hand.act(Action::Call),
+                Event::Bet { to, .. } => hand.act(Action::Bet(*to)),
+                Event::Raise { to, .. } => hand.act(Action::Raise(*to)),
+                // Dealt by the hand itself once the board's cards are in.
+                Event::Board { cards, .. } if hand.awaiting.is_some() => hand.deal_board(cards),
+                Event::Reveal { seat, cards } => {
+                    let mut d = Deck::empty();
+                    for &c in cards {
+                        d |= c;
+                    }
+                    hand.reveal(*seat, d)
+                }
+                Event::Forfeit { seat } => hand.forfeit(*seat),
+                _ => continue,
+            }
+            .map_err(bad)?;
+        }
+        if hand.events != s.events {
+            return Err(PlayError::InvalidSnapshot);
+        }
+        Ok(hand)
+    }
+}
+
+/// The extra blinds a saved hand started with.
+fn posts_of(s: &HandSnapshot) -> Vec<Post> {
+    s.events
+        .iter()
+        .filter_map(|e| match *e {
+            Event::Post { seat, dead, live } => Some(Post {
+                player: seat,
+                dead,
+                live,
+            }),
+            _ => None,
+        })
+        .collect()
 }
