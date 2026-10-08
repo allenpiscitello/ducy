@@ -30,7 +30,9 @@ pub struct ReplaySeat {
     pub stack: u64,
     /// Chips bet on this street, not yet in the pot.
     pub bet: u64,
+    /// Out of the hand.
     pub folded: bool,
+    /// No chips left to bet.
     pub all_in: bool,
 }
 
@@ -38,10 +40,13 @@ pub struct ReplaySeat {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Frame {
+    /// The street being played.
     pub street: Street,
+    /// The board cards dealt so far.
     pub board: Vec<Card>,
     /// Chips in the pot (bets go in when the street ends).
     pub pot: u64,
+    /// Every seat, in seat order.
     pub seats: Vec<ReplaySeat>,
     /// What happened, e.g. "Ann raises to 6".
     pub text: String,
