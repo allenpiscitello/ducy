@@ -392,3 +392,245 @@ fn every_hand_posts_one_small_and_one_big_blind() {
         assert_eq!((sb, bb), (1, 1));
     });
 }
+
+// ---- dead button (#143) ----
+
+/// Six seats, four bots in seats 0–3.
+fn four_bots() -> Table {
+    let seats = (0..6)
+        .map(|i| {
+            if i < 4 {
+                TableSeat::with_bot(format!("B{i}"), format!("b{i}"), Box::new(CallingStation))
+            } else {
+                TableSeat::empty()
+            }
+        })
+        .collect();
+    Table::new(TableRules::no_limit_holdem(5, 10), seats, 1000, 3).unwrap()
+}
+
+#[test]
+fn a_newcomer_is_not_dealt_in_on_the_button_or_the_small_blind() {
+    // Play hands until seat 4, if someone sat there, would get the button or
+    // the small blind next; then a newcomer sits there.
+    for target in ["button", "small blind"] {
+        let mut t = four_bots();
+        loop {
+            t.new_hand().unwrap();
+            while t.advance().unwrap() {}
+            *t.seat_mut(4) = TableSeat::with_bot("New", "new", Box::new(CallingStation));
+            let (b, sb, _) = t.next_positions().unwrap();
+            if (target == "button" && b == 4) || (target == "small blind" && sb == 4) {
+                break;
+            }
+            *t.seat_mut(4) = TableSeat::empty();
+            assert!(t.hand_number() < 50);
+        }
+        t.arrive(4);
+        assert!(t.arriving(4));
+        // The next hand deals without the newcomer, and so on until they're
+        // neither the button nor the small blind.
+        let mut skipped = 0;
+        loop {
+            t.new_hand().unwrap();
+            if let Some(i) = t.hand_index(4) {
+                let sb = t.hand().unwrap().events().iter().find_map(|e| match e {
+                    Event::SmallBlind { seat, .. } => Some(*seat),
+                    _ => None,
+                });
+                assert_ne!(t.button(), 4, "{target}: not dealt in on the button");
+                assert_ne!(sb, Some(i), "{target}: not dealt in on the small blind");
+                assert!(!t.arriving(4));
+                break;
+            }
+            skipped += 1;
+            while t.advance().unwrap() {}
+            assert!(skipped < 6);
+        }
+        if target == "small blind" {
+            assert!(
+                skipped >= 1,
+                "skipped the hand it would have been the small blind"
+            );
+        }
+    }
+}
+
+/// Plays a 30-player tournament and checks, for every player moved to
+/// another table, that their first hand there isn't on the button or the
+/// small blind unless they also post the big blind.
+#[test]
+fn moved_players_never_skip_the_big_blind() {
+    let mut moved_in = 0;
+    let mut checked = 0;
+    for seed in 1..=3 {
+        let mut t = Tournament::new(config(10, 5, seed), random_field(30, seed)).unwrap();
+        // Player id → table they were moved to and haven't played at yet.
+        let mut arrived: std::collections::HashMap<String, usize> = Default::default();
+        let mut hands = 0u64;
+        while !t.is_over() {
+            for id in t.table_ids() {
+                if !t.can_deal(id) {
+                    continue;
+                }
+                t.new_hand(id).unwrap();
+                hands += 1;
+                t.set_level((hands / 40) as usize);
+                let table = t.table(id).unwrap();
+                let hand = table.hand().unwrap();
+                let blind = |pick: fn(&Event) -> Option<usize>| {
+                    hand.events()
+                        .iter()
+                        .find_map(pick)
+                        .map(|i| table.dealt()[i])
+                };
+                let sb = blind(|e| match e {
+                    Event::SmallBlind { seat, .. } => Some(*seat),
+                    _ => None,
+                });
+                let bb = blind(|e| match e {
+                    Event::BigBlind { seat, .. } => Some(*seat),
+                    _ => None,
+                });
+                for &seat in table.dealt() {
+                    let who = table.seat(seat).id.clone();
+                    if arrived.get(&who) == Some(&id) {
+                        arrived.remove(&who);
+                        checked += 1;
+                        let free_ride =
+                            (seat == table.button() || Some(seat) == sb) && Some(seat) != bb;
+                        assert!(
+                            !free_ride,
+                            "{who} moved in and was dealt on the button/small blind without the big blind"
+                        );
+                    }
+                }
+                play_out(&mut t, id);
+                let report = t.finish_hand(id).unwrap();
+                for m in report.moves {
+                    moved_in += 1;
+                    arrived.insert(m.id, m.to.table);
+                }
+                if t.is_over() {
+                    break;
+                }
+            }
+            assert!(hands < 20_000);
+        }
+    }
+    assert!(
+        moved_in > 10 && checked > 10,
+        "moves happened: {moved_in}, checked {checked}"
+    );
+}
+
+// ---- saving a tournament (#143) ----
+
+/// Calling stations and shovers: they keep no state, so a restored
+/// tournament's bots play exactly as the originals would.
+fn stateless_field(n: usize) -> Vec<Entrant> {
+    (0..n)
+        .map(|i| {
+            let bot: Box<dyn Bot> = if i % 3 == 0 {
+                Box::new(Shover)
+            } else {
+                Box::new(CallingStation)
+            };
+            Entrant::bot(format!("p{i}"), format!("Player {i}"), bot)
+        })
+        .collect()
+}
+
+fn bot_for(id: &str) -> Option<Box<dyn Bot>> {
+    let i: usize = id.strip_prefix('p')?.parse().ok()?;
+    Some(if i % 3 == 0 {
+        Box::new(Shover)
+    } else {
+        Box::new(CallingStation)
+    })
+}
+
+/// One step of play: deal at the first table that can, or finish the hand
+/// one table is in. Returns false once the tournament is over.
+fn step(t: &mut Tournament, hands: &mut u64) -> bool {
+    if t.is_over() {
+        return false;
+    }
+    for id in t.table_ids() {
+        if t.table(id).unwrap().in_hand() {
+            // One bot acts; once the hand is over, the tournament takes it in.
+            assert!(
+                t.table_mut(id).unwrap().advance().unwrap(),
+                "only bots here"
+            );
+            if !t.table(id).unwrap().in_hand() {
+                t.finish_hand(id).unwrap();
+            }
+            return true;
+        }
+    }
+    for id in t.table_ids() {
+        if t.can_deal(id) {
+            t.new_hand(id).unwrap();
+            *hands += 1;
+            t.set_level((*hands / 30) as usize);
+            return true;
+        }
+    }
+    panic!("stuck");
+}
+
+#[test]
+fn a_tournament_saved_mid_hand_finishes_exactly_as_it_would_have() {
+    let mut a = Tournament::new(config(10, 5, 11), stateless_field(30)).unwrap();
+    let mut hands = 0;
+    // Play until well in, stopping in the middle of a hand.
+    while hands < 20
+        || !a
+            .table_ids()
+            .iter()
+            .any(|&id| a.table(id).unwrap().in_hand())
+    {
+        assert!(step(&mut a, &mut hands));
+    }
+    assert!(a.players_left() < 30 && a.table_ids().len() <= 3);
+    let snap = a.snapshot();
+    #[cfg(feature = "serde")]
+    let snap: ducy_play::TournamentSnapshot =
+        serde_json::from_str(&serde_json::to_string(&snap).unwrap()).unwrap();
+    let mut b = Tournament::restore(&snap, bot_for).unwrap();
+    assert_eq!(b.snapshot(), a.snapshot(), "restores to the same state");
+
+    assert_eq!((b.level(), b.finishes()), (a.level(), a.finishes()));
+
+    // Both go on in lockstep to the end.
+    let (mut ha, mut hb) = (hands, hands);
+    while step(&mut a, &mut ha) {
+        assert!(step(&mut b, &mut hb));
+        assert_eq!(chips(&a), chips(&b));
+    }
+    assert!(b.is_over());
+    assert_eq!(a.finishes(), b.finishes(), "same places");
+    assert_eq!(a.winner(), b.winner());
+    assert_eq!(a.level(), b.level(), "same level");
+    let places: HashSet<usize> = b.finishes().iter().map(|f| f.place).collect();
+    assert_eq!(places, (2..=30).collect());
+}
+
+#[test]
+fn a_bad_tournament_snapshot_is_refused() {
+    let t = Tournament::new(config(10, 5, 2), stateless_field(12)).unwrap();
+    // A bot that can't be given back.
+    assert!(matches!(
+        Tournament::restore(&t.snapshot(), |_| None),
+        Err(PlayError::InvalidSnapshot)
+    ));
+    // Another version.
+    let mut s = t.snapshot();
+    s.version += 1;
+    assert!(matches!(
+        Tournament::restore(&s, bot_for),
+        Err(PlayError::InvalidSnapshot)
+    ));
+    assert!(Tournament::restore(&t.snapshot(), bot_for).is_ok());
+}
