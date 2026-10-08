@@ -8,6 +8,9 @@ description = "A trustless (mental poker) shuffle for ducy: layered, commutative
 repository = "https://github.com/allenpiscitello/ducy"
 categories = ["cryptography", "game-engines"]
 keywords = ["poker", "mental-poker", "shuffle", "ristretto"]
+# Not on crates.io until a cryptographer has reviewed it (#136) and the API
+# has settled with its bindings (#139).
+publish = false
 
 [dependencies]
 ducy = { path = "..", default-features = false }
