@@ -40,5 +40,6 @@ jobs:
       - run: node ducy-wasm/tests/stats.cjs
       - run: node ducy-wasm/tests/structure.cjs
       - run: node ducy-wasm/tests/ranges.cjs
+      - run: node ducy-wasm/tests/omaha-hand.cjs
       - run: cargo run -p ducy-gto --example tiny_model -- target/tiny-model
       - run: node ducy-wasm/tests/review.cjs

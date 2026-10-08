@@ -18,6 +18,9 @@ pub mod flop_game;
 pub mod holdem;
 /// Omaha game state, evaluation, and board analysis.
 pub mod omaha;
+/// Omaha starting-hand analysis: features, tags, nut-flush blocking and a
+/// percentile ranking.
+pub mod omaha_analysis;
 /// Omaha bomb pot with multiple boards.
 pub mod omaha_bomb_pot;
 /// Omaha Hi-Lo 8-or-Better game state and split-pot evaluation.
@@ -27,6 +30,8 @@ pub mod omaha_hilo;
 pub mod omaha_range;
 /// Monte Carlo equity for Omaha and Omaha Hi-Lo players holding shorthand ranges.
 pub mod omaha_range_equity;
+/// The fitted Omaha starting-hand ranking model (generated).
+pub mod omaha_rank_model;
 /// Razz (Seven-Card Stud Low) game state and evaluation.
 pub mod razz;
 /// Single Draw Deuce-to-Seven Lowball (Kansas City Lowball) game state and evaluation.
