@@ -102,6 +102,9 @@ pub struct TournamentSnapshot {
     pub(crate) hfh_hands: Vec<u64>,
     pub(crate) finished: Vec<u64>,
     pub(crate) draws: u64,
+    /// Tables deal from system randomness (`Tournament::with_secure_deals`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) secure: bool,
 }
 
 /// One person at a [`HostSnapshot`]'s table.

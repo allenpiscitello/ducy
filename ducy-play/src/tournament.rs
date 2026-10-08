@@ -230,6 +230,9 @@ pub struct Tournament {
     /// comes from its own generator, seeded from the config's seed and this
     /// count, so a saved tournament goes on exactly as it would have.
     draws: u64,
+    /// Every table deals from system randomness, not the seed (see
+    /// [`Tournament::with_secure_deals`]).
+    secure: bool,
 }
 
 impl Tournament {
@@ -255,6 +258,7 @@ impl Tournament {
             hfh_hands: Vec::new(),
             finished: Vec::new(),
             draws: 0,
+            secure: false,
             config,
         };
         for l in &t.config.levels {
@@ -303,6 +307,9 @@ impl Tournament {
             self.config.starting_stack.max(rules.big_blind),
             seed,
         )?;
+        if self.secure {
+            table = table.with_secure_deals();
+        }
         table.set_top_up(false);
         for s in 0..self.config.table_size {
             table.set_stack(s, 0)?;
@@ -337,6 +344,25 @@ impl Tournament {
         } else {
             Some(empty[self.rng().random_range(0..empty.len())])
         }
+    }
+
+    /// Deals every hand, at every table (those opened later too), from
+    /// fresh system randomness instead of the seed: use this whenever people
+    /// play (see [`Table::with_secure_deals`]). Seating and moves still
+    /// follow the seed.
+    pub fn with_secure_deals(mut self) -> Self {
+        self.secure = true;
+        for slot in &mut self.tables {
+            if let Some(t) = slot.take() {
+                *slot = Some(t.with_secure_deals());
+            }
+        }
+        self
+    }
+
+    /// Whether every table deals from system randomness.
+    pub fn secure_deals(&self) -> bool {
+        self.secure
     }
 
     /// How the tournament is played.
@@ -728,6 +754,7 @@ impl Tournament {
             hfh_hands: self.hfh_hands.clone(),
             finished: self.finished.clone(),
             draws: self.draws,
+            secure: self.secure,
         }
     }
 
@@ -773,6 +800,7 @@ impl Tournament {
             hfh_hands: s.hfh_hands.clone(),
             finished: s.finished.clone(),
             draws: s.draws,
+            secure: s.secure,
         })
     }
 }
