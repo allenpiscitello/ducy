@@ -63,9 +63,9 @@ fn observations_only_show_own_cards() {
         assert!(!bot.observations.is_empty());
         for obs in &bot.observations {
             assert_eq!(obs.seat, seat);
-            assert_eq!(obs.hole_cards, hand.deal().hole_cards()[seat]);
+            assert_eq!(obs.hole_cards, hand.deal().unwrap().hole_cards()[seat]);
             let json = serde_json::to_string(obs).unwrap();
-            for (other, cards) in hand.deal().hole_cards().iter().enumerate() {
+            for (other, cards) in hand.deal().unwrap().hole_cards().iter().enumerate() {
                 if other != seat {
                     for card in cards.iter(false) {
                         assert!(!json.contains(&format!("\"{card}\"")), "{json}");

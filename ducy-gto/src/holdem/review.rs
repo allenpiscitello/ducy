@@ -146,10 +146,7 @@ impl HandRecord {
         {
             return None;
         }
-        let hole: Vec<Card> = hand.deal().hole_cards()[seat]
-            .iter(false)
-            .map(from_ducy)
-            .collect();
+        let hole: Vec<Card> = hand.hole_cards(seat)?.iter(false).map(from_ducy).collect();
         let history = hand.events().to_vec();
         let button = history.iter().find_map(|e| match *e {
             Event::SmallBlind { seat, .. } => Some(seat),

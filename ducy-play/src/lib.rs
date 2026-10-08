@@ -74,10 +74,10 @@ mod table;
 mod tournament;
 
 pub use bot::{Bot, HandOutcome, HandSummary, Observation, SeatView, fallback_action, play_hand};
-pub use deal::Deal;
+pub use deal::{Deal, Dealer, HiddenDeal};
 pub use error::PlayError;
 pub use hand::{
-    Action, Event, Hand, HandResult, LegalActions, MAX_PLAYERS, Post, RaiseRange, Street,
+    Action, Awaiting, Event, Hand, HandResult, LegalActions, MAX_PLAYERS, Post, RaiseRange, Street,
 };
 pub use host::{
     ChipRequest, ChipsView, Command, DROP_AFTER_HANDS, Departure, MAX_NAME, Outgoing, Refund,

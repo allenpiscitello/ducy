@@ -10,8 +10,8 @@
 use ducy::deck::{Card, Deck};
 
 use crate::{
-    Action, BettingStructure, Bot, Deal, Event, Hand, LegalActions, PersonalityBot, PlayError,
-    Post, Pot, Street, TableRules, fallback_action,
+    Action, Awaiting, BettingStructure, Bot, Deal, Event, Hand, HiddenDeal, LegalActions,
+    PersonalityBot, PlayError, Post, Pot, Street, TableRules, fallback_action,
     snapshot::{SeatSnapshot, TableSnapshot},
 };
 
@@ -208,6 +208,17 @@ pub struct Table {
     returning: Vec<Return>,
     /// The seats of the last hand's small and big blinds.
     last_blinds: Option<(usize, usize)>,
+}
+
+/// Where the next hand's cards come from.
+#[derive(Clone, Copy)]
+enum DealFrom<'a> {
+    /// The table's own shuffle (seeded, or system randomness).
+    Random,
+    /// A provably fair seed (`fair_deal`).
+    Seed(&'a [u8; 32]),
+    /// Cards the engine never sees (a trustless shuffle).
+    Hidden,
 }
 
 /// How a person comes back after sitting out.
@@ -494,7 +505,55 @@ impl Table {
     /// next of them and topping up broke players. Fails with fewer than two
     /// players.
     pub fn new_hand(&mut self) -> Result<(), PlayError> {
-        self.deal_next(None)
+        self.deal_next(DealFrom::Random)
+    }
+
+    /// Like [`Table::new_hand`], with cards the engine never sees (#135): a
+    /// trustless shuffle (#134) deals them. Each player's hole cards stay
+    /// with that player until showdown, and the board arrives street by
+    /// street; the hand waits for them ([`Table::awaiting`]), fed by
+    /// [`Table::deal_board`], [`Table::reveal`] and [`Table::forfeit`].
+    pub fn new_hand_hidden(&mut self) -> Result<(), PlayError> {
+        self.deal_next(DealFrom::Hidden)
+    }
+
+    /// What the hand is waiting for from outside, if anything (only with
+    /// [`Table::new_hand_hidden`]): board cards, or these seats' hole cards
+    /// at showdown (as table seats).
+    pub fn awaiting(&self) -> Option<Awaiting> {
+        let hand = self.hand.as_ref()?;
+        Some(match hand.awaiting()? {
+            Awaiting::Board(street) => Awaiting::Board(*street),
+            Awaiting::Reveals(players) => {
+                Awaiting::Reveals(players.iter().map(|&i| self.dealt[i]).collect())
+            }
+        })
+    }
+
+    /// The board cards the hand is waiting for (see [`Hand::deal_board`]).
+    pub fn deal_board(&mut self, cards: &[Card]) -> Result<(), PlayError> {
+        self.hand
+            .as_mut()
+            .ok_or(PlayError::IllegalAction)?
+            .deal_board(cards)
+    }
+
+    /// At showdown, `seat` shows its hidden hole cards (see [`Hand::reveal`]).
+    pub fn reveal(&mut self, seat: usize, cards: Deck) -> Result<(), PlayError> {
+        let i = self.hand_index(seat).ok_or(PlayError::IllegalAction)?;
+        self.hand
+            .as_mut()
+            .ok_or(PlayError::IllegalAction)?
+            .reveal(i, cards)
+    }
+
+    /// At showdown, `seat` doesn't show: it can't win (see [`Hand::forfeit`]).
+    pub fn forfeit(&mut self, seat: usize) -> Result<(), PlayError> {
+        let i = self.hand_index(seat).ok_or(PlayError::IllegalAction)?;
+        self.hand
+            .as_mut()
+            .ok_or(PlayError::IllegalAction)?
+            .forfeit(i)
     }
 
     /// Like [`Table::new_hand`], dealt from a provably fair seed that the
@@ -503,10 +562,10 @@ impl Table {
     /// so anyone with the seed can check every card. Sit out anyone who
     /// didn't reveal before calling this.
     pub fn new_hand_from_seed(&mut self, seed: &[u8; 32]) -> Result<(), PlayError> {
-        self.deal_next(Some(seed))
+        self.deal_next(DealFrom::Seed(seed))
     }
 
-    fn deal_next(&mut self, fair: Option<&[u8; 32]>) -> Result<(), PlayError> {
+    fn deal_next(&mut self, from: DealFrom) -> Result<(), PlayError> {
         if self.in_hand() {
             return Err(PlayError::IllegalAction);
         }
@@ -606,17 +665,31 @@ impl Table {
         self.button = button;
         self.last_blinds = Some((sb, bb));
         self.hand_number += 1;
-        let deal = match fair {
-            Some(seed) => Deal::from_seed(self.rules.variant, dealt.len(), seed)?,
-            None => Deal::random(
-                self.rules.variant,
-                dealt.len(),
-                self.seed.map(|s| s.wrapping_add(self.hand_number * 7919)),
-            )?,
-        };
         let stacks: Vec<u64> = dealt.iter().map(|&s| self.stacks[s]).collect();
         let button = dealt.iter().position(|&s| s == self.button).expect("dealt");
-        self.hand = Some(Hand::with_posts(self.rules, &stacks, button, deal, &posts)?);
+        let (variant, players) = (self.rules.variant, dealt.len());
+        self.hand = Some(match from {
+            DealFrom::Random => {
+                let seed = self.seed.map(|s| s.wrapping_add(self.hand_number * 7919));
+                Hand::with_posts(
+                    self.rules,
+                    &stacks,
+                    button,
+                    Deal::random(variant, players, seed)?,
+                    &posts,
+                )?
+            }
+            DealFrom::Seed(seed) => Hand::with_posts(
+                self.rules,
+                &stacks,
+                button,
+                Deal::from_seed(variant, players, seed)?,
+                &posts,
+            )?,
+            DealFrom::Hidden => {
+                Hand::with_dealer(self.rules, &stacks, button, &HiddenDeal { players }, &posts)?
+            }
+        });
         self.dealt = dealt;
         self.synced = false;
         Ok(())
@@ -765,7 +838,7 @@ impl Table {
                     },
                     hand.has_folded(i),
                     hand.is_all_in(i),
-                    shown.then(|| cards(hand.deal().hole_cards()[i])),
+                    shown.then(|| hand.hole_cards(i)).flatten().map(cards),
                     result.map_or(0, |r| r.payouts[i]),
                     result.map_or(0, |r| r.net[i]),
                     false,
@@ -870,6 +943,8 @@ fn rotate_event(e: &Event, rot: impl Fn(usize) -> usize) -> Event {
         | Event::Call { seat, .. }
         | Event::Bet { seat, .. }
         | Event::Raise { seat, .. }
+        | Event::Reveal { seat, .. }
+        | Event::Forfeit { seat }
         | Event::Award { seat, .. } => *seat = rot(*seat),
         Event::Board { .. } => {}
     }
