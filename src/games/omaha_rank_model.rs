@@ -3,7 +3,7 @@
 //! src/omaha-rank-model.js); don't edit by hand.
 //!
 //! Each variant's score is a linear model over the hand features in
-//! [`FEATURE_NAMES`](super::omaha_analysis::FEATURE_NAMES), plus a term for
+//! [`FEATURE_NAMES`](crate::games::omaha_analysis::FEATURE_NAMES), plus a term for
 //! blocking the nut flush; `cutoffs[i]` is the score at the top (i / 400 *
 //! 100)% of hands.
 #![allow(clippy::excessive_precision, clippy::unreadable_literal)]

@@ -1,7 +1,7 @@
 //! Omaha starting-hand analysis (4, 5 or 6 cards): the features that make a
 //! hand play well, recognisable kinds of hands ("tags"), how often it
 //! blocks the nut flush, and a ranking by percentile from a model fitted to
-//! engine measurements ([`omaha_rank_model`](super::omaha_rank_model)).
+//! engine measurements ([`omaha_rank_model`](crate::games::omaha_rank_model)).
 //!
 //! These came from ducy.cards' trainer, so the page, the bots and the PLO
 //! GTO work (card abstraction, #128) can share one copy.
