@@ -71,9 +71,33 @@ pub struct TableSnapshot {
     pub(crate) seed: Option<String>,
     pub(crate) missed: Vec<(bool, bool)>,
     /// How each seat comes back after sitting out: "ready", "post" or
-    /// "wait_for_big_blind".
+    /// "wait_for_big_blind"; or "arriving" for a newcomer not dealt in yet.
     pub(crate) returning: Vec<String>,
     pub(crate) last_blinds: Option<(usize, usize)>,
+}
+
+/// The tournament snapshot format: one with any other version is refused.
+pub const TOURNAMENT_SNAPSHOT_VERSION: u32 = 1;
+
+/// A whole [`crate::Tournament`]: see [`crate::Tournament::snapshot`]. Each
+/// table is saved as a [`TableSnapshot`], the hand in progress included, so
+/// it holds every card of every hand being played.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TournamentSnapshot {
+    /// [`TOURNAMENT_SNAPSHOT_VERSION`] when it was saved.
+    pub version: u32,
+    pub(crate) config: crate::TournamentConfig,
+    /// By table id; `None` for a broken table.
+    pub(crate) tables: Vec<Option<TableSnapshot>>,
+    pub(crate) level: usize,
+    pub(crate) finishes: Vec<crate::Finish>,
+    pub(crate) winner: Option<crate::Finish>,
+    pub(crate) entries: usize,
+    pub(crate) hand_for_hand: bool,
+    pub(crate) hfh_hands: Vec<u64>,
+    pub(crate) finished: Vec<u64>,
+    pub(crate) draws: u64,
 }
 
 /// One person at a [`HostSnapshot`]'s table.

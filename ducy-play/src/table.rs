@@ -202,6 +202,10 @@ enum Return {
     Post,
     /// Not dealt in until the big blind reaches them.
     WaitForBigBlind,
+    /// Just sat down at a table that's been playing: not dealt in on the
+    /// button or the small blind, so they can't play an orbit without
+    /// paying a big blind; dealt in at the first hand where they're neither.
+    Arriving,
 }
 
 impl Table {
@@ -305,6 +309,13 @@ impl Table {
     /// The seat that would post the big blind if the next hand were dealt
     /// now, or `None` if fewer than two seats would be dealt in.
     pub fn next_big_blind(&self) -> Option<usize> {
+        self.next_positions().map(|(_, _, bb)| bb)
+    }
+
+    /// The button, small blind and big blind seats if the next hand were
+    /// dealt now (with everyone who would play), or `None` if fewer than two
+    /// seats would be dealt in.
+    pub fn next_positions(&self) -> Option<(usize, usize, usize)> {
         let n = self.seats.len();
         let dealt: Vec<usize> = (0..n).filter(|&s| self.will_play(s)).collect();
         if dealt.len() < 2 {
@@ -322,7 +333,23 @@ impl Table {
         } else {
             next_after(button)
         };
-        Some(next_after(small_blind))
+        Some((button, small_blind, next_after(small_blind)))
+    }
+
+    /// Someone new has just sat in `seat` (e.g. moved from another table in
+    /// a tournament): it owes nothing from whoever sat there before, and it
+    /// isn't dealt in on the button or the small blind. A hand that would
+    /// put either on it deals without it, so the newcomer can't play an orbit
+    /// without paying a big blind (a tournament's dead-button rule); it's
+    /// dealt in at the first hand where it's neither.
+    pub fn arrive(&mut self, seat: usize) {
+        self.missed[seat] = (false, false);
+        self.returning[seat] = Return::Arriving;
+    }
+
+    /// Whether `seat` sat down and hasn't been dealt in yet (see [`Self::arrive`]).
+    pub fn arriving(&self, seat: usize) -> bool {
+        self.returning[seat] == Return::Arriving
     }
 
     pub fn num_seats(&self) -> usize {
@@ -455,7 +482,17 @@ impl Table {
         // dealt in when it reaches them.
         let able: Vec<usize> = (0..n).filter(|&s| self.will_play(s)).collect();
         let waiting = |s: usize| self.returning[s] == Return::WaitForBigBlind;
-        let core: Vec<usize> = able.iter().copied().filter(|&s| !waiting(s)).collect();
+        let arriving = |s: usize| self.returning[s] == Return::Arriving;
+        // Who may take the button: not someone waiting, and not a newcomer
+        // unless no one else can.
+        let mut core: Vec<usize> = able
+            .iter()
+            .copied()
+            .filter(|&s| !waiting(s) && !arriving(s))
+            .collect();
+        if core.is_empty() {
+            core = able.iter().copied().filter(|&s| !waiting(s)).collect();
+        }
         if core.is_empty() || able.len() < 2 {
             return Err(PlayError::InvalidPlayerCount);
         }
@@ -466,8 +503,10 @@ impl Table {
         let mut cand = able.clone();
         let (sb, bb) = loop {
             let (sb, bb) = blind_seats(&cand, button);
-            // Someone waiting can't take the small blind: they're skipped.
-            if waiting(sb) {
+            // Someone waiting, or just arrived, can't take the small blind:
+            // they're skipped this hand (a newcomer only while that leaves
+            // two others).
+            if waiting(sb) || (arriving(sb) && sb != button && cand.len() > 2) {
                 cand.retain(|&s| s != sb);
                 continue;
             }
@@ -813,6 +852,7 @@ impl Return {
             Self::Ready => "ready",
             Self::Post => "post",
             Self::WaitForBigBlind => "wait_for_big_blind",
+            Self::Arriving => "arriving",
         }
     }
 
@@ -821,6 +861,7 @@ impl Return {
             "ready" => Self::Ready,
             "post" => Self::Post,
             "wait_for_big_blind" => Self::WaitForBigBlind,
+            "arriving" => Self::Arriving,
             _ => return None,
         })
     }

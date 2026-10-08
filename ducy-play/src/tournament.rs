@@ -16,6 +16,14 @@
 //! marked absent ([`Tournament::set_absent`]): they're still dealt in, post
 //! blinds and antes, and check or fold when it's their turn ("blinded off").
 //!
+//! A player who sits down at a table that's been playing (moved there, or a
+//! late entry) isn't dealt in on the button or the small blind, so no one
+//! plays an orbit without paying a big blind ([`Table::arrive`]).
+//!
+//! [`Tournament::snapshot`] saves the whole tournament, hands in progress
+//! included, and [`Tournament::restore`] carries on from it exactly as the
+//! original would, e.g. after a host or server restarts.
+//!
 //! ```
 //! use ducy_play::{Entrant, Level, Tournament, TournamentConfig, Variant, BettingStructure};
 //! use ducy_play::bots::CallingStation;
@@ -52,7 +60,10 @@
 
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
-use crate::{BettingStructure, Bot, MAX_PLAYERS, PlayError, Table, TableRules, TableSeat, Variant};
+use crate::{
+    BettingStructure, Bot, MAX_PLAYERS, PlayError, TOURNAMENT_SNAPSHOT_VERSION, Table, TableRules,
+    TableSeat, TournamentSnapshot, Variant,
+};
 
 /// One blind level. Amounts are whole chips.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,7 +202,10 @@ pub struct Tournament {
     hfh_hands: Vec<u64>,
     /// The last hand number `finish_hand` took in, per table.
     finished: Vec<u64>,
-    rng: StdRng,
+    /// Random choices made so far (seats for new players and moves): each
+    /// comes from its own generator, seeded from the config's seed and this
+    /// count, so a saved tournament goes on exactly as it would have.
+    draws: u64,
 }
 
 impl Tournament {
@@ -216,7 +230,7 @@ impl Tournament {
             hand_for_hand: false,
             hfh_hands: Vec::new(),
             finished: Vec::new(),
-            rng: StdRng::seed_from_u64(config.seed),
+            draws: 0,
             config,
         };
         for l in &t.config.levels {
@@ -227,11 +241,17 @@ impl Tournament {
             t.open_table()?;
         }
         let mut entrants = entrants;
-        shuffle(&mut entrants, &mut t.rng);
+        shuffle(&mut entrants, &mut t.rng());
         for (i, e) in entrants.into_iter().enumerate() {
             t.seat_entrant(i % n_tables, e)?;
         }
         Ok(t)
+    }
+
+    /// A generator for the next random choice (see `draws`).
+    fn rng(&mut self) -> StdRng {
+        self.draws += 1;
+        StdRng::seed_from_u64(self.config.seed ^ self.draws.wrapping_mul(0xD1B5_4A32_D192_ED03))
     }
 
     fn rules_for(&self, level: Level) -> TableRules {
@@ -278,6 +298,7 @@ impl Tournament {
         let table = self.tables[id].as_mut().expect("live table");
         *table.seat_mut(seat) = e.into_seat();
         table.set_stack(seat, stack)?;
+        arrive(table, seat);
         self.entries += 1;
         Ok(SeatRef { table: id, seat })
     }
@@ -290,7 +311,7 @@ impl Tournament {
         if empty.is_empty() {
             None
         } else {
-            Some(empty[self.rng.random_range(0..empty.len())])
+            Some(empty[self.rng().random_range(0..empty.len())])
         }
     }
 
@@ -435,7 +456,7 @@ impl Tournament {
                     .into_iter()
                     .filter(|&t| self.players_at(t) == fewest)
                     .collect();
-                shortest[self.rng.random_range(0..shortest.len())]
+                shortest[self.rng().random_range(0..shortest.len())]
             }
             None => self.open_table()?,
         };
@@ -636,7 +657,7 @@ impl Tournament {
             .into_iter()
             .filter(|&t| self.players_at(t) == fewest)
             .collect();
-        Some(shortest[self.rng.random_range(0..shortest.len())])
+        Some(shortest[self.rng().random_range(0..shortest.len())])
     }
 
     /// Puts an existing player with `stack` chips in a random empty seat at
@@ -648,10 +669,92 @@ impl Tournament {
         let table = self.tables[dest].as_mut().expect("live");
         *table.seat_mut(s) = seat;
         table.set_stack(s, stack)?;
+        arrive(table, s);
         Ok(SeatRef {
             table: dest,
             seat: s,
         })
+    }
+}
+
+impl Tournament {
+    /// The whole tournament as saved data (JSON with the `serde` feature): its
+    /// tables with the hands being played, stacks, the level, eliminations
+    /// and what comes next. [`Self::restore`] carries on from it exactly as
+    /// this one would. Bots aren't saved; `restore` asks for them again.
+    pub fn snapshot(&self) -> TournamentSnapshot {
+        TournamentSnapshot {
+            version: TOURNAMENT_SNAPSHOT_VERSION,
+            config: self.config.clone(),
+            tables: self
+                .tables
+                .iter()
+                .map(|t| t.as_ref().map(Table::snapshot))
+                .collect(),
+            level: self.level,
+            finishes: self.finishes.clone(),
+            winner: self.winner.clone(),
+            entries: self.entries,
+            hand_for_hand: self.hand_for_hand,
+            hfh_hands: self.hfh_hands.clone(),
+            finished: self.finished.clone(),
+            draws: self.draws,
+        }
+    }
+
+    /// Loads a saved tournament. `bot(id)` gives the bot for each entrant
+    /// (by id) who had one; one that can't be given back fails the load, as
+    /// does a snapshot of another version or one that doesn't fit together.
+    pub fn restore(
+        s: &TournamentSnapshot,
+        mut bot: impl FnMut(&str) -> Option<Box<dyn Bot>>,
+    ) -> Result<Self, PlayError> {
+        let bad = PlayError::InvalidSnapshot;
+        let c = &s.config;
+        if s.version != TOURNAMENT_SNAPSHOT_VERSION
+            || !(2..=MAX_PLAYERS).contains(&c.table_size)
+            || c.levels.is_empty()
+            || s.level >= c.levels.len()
+            || s.tables.is_empty()
+            || s.hfh_hands.len() != s.tables.len()
+            || s.finished.len() != s.tables.len()
+        {
+            return Err(bad);
+        }
+        let mut tables = Vec::with_capacity(s.tables.len());
+        for t in &s.tables {
+            tables.push(match t {
+                Some(t) => {
+                    if t.seats.len() != c.table_size {
+                        return Err(bad);
+                    }
+                    Some(Table::restore(t, |seat| bot(&t.seats[seat].id))?)
+                }
+                None => None,
+            });
+        }
+        Ok(Self {
+            config: c.clone(),
+            tables,
+            level: s.level,
+            finishes: s.finishes.clone(),
+            winner: s.winner.clone(),
+            entries: s.entries,
+            hand_for_hand: s.hand_for_hand,
+            hfh_hands: s.hfh_hands.clone(),
+            finished: s.finished.clone(),
+            draws: s.draws,
+        })
+    }
+}
+
+/// Someone has just sat in `seat` (a move, a late entry or a re-entry). Once
+/// the table has dealt, they aren't dealt in on the button or the small blind
+/// (see [`Table::arrive`]), so a newcomer can't play an orbit without paying a
+/// big blind; before the first hand everyone starts together.
+fn arrive(table: &mut Table, seat: usize) {
+    if table.hand_number() > 0 {
+        table.arrive(seat);
     }
 }
 

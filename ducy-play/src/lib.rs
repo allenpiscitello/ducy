@@ -58,7 +58,10 @@ pub use personality::{Personality, PersonalityBot, Style, position_strength, sca
 pub use process::ProcessBot;
 pub use rules::{BettingStructure, TableRules, Variant};
 pub use showdown::{Award, Pot};
-pub use snapshot::{HandSnapshot, HostSnapshot, SNAPSHOT_VERSION, TableSnapshot};
+pub use snapshot::{
+    HandSnapshot, HostSnapshot, SNAPSHOT_VERSION, TOURNAMENT_SNAPSHOT_VERSION, TableSnapshot,
+    TournamentSnapshot,
+};
 pub use table::{SeatState, Table, TableSeat, TableView};
 pub use tournament::{
     Entrant, Finish, HandReport, Level, Move, SeatRef, Standing, Tournament, TournamentConfig,
