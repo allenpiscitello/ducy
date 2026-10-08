@@ -3,6 +3,61 @@ use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{error::PlayError, rules::Variant};
 
+/// Where a hand's cards come from (#135).
+///
+/// A [`Deal`] knows every card up front, as tables have always worked. A
+/// dealer for the trustless shuffle (#134) doesn't let the engine see them:
+/// a player's hole cards are known only to that player until they show them
+/// at showdown ([`crate::Hand::reveal`]), and the board arrives street by
+/// street as the host unlocks it ([`crate::Hand::deal_board`]); meanwhile the
+/// hand waits ([`crate::Hand::awaiting`]).
+pub trait Dealer {
+    /// How many players are dealt in.
+    fn players(&self) -> usize;
+    /// Player `player`'s hole cards, or `None` if only that player may see
+    /// them.
+    fn hole_cards(&self, player: usize) -> Option<Deck>;
+    /// The whole board, if it's known up front; otherwise it's dealt street
+    /// by street with [`crate::Hand::deal_board`].
+    fn board(&self) -> Option<[Card; 5]>;
+}
+
+impl Dealer for Deal {
+    fn players(&self) -> usize {
+        self.hole_cards.len()
+    }
+
+    fn hole_cards(&self, player: usize) -> Option<Deck> {
+        self.hole_cards.get(player).copied()
+    }
+
+    fn board(&self) -> Option<[Card; 5]> {
+        Some(self.board)
+    }
+}
+
+/// A deal the engine never sees: every player's hole cards stay with that
+/// player until showdown, and the board is dealt street by street. The cards
+/// themselves come from outside, e.g. a trustless shuffle (#134).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HiddenDeal {
+    pub players: usize,
+}
+
+impl Dealer for HiddenDeal {
+    fn players(&self) -> usize {
+        self.players
+    }
+
+    fn hole_cards(&self, _player: usize) -> Option<Deck> {
+        None
+    }
+
+    fn board(&self) -> Option<[Card; 5]> {
+        None
+    }
+}
+
 /// Every card a hand can use: each player's hole cards and the full board.
 /// Board cards are revealed street by street as the hand is played.
 #[derive(Clone, Debug, PartialEq, Eq)]

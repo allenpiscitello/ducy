@@ -363,7 +363,13 @@ fn table_rules_change_between_hands_only() {
     table.set_rules(plo).unwrap();
     table.new_hand().unwrap();
     let hand = table.hand().unwrap();
-    assert!(hand.deal().hole_cards().iter().all(|h| h.num_cards() == 4));
+    assert!(
+        hand.deal()
+            .unwrap()
+            .hole_cards()
+            .iter()
+            .all(|h| h.num_cards() == 4)
+    );
     assert_eq!(hand.rules().big_blind, 10);
     while table.advance().unwrap() {}
     assert_eq!((0..3).map(|s| table.stack(s)).sum::<u64>(), 600);

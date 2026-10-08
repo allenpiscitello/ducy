@@ -178,7 +178,7 @@ impl Follower {
                 self.real.contributed[p] += added;
                 self.real.current_bet = to;
             }
-            Event::Award { .. } => {}
+            Event::Award { .. } | Event::Reveal { .. } | Event::Forfeit { .. } => {}
         }
     }
 

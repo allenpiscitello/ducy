@@ -98,7 +98,10 @@ impl Hand {
         let legal = self.legal_actions().filter(|l| l.seat == seat)?;
         Some(Observation {
             seat,
-            hole_cards: self.deal().hole_cards()[seat],
+            // Empty for a hand dealt hidden: the engine doesn't know them.
+            hole_cards: self
+                .hole_cards(seat)
+                .unwrap_or_else(ducy::deck::Deck::empty),
             rules: *self.rules(),
             street: self.street(),
             board: self.board().to_vec(),
@@ -130,7 +133,7 @@ impl Hand {
         let shown = (0..self.num_seats())
             .map(|s| {
                 let revealed = s == seat || (result.showdown && !self.has_folded(s));
-                revealed.then(|| self.deal().hole_cards()[s])
+                revealed.then(|| self.hole_cards(s)).flatten()
             })
             .collect();
         Some(HandSummary {

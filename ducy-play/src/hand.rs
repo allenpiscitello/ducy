@@ -1,7 +1,7 @@
 use ducy::deck::{Card, Deck};
 
 use crate::{
-    deal::Deal,
+    deal::{Deal, Dealer},
     error::PlayError,
     rules::{BettingStructure, TableRules},
     showdown::{Pot, best_hands, build_pots, split},
@@ -179,6 +179,19 @@ pub enum Event {
         /// The new cards (3 on the flop, then 1).
         cards: Vec<Card>,
     },
+    /// At showdown, a seat whose hole cards the engine didn't know showed
+    /// them (see [`Dealer`]).
+    Reveal {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+        /// Its hole cards.
+        cards: Vec<Card>,
+    },
+    /// At showdown, a seat didn't show its hole cards: it can't win.
+    Forfeit {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+    },
     /// A seat won chips from pot `pot` (0 is the main pot).
     Award {
         /// The seat, as an index into the hand's stacks.
@@ -227,6 +240,17 @@ impl Seat {
     }
 }
 
+/// What a hand is waiting for from outside before it can go on, with a
+/// [`Dealer`] that doesn't give the engine every card (see [`Hand::awaiting`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Awaiting {
+    /// The board cards for this street: [`Hand::deal_board`].
+    Board(Street),
+    /// These seats' hole cards at showdown: [`Hand::reveal`] or
+    /// [`Hand::forfeit`] each.
+    Reveals(Vec<usize>),
+}
+
 /// Blinds a player posts on coming back after missing them (see
 /// [`Hand::with_posts`]): `dead` goes straight into the pot (a missed small
 /// blind), `live` counts as their bet for the street (a missed big blind,
@@ -266,7 +290,17 @@ pub struct Post {
 #[derive(Clone, Debug)]
 pub struct Hand {
     rules: TableRules,
-    deal: Deal,
+    /// The whole deal, when every card was known from the start.
+    deal: Option<Deal>,
+    /// Each seat's hole cards as far as the engine knows them: `None` until
+    /// a hidden hand is shown at showdown.
+    hole: Vec<Option<Deck>>,
+    /// Seats that didn't show at showdown.
+    forfeited: Vec<bool>,
+    /// The board cards known so far, in order (all five up front with a
+    /// [`Deal`]).
+    board: Vec<Card>,
+    awaiting: Option<Awaiting>,
     button: usize,
     seats: Vec<Seat>,
     street: Street,
@@ -299,6 +333,21 @@ impl Hand {
         deal: Deal,
         posts: &[Post],
     ) -> Result<Self, PlayError> {
+        let mut hand = Self::with_dealer(rules, stacks, button, &deal, posts)?;
+        hand.deal = Some(deal);
+        Ok(hand)
+    }
+
+    /// Like [`Hand::with_posts`], with the cards from any [`Dealer`]. With a
+    /// dealer that hides cards from the engine, the hand stops to wait for
+    /// them when they're needed: see [`Hand::awaiting`].
+    pub fn with_dealer(
+        rules: TableRules,
+        stacks: &[u64],
+        button: usize,
+        dealer: &dyn Dealer,
+        posts: &[Post],
+    ) -> Result<Self, PlayError> {
         rules.validate()?;
         let n = stacks.len();
         if !(2..=MAX_PLAYERS).contains(&n) {
@@ -307,13 +356,26 @@ impl Hand {
         if button >= n || stacks.contains(&0) {
             return Err(PlayError::InvalidSetup);
         }
-        if deal.hole_cards().len() != n
-            || deal
-                .hole_cards()
-                .iter()
-                .any(|h| h.num_cards() as usize != rules.variant.hole_cards())
-        {
+        if dealer.players() != n {
             return Err(PlayError::InvalidDeal);
+        }
+        let hole: Vec<Option<Deck>> = (0..n).map(|i| dealer.hole_cards(i)).collect();
+        let board = dealer.board().map(|b| b.to_vec()).unwrap_or_default();
+        // The cards the engine knows: the right number each, none twice.
+        let mut seen = Deck::empty();
+        for h in hole.iter().flatten() {
+            if h.num_cards() as usize != rules.variant.hole_cards()
+                || u64::from(seen) & u64::from(*h) != 0
+            {
+                return Err(PlayError::InvalidDeal);
+            }
+            seen |= *h;
+        }
+        for &c in &board {
+            if seen.has_card(&c) {
+                return Err(PlayError::InvalidDeal);
+            }
+            seen |= c;
         }
 
         let seats = stacks
@@ -330,7 +392,11 @@ impl Hand {
             .collect();
         let mut hand = Self {
             rules,
-            deal,
+            deal: None,
+            hole,
+            forfeited: vec![false; n],
+            board,
+            awaiting: None,
             button,
             seats,
             street: Street::Preflop,
@@ -590,45 +656,164 @@ impl Hand {
     fn finish_street(&mut self) -> Result<(), PlayError> {
         loop {
             let Some(next) = self.street.next() else {
-                return self.settle(true);
+                return self.showdown();
             };
-            let shown = self.street.board_cards();
-            self.street = next;
-            let cards = self.deal.board()[shown..next.board_cards()].to_vec();
-            self.events.push(Event::Board {
-                street: next,
-                cards,
-            });
-            self.current_bet = 0;
-            self.last_raise = self.rules.big_blind;
-            for s in &mut self.seats {
-                s.street_bet = 0;
-                s.acted = false;
-                s.can_raise = true;
+            // A board dealt street by street: wait for these cards.
+            if self.board.len() < next.board_cards() {
+                self.to_act = None;
+                self.awaiting = Some(Awaiting::Board(next));
+                return Ok(());
             }
-            self.to_act = self.find_to_act((self.button + 1) % self.seats.len());
+            self.start_street(next);
             if self.to_act.is_some() {
                 return Ok(());
             }
         }
     }
 
+    fn start_street(&mut self, next: Street) {
+        let shown = self.street.board_cards();
+        self.street = next;
+        let cards = self.board[shown..next.board_cards()].to_vec();
+        self.events.push(Event::Board {
+            street: next,
+            cards,
+        });
+        self.current_bet = 0;
+        self.last_raise = self.rules.big_blind;
+        for s in &mut self.seats {
+            s.street_bet = 0;
+            s.acted = false;
+            s.can_raise = true;
+        }
+        self.to_act = self.find_to_act((self.button + 1) % self.seats.len());
+    }
+
+    /// The seats still contesting the pot at showdown: in the hand and not
+    /// forfeited.
+    fn contesting(&self) -> Vec<usize> {
+        (0..self.seats.len())
+            .filter(|&s| !self.seats[s].folded && !self.forfeited[s])
+            .collect()
+    }
+
+    /// Goes to showdown, first waiting for anyone whose hole cards the
+    /// engine doesn't know to show them. Only shown hands can win; if
+    /// everyone else has forfeited, the last player in wins unseen.
+    fn showdown(&mut self) -> Result<(), PlayError> {
+        let contesting = self.contesting();
+        let unseen: Vec<usize> = contesting
+            .iter()
+            .copied()
+            .filter(|&s| self.hole[s].is_none())
+            .collect();
+        if contesting.len() > 1 && !unseen.is_empty() {
+            self.to_act = None;
+            self.awaiting = Some(Awaiting::Reveals(unseen));
+            return Ok(());
+        }
+        self.awaiting = None;
+        self.settle(true)
+    }
+
+    /// What the hand is waiting for from outside, if anything: board cards
+    /// it doesn't know, or hidden hands at showdown. Nobody acts meanwhile.
+    pub fn awaiting(&self) -> Option<&Awaiting> {
+        self.awaiting.as_ref()
+    }
+
+    /// Deals the cards for the street the hand is waiting for
+    /// ([`Awaiting::Board`]): one card for the turn or river, three for the
+    /// flop. The dealer vouches for them; the engine only checks it doesn't
+    /// already know them.
+    pub fn deal_board(&mut self, cards: &[Card]) -> Result<(), PlayError> {
+        let Some(Awaiting::Board(street)) = self.awaiting else {
+            return Err(PlayError::IllegalAction);
+        };
+        if self.board.len() + cards.len() != street.board_cards() || !self.cards_unseen(cards) {
+            return Err(PlayError::InvalidDeal);
+        }
+        self.board.extend_from_slice(cards);
+        self.awaiting = None;
+        self.start_street(street);
+        if self.to_act.is_none() {
+            self.finish_street()?;
+        }
+        Ok(())
+    }
+
+    /// Whether none of `cards` is one the engine already knows, and none is
+    /// there twice.
+    fn cards_unseen(&self, cards: &[Card]) -> bool {
+        let mut seen = Deck::empty();
+        for h in self.hole.iter().flatten() {
+            seen |= *h;
+        }
+        for &c in self.board.iter().chain(cards) {
+            if seen.has_card(&c) {
+                return false;
+            }
+            seen |= c;
+        }
+        true
+    }
+
+    /// At showdown, `seat` shows the hole cards the engine didn't know. The
+    /// dealer checks they're really the seat's cards (e.g. against the
+    /// trustless shuffle); the engine checks the count and that it doesn't
+    /// already know them.
+    pub fn reveal(&mut self, seat: usize, cards: Deck) -> Result<(), PlayError> {
+        if !self.awaiting_reveal(seat) {
+            return Err(PlayError::IllegalAction);
+        }
+        let list: Vec<Card> = cards.iter(false).collect();
+        if list.len() != self.rules.variant.hole_cards() || !self.cards_unseen(&list) {
+            return Err(PlayError::InvalidDeal);
+        }
+        self.hole[seat] = Some(cards);
+        self.events.push(Event::Reveal { seat, cards: list });
+        self.showdown()
+    }
+
+    /// At showdown, `seat` doesn't show (they declined, left, or ran out of
+    /// time): they can't win any pot.
+    pub fn forfeit(&mut self, seat: usize) -> Result<(), PlayError> {
+        if !self.awaiting_reveal(seat) {
+            return Err(PlayError::IllegalAction);
+        }
+        self.forfeited[seat] = true;
+        self.events.push(Event::Forfeit { seat });
+        self.showdown()
+    }
+
+    fn awaiting_reveal(&self, seat: usize) -> bool {
+        matches!(&self.awaiting, Some(Awaiting::Reveals(seats)) if seats.contains(&seat))
+            && self.hole[seat].is_none()
+    }
+
     fn settle(&mut self, showdown: bool) -> Result<(), PlayError> {
         let n = self.seats.len();
         let contributed: Vec<u64> = self.seats.iter().map(|s| s.contributed).collect();
-        let folded: Vec<bool> = self.seats.iter().map(|s| s.folded).collect();
+        // A forfeited hand can't win, but its chips stay in the pots it
+        // reached, like a fold's. If every hand left was forfeited, they
+        // share the pots as if none had been.
+        let any_contesting = !self.contesting().is_empty();
+        let out: Vec<bool> = (0..n)
+            .map(|s| self.seats[s].folded || (any_contesting && self.forfeited[s]))
+            .collect();
         let mut payouts = vec![0u64; n];
         let mut pots = Vec::new();
+        let hole: Vec<Deck> = self
+            .hole
+            .iter()
+            .map(|h| h.unwrap_or_else(Deck::empty))
+            .collect();
 
-        for (index, (amount, eligible)) in build_pots(&contributed, &folded).into_iter().enumerate()
-        {
-            let (winners, winning_hand) = if eligible.len() > 1 {
-                let (winners, hand) = best_hands(
-                    self.rules.variant,
-                    self.deal.hole_cards(),
-                    self.deal.board(),
-                    &eligible,
-                )?;
+        for (index, (amount, eligible)) in build_pots(&contributed, &out).into_iter().enumerate() {
+            let shown = eligible.iter().all(|&s| self.hole[s].is_some());
+            let (winners, winning_hand) = if eligible.len() > 1 && shown && self.board.len() == 5 {
+                let board: [Card; 5] = self.board.clone().try_into().expect("five cards");
+                let (winners, hand) = best_hands(self.rules.variant, &hole, &board, &eligible)?;
                 (winners, Some(hand))
             } else {
                 (eligible.clone(), None)
@@ -694,12 +879,24 @@ impl Hand {
 
     /// Board cards revealed so far.
     pub fn board(&self) -> &[Card] {
-        &self.deal.board()[..self.street.board_cards()]
+        &self.board[..self.street.board_cards()]
     }
 
-    /// The cards for this hand.
-    pub fn deal(&self) -> &Deal {
-        &self.deal
+    /// The cards for this hand, when every one was known from the start
+    /// (a [`Deal`]); `None` with a dealer that hides them.
+    pub fn deal(&self) -> Option<&Deal> {
+        self.deal.as_ref()
+    }
+
+    /// `seat`'s hole cards, if the engine knows them: always with a
+    /// [`Deal`]; with a hiding dealer, once shown at showdown.
+    pub fn hole_cards(&self, seat: usize) -> Option<Deck> {
+        self.hole.get(seat).copied().flatten()
+    }
+
+    /// Whether `seat` forfeited at showdown by not showing.
+    pub fn has_forfeited(&self, seat: usize) -> bool {
+        self.forfeited[seat]
     }
 
     /// The rules for this hand.
@@ -760,18 +957,20 @@ impl Hand {
 
 impl Hand {
     /// The hand as saved data: how it started and what has happened since.
+    /// A hand with hidden cards saves only what the engine knows, which
+    /// [`Hand::restore`] refuses: those can't be resumed yet (the trustless
+    /// shuffle will keep its own state, #139).
     pub fn snapshot(&self) -> HandSnapshot {
         HandSnapshot {
             rules: self.rules,
             stacks: self.seats.iter().map(|s| s.starting_stack).collect(),
             button: self.button,
             hole_cards: self
-                .deal
-                .hole_cards()
+                .hole
                 .iter()
-                .map(|d| d.iter(false).collect())
+                .map(|d| d.map(|d| d.iter(false).collect()).unwrap_or_default())
                 .collect(),
-            board: self.deal.board().to_vec(),
+            board: self.board.clone(),
             events: self.events.clone(),
         }
     }

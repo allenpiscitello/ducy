@@ -187,6 +187,13 @@ enum EventJs {
         street: &'static str,
         cards: Vec<String>,
     },
+    Reveal {
+        seat: usize,
+        cards: Vec<String>,
+    },
+    Forfeit {
+        seat: usize,
+    },
     Award {
         seat: usize,
         pot: usize,
@@ -239,6 +246,11 @@ impl From<&Event> for EventJs {
                 street: street_name(*street),
                 cards: cards.iter().map(|c| c.to_string()).collect(),
             },
+            Event::Reveal { seat, cards } => Self::Reveal {
+                seat: *seat,
+                cards: cards.iter().map(|c| c.to_string()).collect(),
+            },
+            Event::Forfeit { seat } => Self::Forfeit { seat: *seat },
             Event::Award { seat, pot, amount } => Self::Award {
                 seat: *seat,
                 pot: *pot,
@@ -398,12 +410,15 @@ impl PokerHand {
 
     /// A seat's hole cards, e.g. `"As Ah"`. The app decides who may see them.
     pub fn hole_cards(&self, seat: usize) -> Result<String, JsError> {
-        self.hand
-            .deal()
-            .hole_cards()
-            .get(seat)
+        if seat >= self.hand.num_seats() {
+            return Err(JsError::new("no such seat"));
+        }
+        // Empty for hole cards the engine never saw (a hidden deal).
+        Ok(self
+            .hand
+            .hole_cards(seat)
             .map(|d| d.to_string())
-            .ok_or_else(|| JsError::new("no such seat"))
+            .unwrap_or_default())
     }
 
     /// Everything that has happened, in order, as objects with a `type` of
