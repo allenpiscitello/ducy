@@ -68,7 +68,9 @@ const SHUFFLE: &[u8] = b"ducy-fair-deal-v1/shuffle";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Reveal {
+    /// The random value that goes into the hand's seed.
     pub value: Bytes32,
+    /// Random padding that hides the value inside the commitment.
     pub nonce: Bytes32,
 }
 
@@ -193,6 +195,7 @@ impl std::error::Error for FairError {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FairOutcome {
+    /// The hand's seed ([`hand_seed`] of the used values).
     pub seed: Bytes32,
     /// The valid reveals, in participant order: publish these after the hand.
     pub reveals: Vec<Reveal>,
@@ -214,6 +217,7 @@ pub struct FairRound {
 }
 
 impl FairRound {
+    /// A round for `participants` people, with nothing committed yet.
     pub fn new(participants: usize) -> Self {
         Self {
             commitments: vec![None; participants],
