@@ -11,8 +11,8 @@
 //! the page passes it each player's messages and sends back what it returns.
 
 use ducy_play::{
-    Action, ChipRequest, Command, Departure, Outgoing, Personality, SeatedPlayer, Table, TableHost,
-    TableRules, TableSeat, Variant,
+    Action, ChipRequest, Command, Departure, Outgoing, Personality, Refund, SeatedPlayer, Table,
+    TableHost, TableRules, TableSeat, Variant,
 };
 use std::{cell::RefCell, sync::Arc};
 
@@ -440,6 +440,9 @@ struct HostResult<'a> {
     /// bank) and the chips they took, since the last call.
     players: Vec<SeatedPlayer>,
     departed: Vec<Departure>,
+    /// Approved top-ups that didn't fit under the maximum at the deal, since
+    /// the last call: the app returns them to the player (ducy-play Refund).
+    refunds: Vec<Refund>,
     out: Vec<Message<'a>>,
 }
 
@@ -582,9 +585,11 @@ impl MultiTable {
 
     fn result(&mut self, out: &[Outgoing], now: u64) -> Result<JsValue, JsError> {
         let departed = self.host.take_departures();
+        let refunds = self.host.take_refunds();
         to_js(&HostResult {
             players: self.host.seated(),
             departed,
+            refunds,
             seq: self.host.seq(),
             state: self.host.host_view(),
             bot_to_act: self.host.auto_to_act(),

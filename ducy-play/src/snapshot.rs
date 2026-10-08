@@ -114,5 +114,8 @@ pub struct HostSnapshot {
     pub(crate) host_approved: u64,
     pub(crate) has_host: bool,
     pub(crate) departed: Vec<crate::Departure>,
+    /// Approved chips that didn't fit under the maximum, not yet taken.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) refunds: Vec<crate::Refund>,
     pub(crate) sit_out_limit_ms: u64,
 }

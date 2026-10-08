@@ -49,8 +49,8 @@ pub use hand::{
     Action, Event, Hand, HandResult, LegalActions, MAX_PLAYERS, Post, RaiseRange, Street,
 };
 pub use host::{
-    ChipRequest, ChipsView, Command, DROP_AFTER_HANDS, Departure, MAX_NAME, Outgoing, SeatStatus,
-    SeatedPlayer, TableHost, Update,
+    ChipRequest, ChipsView, Command, DROP_AFTER_HANDS, Departure, MAX_NAME, Outgoing, Refund,
+    SeatStatus, SeatedPlayer, TableHost, Update,
 };
 pub use matchup::{MatchConfig, MatchResult, run_match};
 pub use personality::{Personality, PersonalityBot, Style, position_strength, scale_for_table};
