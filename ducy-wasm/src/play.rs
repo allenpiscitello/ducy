@@ -186,8 +186,10 @@ struct Gto {
 }
 
 /// Turn and river iterations per solve for the GTO bot in the page. Fewer
-/// than natively (`TurnSolving::default`): WebAssembly runs on one core.
-const PAGE_TURN_ITERATIONS: usize = 50;
+/// turn iterations than natively (`TurnSolving::default`, 50): WebAssembly
+/// runs on one core, where 50 take about 6.5 s a turn decision and 20 about
+/// 3 s (Node, the `gto-hunl-300m` model). A river solve takes about 0.4 s.
+const PAGE_TURN_ITERATIONS: usize = 20;
 const PAGE_RIVER_ITERATIONS: usize = 200;
 
 thread_local! {

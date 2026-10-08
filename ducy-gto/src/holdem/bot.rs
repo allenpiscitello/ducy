@@ -26,7 +26,8 @@
 //! betting is solved from the real chips, with the rivers played out by the
 //! blueprint (or, for the opponent, the blueprint biased one of several
 //! ways). With river solving on as well, the river's ranges then follow the
-//! turn solution rather than the blueprint.
+//! turn solution rather than the blueprint. [`GtoBot::with_solving`] turns
+//! on both at their defaults, the strongest setup measured.
 //!
 //! The blueprint is for heads-up play. At a table with more players, or if
 //! the hand ever can't be followed on the tree, the bot falls back to a

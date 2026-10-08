@@ -423,6 +423,31 @@ cargo run --release -p ducy-gto --example gto_match -- \
     --deals 2000 --lbr 4000 --turn-solve 50 --river-solve 200
 ```
 
+### What it's worth
+
+Measured against river solving alone, with 50 turn and 200 river
+iterations, the `gto-hunl-300m` model, and the LBR hands paired up to the
+turn:
+
+| 70,000 paired hands | LBR wins (mbb/hand, lower is better) |
+|---|---|
+| River solving only | 186 ± 164 |
+| Turn and river solving | −11 ± 162 |
+| **Change** | **−197 ± 97** |
+
+So turn solving makes the bot clearly harder to exploit: the whole 95%
+interval of the change is below zero. In a duplicate match of 3,000 deals
+the two bots were even (−6.8 ± 24.9 bb/100), as two near-equilibrium
+strategies should be. The cost is about 3–4 s a turn decision on 12 cores,
+and about 150 MB.
+
+So `GtoBot::with_solving()` turns on both, at `TurnSolving::default()` (50
+iterations) and `RiverSolving::default()` (200). In the page (ducy-wasm),
+the GTO bot solves both too, with 20 turn iterations: WebAssembly runs on
+one core, where 50 take about 6.5 s a turn decision and 20 about 3 s.
+`setGtoSolving(turn, river)` changes that, 0 playing the blueprint on that
+street.
+
 The tests check that check-down leaf values match brute force over every
 pair of hands and river, that exploitability falls toward 0 (with all rivers
 and with 8 sampled), that a chooser's best response gains from its
@@ -438,5 +463,5 @@ turn and river solving on.
 5. **Done:** Train and store the blueprint strategy (#89)
 6. **Done:** `GtoBot`: play the blueprint in ducy-play, with action translation (#90)
 7. Evaluation: Local Best Response and duplicate matches against the built-in bots (#91)
-8. Real-time depth-limited subgame solving (#92): **the river is done**;
-   depth-limited solving of the turn works but is too slow to play with yet
+8. **Done:** Real-time subgame solving (#92): the river exactly, the turn
+   depth-limited, both on by default
