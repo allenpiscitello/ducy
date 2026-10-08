@@ -27,6 +27,17 @@ pub struct SeatStats {
 }
 
 impl SeatStats {
+    /// Adds one hand's counts.
+    pub fn add(&mut self, c: &HandCounts) {
+        self.hands += 1;
+        self.vpip_hands += u32::from(c.vpip);
+        self.pfr_hands += u32::from(c.pfr);
+        self.faced_bets += c.faced_bets;
+        self.folds_to_bets += c.folds_to_bets;
+        self.aggressive += c.aggressive;
+        self.calls += c.calls;
+    }
+
     /// Share of hands played voluntarily, with a light prior of 25% so a few
     /// hands don't swing it to an extreme.
     pub fn vpip(&self) -> f64 {
@@ -55,6 +66,128 @@ fn smoothed(count: u32, total: u32, prior: f64) -> f64 {
     (count as f64 + 4.0 * prior) / (total as f64 + 4.0)
 }
 
+/// What one seat did in one finished hand. [`OpponentModel`] adds these up
+/// for the bots, and ducy.cards counts its player stats from them too
+/// (through ducy-wasm), so both read players the same way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct HandCounts {
+    /// Called or raised preflop (posting a blind doesn't count).
+    pub vpip: bool,
+    /// Raised preflop.
+    pub pfr: bool,
+    /// Made a preflop decision facing exactly one raise (a chance to
+    /// 3-bet), other than a call that put it all-in.
+    pub three_bet_chance: bool,
+    /// ... and re-raised.
+    pub three_bet: bool,
+    /// Bets and raises after the flop.
+    pub aggressive: u32,
+    /// Calls after the flop.
+    pub calls: u32,
+    /// Folds after the flop.
+    pub folds: u32,
+    /// Times it faced a bet or raise after the flop.
+    pub faced_bets: u32,
+    /// Times it folded to one.
+    pub folds_to_bets: u32,
+    /// Still in when the flop came.
+    pub saw_flop: bool,
+    /// Folded at some point.
+    pub folded: bool,
+}
+
+/// Counts for each of `seats` seats from one finished hand's events.
+pub fn hand_counts(history: &[Event], seats: usize) -> Vec<HandCounts> {
+    let mut c = vec![HandCounts::default(); seats];
+    let mut street = Street::Preflop;
+    let mut street_bets = vec![0u64; seats];
+    let mut current = 0u64;
+    // Preflop bets and raises so far (blinds and posts aren't raises).
+    let mut raises = 0u32;
+
+    for event in history {
+        let seat_ok = |seat: usize| seat < seats;
+        match *event {
+            Event::SmallBlind { seat, amount }
+            | Event::BigBlind { seat, amount }
+            | Event::Post {
+                seat, live: amount, ..
+            } if seat_ok(seat) => {
+                street_bets[seat] += amount;
+                current = current.max(street_bets[seat]);
+            }
+            Event::Board { street: next, .. } => {
+                if street == Street::Preflop {
+                    for s in c.iter_mut().filter(|s| !s.folded) {
+                        s.saw_flop = true;
+                    }
+                }
+                street = next;
+                street_bets.iter_mut().for_each(|b| *b = 0);
+                current = 0;
+            }
+            Event::Fold { seat } if seat_ok(seat) => {
+                let facing = current > street_bets[seat];
+                let s = &mut c[seat];
+                if street == Street::Preflop {
+                    preflop_decision(s, raises, false, false);
+                } else {
+                    s.folds += 1;
+                    if facing {
+                        s.faced_bets += 1;
+                        s.folds_to_bets += 1;
+                    }
+                }
+                s.folded = true;
+            }
+            Event::Call {
+                seat,
+                amount,
+                all_in,
+            } if seat_ok(seat) => {
+                let s = &mut c[seat];
+                if street == Street::Preflop {
+                    preflop_decision(s, raises, false, all_in);
+                    s.vpip = true;
+                } else {
+                    s.faced_bets += 1;
+                    s.calls += 1;
+                }
+                street_bets[seat] += amount;
+            }
+            Event::Bet { seat, to, .. } | Event::Raise { seat, to, .. } if seat_ok(seat) => {
+                let facing = current > street_bets[seat];
+                let s = &mut c[seat];
+                if street == Street::Preflop {
+                    preflop_decision(s, raises, true, false);
+                    s.vpip = true;
+                    s.pfr = true;
+                    raises += 1;
+                } else {
+                    s.aggressive += 1;
+                    if facing {
+                        s.faced_bets += 1;
+                    }
+                }
+                street_bets[seat] = to;
+                current = current.max(to);
+            }
+            _ => {}
+        }
+    }
+    c
+}
+
+/// A preflop decision facing exactly one raise is a chance to 3-bet, the
+/// first time, unless a call put the seat all-in (it couldn't have raised).
+fn preflop_decision(s: &mut HandCounts, raises: u32, raised: bool, all_in_call: bool) {
+    if raises == 1 && !s.three_bet_chance && !all_in_call {
+        s.three_bet_chance = true;
+        s.three_bet = raised;
+    }
+}
+
 /// Stats for every seat, updated from each finished hand's history.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OpponentModel {
@@ -77,69 +210,8 @@ impl OpponentModel {
         if self.seats.len() < seats {
             self.seats.resize(seats, SeatStats::default());
         }
-        let mut street = Street::Preflop;
-        let mut street_bets = vec![0u64; seats];
-        let mut current = 0u64;
-        let mut vpip = vec![false; seats];
-        let mut pfr = vec![false; seats];
-
-        for event in history {
-            // Whether `seat` faced a bet larger than what it had put in.
-            let facing = |seat: usize, street_bets: &[u64]| current > street_bets[seat];
-            match *event {
-                Event::SmallBlind { seat, amount }
-                | Event::BigBlind { seat, amount }
-                | Event::Post {
-                    seat, live: amount, ..
-                } => {
-                    street_bets[seat] += amount;
-                    current = current.max(street_bets[seat]);
-                }
-                Event::Board { street: next, .. } => {
-                    street = next;
-                    street_bets.iter_mut().for_each(|b| *b = 0);
-                    current = 0;
-                }
-                Event::Fold { seat } => {
-                    if street != Street::Preflop && facing(seat, &street_bets) {
-                        let s = &mut self.seats[seat];
-                        s.faced_bets += 1;
-                        s.folds_to_bets += 1;
-                    }
-                }
-                Event::Check { .. } => {}
-                Event::Call { seat, amount, .. } => {
-                    if street == Street::Preflop {
-                        vpip[seat] = true;
-                    } else {
-                        let s = &mut self.seats[seat];
-                        s.faced_bets += 1;
-                        s.calls += 1;
-                    }
-                    street_bets[seat] += amount;
-                }
-                Event::Bet { seat, to, .. } | Event::Raise { seat, to, .. } => {
-                    if street == Street::Preflop {
-                        vpip[seat] = true;
-                        pfr[seat] = true;
-                    } else {
-                        let was_facing = facing(seat, &street_bets);
-                        let s = &mut self.seats[seat];
-                        s.aggressive += 1;
-                        if was_facing {
-                            s.faced_bets += 1;
-                        }
-                    }
-                    street_bets[seat] = to;
-                    current = current.max(to);
-                }
-                Event::Ante { .. } | Event::Award { .. } => {}
-            }
-        }
-        for (seat, s) in self.seats.iter_mut().enumerate().take(seats) {
-            s.hands += 1;
-            s.vpip_hands += u32::from(vpip[seat]);
-            s.pfr_hands += u32::from(pfr[seat]);
+        for (s, c) in self.seats.iter_mut().zip(hand_counts(history, seats)) {
+            s.add(&c);
         }
     }
 }
@@ -201,5 +273,91 @@ mod test {
         let blind = model.seat(2);
         assert_eq!((blind.vpip_hands, blind.faced_bets), (0, 0));
         assert_eq!(model.seat(9), SeatStats::default());
+    }
+
+    #[test]
+    fn test_hand_counts() {
+        use Event::*;
+        // Seat 3 posts a missed big blind live; seat 0 opens, seat 2 (big
+        // blind) folds, seat 1 3-bets, seat 3 calls all-in for less, seat 0
+        // calls. Flop: seat 1 bets, seat 0 folds.
+        let history = [
+            SmallBlind { seat: 1, amount: 1 },
+            BigBlind { seat: 2, amount: 2 },
+            Post {
+                seat: 3,
+                dead: 0,
+                live: 2,
+            },
+            Raise {
+                seat: 0,
+                to: 6,
+                all_in: false,
+            },
+            Fold { seat: 2 },
+            Raise {
+                seat: 1,
+                to: 18,
+                all_in: false,
+            },
+            Call {
+                seat: 3,
+                amount: 8,
+                all_in: true,
+            },
+            Call {
+                seat: 0,
+                amount: 12,
+                all_in: false,
+            },
+            Board {
+                street: Street::Flop,
+                cards: Vec::new(),
+            },
+            Bet {
+                seat: 1,
+                to: 20,
+                all_in: false,
+            },
+            Fold { seat: 0 },
+        ];
+        let c = hand_counts(&history, 4);
+        // The opener faced no raise before acting, so no 3-bet chance then;
+        // facing the 3-bet it had already raised, so it isn't one either.
+        assert_eq!(
+            (c[0].vpip, c[0].pfr, c[0].three_bet_chance),
+            (true, true, false)
+        );
+        assert_eq!((c[0].folds, c[0].faced_bets, c[0].folds_to_bets), (1, 1, 1));
+        assert!(c[0].saw_flop && c[0].folded);
+        assert_eq!(
+            (c[1].three_bet_chance, c[1].three_bet, c[1].aggressive),
+            (true, true, 1)
+        );
+        // The big blind folded facing the open: a chance, not taken.
+        assert_eq!(
+            (c[2].three_bet_chance, c[2].three_bet, c[2].vpip),
+            (true, false, false)
+        );
+        assert!(!c[2].saw_flop);
+        // Facing two raises isn't a 3-bet chance.
+        assert_eq!((c[3].three_bet_chance, c[3].vpip), (false, true));
+        // An all-in call facing one raise isn't one either: it couldn't raise.
+        let short = [
+            BigBlind { seat: 1, amount: 2 },
+            Raise {
+                seat: 0,
+                to: 6,
+                all_in: false,
+            },
+            Call {
+                seat: 1,
+                amount: 3,
+                all_in: true,
+            },
+        ];
+        assert!(!hand_counts(&short, 2)[1].three_bet_chance);
+        // Seats past the count, or events for them, don't panic.
+        assert_eq!(hand_counts(&history, 2).len(), 2);
     }
 }

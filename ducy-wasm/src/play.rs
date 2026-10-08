@@ -54,6 +54,57 @@ pub fn bot_personalities() -> Result<JsValue, JsError> {
     serde_wasm_bindgen::to_value(&list).map_err(err)
 }
 
+/// What each of `seats` seats did in one finished hand, counted by the same
+/// rules the bots use (ducy_play::stats::hand_counts): the page adds these
+/// up for its player stats. `events` is the hand's event list as table
+/// views give it. Returns one object per seat: {vpip, pfr, three_bet_chance,
+/// three_bet, aggressive, calls, folds, faced_bets, folds_to_bets, saw_flop,
+/// folded}.
+#[wasm_bindgen(js_name = handCounts)]
+pub fn hand_counts(events: JsValue, seats: usize) -> Result<JsValue, JsError> {
+    let events: Vec<ducy_play::Event> = serde_wasm_bindgen::from_value(events).map_err(err)?;
+    to_js(&ducy_play::stats::hand_counts(&events, seats))
+}
+
+#[derive(Serialize)]
+struct BotReads {
+    vpip: f64,
+    pfr: f64,
+    fold_to_bet: f64,
+    aggression: f64,
+}
+
+/// How the bots read a player from summed counts: the same rates as the
+/// page's, smoothed toward typical values so a few hands don't swing them
+/// (ducy_play::stats::SeatStats). Returns {vpip, pfr, fold_to_bet, aggression}.
+#[wasm_bindgen(js_name = botReads)]
+#[allow(clippy::too_many_arguments)]
+pub fn bot_reads(
+    hands: u32,
+    vpip_hands: u32,
+    pfr_hands: u32,
+    faced_bets: u32,
+    folds_to_bets: u32,
+    aggressive: u32,
+    calls: u32,
+) -> Result<JsValue, JsError> {
+    let s = ducy_play::stats::SeatStats {
+        hands,
+        vpip_hands,
+        pfr_hands,
+        faced_bets,
+        folds_to_bets,
+        aggressive,
+        calls,
+    };
+    to_js(&BotReads {
+        vpip: s.vpip(),
+        pfr: s.pfr(),
+        fold_to_bet: s.fold_to_bet(),
+        aggression: s.aggression(),
+    })
+}
+
 fn rules_for(game: Option<&str>, small_blind: u64, big_blind: u64) -> Result<TableRules, JsError> {
     Ok(match game.unwrap_or("nlhe") {
         "nlhe" => TableRules::no_limit_holdem(small_blind, big_blind),
