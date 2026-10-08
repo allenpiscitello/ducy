@@ -494,6 +494,19 @@ impl Table {
     /// next of them and topping up broke players. Fails with fewer than two
     /// players.
     pub fn new_hand(&mut self) -> Result<(), PlayError> {
+        self.deal_next(None)
+    }
+
+    /// Like [`Table::new_hand`], dealt from a provably fair seed that the
+    /// players and the host agreed ([`crate::fair_deal`]). The hole cards go
+    /// to the dealt seats in seat order ([`Table::dealt`] once dealt),
+    /// so anyone with the seed can check every card. Sit out anyone who
+    /// didn't reveal before calling this.
+    pub fn new_hand_from_seed(&mut self, seed: &[u8; 32]) -> Result<(), PlayError> {
+        self.deal_next(Some(seed))
+    }
+
+    fn deal_next(&mut self, fair: Option<&[u8; 32]>) -> Result<(), PlayError> {
         if self.in_hand() {
             return Err(PlayError::IllegalAction);
         }
@@ -593,11 +606,14 @@ impl Table {
         self.button = button;
         self.last_blinds = Some((sb, bb));
         self.hand_number += 1;
-        let deal = Deal::random(
-            self.rules.variant,
-            dealt.len(),
-            self.seed.map(|s| s.wrapping_add(self.hand_number * 7919)),
-        )?;
+        let deal = match fair {
+            Some(seed) => Deal::from_seed(self.rules.variant, dealt.len(), seed)?,
+            None => Deal::random(
+                self.rules.variant,
+                dealt.len(),
+                self.seed.map(|s| s.wrapping_add(self.hand_number * 7919)),
+            )?,
+        };
         let stacks: Vec<u64> = dealt.iter().map(|&s| self.stacks[s]).collect();
         let button = dealt.iter().position(|&s| s == self.button).expect("dealt");
         self.hand = Some(Hand::with_posts(self.rules, &stacks, button, deal, &posts)?);

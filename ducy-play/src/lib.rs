@@ -57,6 +57,7 @@ mod bot;
 pub mod bots;
 mod deal;
 mod error;
+pub mod fair_deal;
 mod hand;
 mod host;
 mod matchup;

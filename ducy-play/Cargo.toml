@@ -24,6 +24,7 @@ process = ["serde", "dep:serde_json"]
 [dependencies]
 ducy = { version = "0.3.0", path = "..", default-features = false }
 rand = "0.10.2"
+sha2 = "0.10"
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 

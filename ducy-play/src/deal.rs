@@ -53,6 +53,22 @@ impl Deal {
             let j = rng.random_range(i..cards.len());
             cards.swap(i, j);
         }
+        Self::from_order(variant, players, cards)
+    }
+
+    /// The deal for a provably fair seed agreed by the players and the host
+    /// ([`crate::fair_deal`]): anyone with the seed gets the same cards.
+    pub fn from_seed(variant: Variant, players: usize, seed: &[u8; 32]) -> Result<Self, PlayError> {
+        if players * variant.hole_cards() + 5 > 52 {
+            return Err(PlayError::NotEnoughCards);
+        }
+        Self::from_order(variant, players, crate::fair_deal::shuffled_deck(seed))
+    }
+
+    /// Deals from a shuffled deck: each player's hole cards in turn, then the
+    /// board.
+    fn from_order(variant: Variant, players: usize, cards: Vec<Card>) -> Result<Self, PlayError> {
+        let per_player = variant.hole_cards();
         let mut next = cards.into_iter();
         let hole_cards = (0..players)
             .map(|_| {
