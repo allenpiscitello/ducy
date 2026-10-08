@@ -21,6 +21,14 @@
 //! kept for the rest of the hand, solved again when the opponent bets a
 //! size it doesn't have.
 //!
+//! With [`GtoBot::with_turn_solving`], turn decisions likewise come from a
+//! depth-limited solve of the turn (see [`turn`](super::turn)): the turn's
+//! betting is solved from the real chips, with the rivers played out by the
+//! blueprint (or, for the opponent, the blueprint biased one of several
+//! ways). With river solving on as well, the river's ranges then follow the
+//! turn solution rather than the blueprint. [`GtoBot::with_solving`] turns
+//! on both at their defaults, the strongest setup measured.
+//!
 //! The blueprint is for heads-up play. At a table with more players, or if
 //! the hand ever can't be followed on the tree, the bot falls back to a
 //! simple pot-odds rule rather than ever returning an illegal action.
@@ -36,8 +44,9 @@ use super::{
     cards::{Card, from_ducy, hole_index},
     follow::{Follower, street_index},
     hunl::{Betting, BettingTree, Hunl, HunlAction, HunlConfig, pot_fraction},
-    range::{BucketCache, replay},
+    range::{BucketCache, Range, replay},
     river::RiverSolver,
+    turn::{Bias, TurnSolver},
 };
 use crate::rng::Rng;
 
@@ -53,6 +62,8 @@ struct Track {
     /// Our side: 0 is the button.
     me: usize,
     follow: Follower,
+    /// The turn solution for this hand.
+    turn_solved: Option<Box<TurnSolver>>,
     /// The river solution for this hand.
     solved: Option<Box<RiverSolver>>,
 }
@@ -79,6 +90,55 @@ impl RiverSolving {
     }
 }
 
+/// How hard to solve the turn.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TurnSolving {
+    /// Iterations per solve.
+    pub iterations: usize,
+    /// Stop early after this long (not on WebAssembly, which has no clock).
+    pub time: Option<Duration>,
+    /// The turn and river bet menu (`menu.postflop`); blinds come from the
+    /// table.
+    pub config: HunlConfig,
+    /// The river continuations the opponent may pick from at each leaf;
+    /// empty to have both play the blueprint's.
+    pub biases: Vec<Bias>,
+    /// River cards dealt per iteration when valuing leaves (0 for all 48;
+    /// see [`TurnSolver::set_river_samples`]).
+    pub river_samples: usize,
+}
+
+impl TurnSolving {
+    /// `iterations` per solve, the blueprint's own postflop menu, the
+    /// opponent choosing among all four continuations, and 8 rivers dealt
+    /// per iteration.
+    pub fn new(iterations: usize) -> Self {
+        Self {
+            iterations,
+            time: None,
+            config: HunlConfig::default(),
+            biases: Bias::ALL.to_vec(),
+            river_samples: 8,
+        }
+    }
+}
+
+impl Default for RiverSolving {
+    /// 200 iterations, as measured (see the crate README).
+    fn default() -> Self {
+        Self::new(200)
+    }
+}
+
+impl Default for TurnSolving {
+    /// 50 iterations: with 200 on the river, LBR wins 197 ± 97 mbb/hand less
+    /// against it than against river solving alone (70,000 paired hands).
+    /// About 3–4 s a turn decision on 12 cores.
+    fn default() -> Self {
+        Self::new(50)
+    }
+}
+
 /// A bot that plays a heads-up blueprint.
 pub struct GtoBot {
     cards: Arc<CardAbstraction>,
@@ -90,8 +150,11 @@ pub struct GtoBot {
     pub off_tree: u32,
     /// River solves run (re-solves included).
     pub river_solves: u32,
+    /// Turn solves run (re-solves included).
+    pub turn_solves: u32,
     fallback_rng: StdRng,
     river: Option<RiverSolving>,
+    turn: Option<TurnSolving>,
     /// Every hand's buckets on recent boards, for tracking ranges.
     buckets: BucketCache,
 }
@@ -127,8 +190,10 @@ impl GtoBot {
             track: Track::default(),
             off_tree: 0,
             river_solves: 0,
+            turn_solves: 0,
             fallback_rng: StdRng::seed_from_u64(seed ^ 0x5eed),
             river: None,
+            turn: None,
             buckets: BucketCache::default(),
         }
     }
@@ -141,6 +206,23 @@ impl GtoBot {
     pub fn with_river_solving(mut self, solving: RiverSolving) -> Self {
         self.river = (solving.iterations > 0).then_some(solving);
         self
+    }
+
+    /// Solves the turn in real time, depth-limited, instead of playing the
+    /// blueprint there (with zero iterations, it keeps playing the
+    /// blueprint). Each solve plays out all 48 rivers at every leaf of the
+    /// turn's betting, for each continuation the opponent may pick, so it
+    /// costs far more per iteration than a river solve.
+    pub fn with_turn_solving(mut self, solving: TurnSolving) -> Self {
+        self.turn = (solving.iterations > 0).then_some(solving);
+        self
+    }
+
+    /// Turn and river solving at their defaults: the strongest setup
+    /// measured, and how the bot should normally play.
+    pub fn with_solving(self) -> Self {
+        self.with_turn_solving(TurnSolving::default())
+            .with_river_solving(RiverSolving::default())
     }
 
     /// The blueprint's action probabilities at this decision, with the
@@ -206,17 +288,8 @@ impl GtoBot {
             return None;
         }
         self.follow(obs);
-        let me = self.track.me;
-        let root = river_root(obs)?;
-        // The real river so far must replay legally to our turn.
-        let mut b = root.clone();
-        for &a in &self.track.follow.river_path {
-            if b.is_over() {
-                return None;
-            }
-            b = b.play(a);
-        }
-        if b.is_over() || b.to_act != me {
+        let root = street_root(obs, 3)?;
+        if !replays_to_me(&root, &self.track.follow.river_path, self.track.me) {
             return None;
         }
         let path = self.track.follow.river_path.clone();
@@ -244,7 +317,7 @@ impl GtoBot {
         root: &Betting,
         path: &[HunlAction],
     ) -> Option<RiverSolver> {
-        let settings = self.river.as_ref()?;
+        let settings = self.river.clone()?;
         let bp_root = self.track.follow.river_root?;
         let bp_node = &self.tree.nodes[bp_root as usize];
         if bp_node.actions.is_empty() || bp_node.betting.street != 3 {
@@ -252,16 +325,7 @@ impl GtoBot {
         }
         let board: Vec<Card> = obs.board.iter().copied().map(from_ducy).collect();
         let board: [Card; 5] = board.try_into().ok()?;
-        // Both ranges at the start of the river, from the tree steps before it.
-        let before = self.track.follow.steps_before_river(&self.tree);
-        let ranges = replay(
-            &self.cards,
-            &self.blueprint,
-            &self.tree,
-            &before,
-            &board,
-            &mut self.buckets,
-        );
+        let ranges = self.river_ranges(&board);
         if ranges.iter().any(|r| r.total() <= 0.0) {
             return None;
         }
@@ -292,7 +356,133 @@ impl GtoBot {
                 }
             }
         }
-        run_budget(&mut solver, settings);
+        run_budget(settings.iterations, settings.time, || solver.iterate());
+        Some(solver)
+    }
+
+    /// The blueprint steps before `street`, for replaying ranges.
+    fn steps_before(&self, street: usize) -> Vec<(u32, usize)> {
+        self.track.follow.steps_before(&self.tree, street)
+    }
+
+    /// Both ranges at the start of the river: as the blueprint played up to
+    /// the turn, then as the turn solution played the turn if there is one
+    /// that has the real turn's actions, else as the blueprint did.
+    fn river_ranges(&mut self, board: &[Card; 5]) -> [Range; 2] {
+        let solved = self.track.turn_solved.as_deref();
+        let along = solved.and_then(|s| s.tree.along(&self.track.follow.turn_path));
+        let steps = self.steps_before(if along.is_some() { 2 } else { 3 });
+        let mut ranges = replay(
+            &self.cards,
+            &self.blueprint,
+            &self.tree,
+            &steps,
+            board,
+            &mut self.buckets,
+        );
+        let turn = self.track.turn_solved.as_deref().zip(along);
+        if let Some((s, along)) = turn {
+            for (node, a) in along {
+                let p = s.tree.nodes[node as usize].betting.to_act;
+                ranges[p].update_by(|h| s.probs(node, h).map_or(0.0, |x| x[a]));
+            }
+        }
+        ranges
+    }
+
+    /// A turn decision from the depth-limited solve: solved now if there's
+    /// no solution yet or the real turn left its tree. `None` to fall back
+    /// to the blueprint.
+    fn turn_action(&mut self, obs: &Observation) -> Option<Action> {
+        if obs.seats.len() != 2 {
+            return None;
+        }
+        self.follow(obs);
+        let root = street_root(obs, 2)?;
+        if !replays_to_me(&root, &self.track.follow.turn_path, self.track.me) {
+            return None;
+        }
+        let path = self.track.follow.turn_path.clone();
+        let on_tree = |s: &TurnSolver| s.tree.follow(&path).is_some();
+        if !self.track.turn_solved.as_deref().is_some_and(on_tree) {
+            let solver = self.solve_turn(obs, &root, &path)?;
+            self.track.turn_solved = Some(Box::new(solver));
+            self.turn_solves += 1;
+        }
+        let solver = self.track.turn_solved.as_deref()?;
+        let node = solver.tree.follow(&path)?;
+        let hole: Vec<Card> = obs.hole_cards.iter(false).map(from_ducy).collect();
+        let probs = solver.probs(node, hole_index(hole[0], hole[1]))?;
+        let a = solver.tree.nodes[node as usize].actions[self.rng.sample(&probs)];
+        self.track.follow.pending = None;
+        Some(real_action(a, obs))
+    }
+
+    /// Solves the turn from `root` with the real actions `path` in the
+    /// tree, the bot's own earlier turn actions frozen at the previous
+    /// solution, the opponent picking river continuations, and the gadget
+    /// against the blueprint's turn values.
+    fn solve_turn(
+        &mut self,
+        obs: &Observation,
+        root: &Betting,
+        path: &[HunlAction],
+    ) -> Option<TurnSolver> {
+        let settings = self.turn.clone()?;
+        let bp_root = self.track.follow.turn_root?;
+        let bp_node = &self.tree.nodes[bp_root as usize];
+        if bp_node.actions.is_empty() || bp_node.betting.street != 2 {
+            return None;
+        }
+        let board: Vec<Card> = obs.board.iter().copied().map(from_ducy).collect();
+        let board: [Card; 4] = board.try_into().ok()?;
+        let ranges = replay(
+            &self.cards,
+            &self.blueprint,
+            &self.tree,
+            &self.steps_before(2),
+            &board,
+            &mut self.buckets,
+        );
+        if ranges.iter().any(|r| r.total() <= 0.0) {
+            return None;
+        }
+        let mut config = settings.config.clone();
+        config.big_blind = obs.rules.big_blind;
+        let mut solver = TurnSolver::from_blueprint(
+            board,
+            root,
+            &config,
+            path,
+            [&ranges[0].weight, &ranges[1].weight],
+            &self.cards,
+            &self.blueprint,
+            &self.tree,
+            bp_root,
+        );
+        let me = self.track.me;
+        if !settings.biases.is_empty() {
+            solver.set_chooser(1 - me, &settings.biases);
+        }
+        solver.set_river_samples(settings.river_samples, self.rng.next_u64());
+        let buckets = self.buckets.get(&self.cards, &board).to_vec();
+        let reference = solver.blueprint_strategy(&self.blueprint, &self.tree, bp_root, &buckets);
+        let target = solver.best_response(1 - me, &reference);
+        solver.set_gadget(1 - me, target);
+        if let Some(prev) = self.track.turn_solved.as_deref() {
+            for (k, (node, _)) in solver.tree.along(path)?.into_iter().enumerate() {
+                let n = &solver.tree.nodes[node as usize];
+                if n.betting.to_act != me {
+                    continue;
+                }
+                if let Some(old) = prev.tree.follow(&path[..k])
+                    && prev.tree.nodes[old as usize].actions == n.actions
+                {
+                    solver.freeze(node, prev.average_at(old));
+                }
+            }
+        }
+        run_budget(settings.iterations, settings.time, || solver.iterate());
         Some(solver)
     }
 
@@ -351,24 +541,36 @@ impl GtoBot {
     }
 }
 
-/// Runs a solver for the iterations (and time) allowed.
-fn run_budget(solver: &mut RiverSolver, settings: &RiverSolving) {
-    match settings.time {
-        None => solver.run(settings.iterations),
-        Some(limit) => {
-            let start = std::time::Instant::now();
-            for _ in 0..settings.iterations {
-                solver.iterate();
-                if start.elapsed() >= limit {
-                    break;
-                }
-            }
+/// Runs `iterate` for the iterations allowed, stopping early once `time`
+/// has passed.
+fn run_budget(iterations: usize, time: Option<Duration>, mut iterate: impl FnMut()) {
+    let start = time.map(|_| std::time::Instant::now());
+    for _ in 0..iterations {
+        iterate();
+        if let (Some(s), Some(limit)) = (start, time)
+            && s.elapsed() >= limit
+        {
+            break;
         }
     }
 }
 
-/// The real hand's betting at the start of the river (player 0 the button).
-fn river_root(obs: &Observation) -> Option<Betting> {
+/// Whether the real actions `path` replay legally from `root` to a decision
+/// of player `me`.
+fn replays_to_me(root: &Betting, path: &[HunlAction], me: usize) -> bool {
+    let mut b = root.clone();
+    for &a in path {
+        if b.is_over() || b.street != root.street {
+            return false;
+        }
+        b = b.play(a);
+    }
+    !b.is_over() && b.street == root.street && b.to_act == me
+}
+
+/// The real hand's betting at the start of `street` (2 the turn, 3 the
+/// river; player 0 the button).
+fn street_root(obs: &Observation, street: usize) -> Option<Betting> {
     let seat = |p: usize| if p == 0 { obs.button } else { 1 - obs.button };
     let mut stack = [0; 2];
     let mut contributed = [0; 2];
@@ -378,7 +580,7 @@ fn river_root(obs: &Observation) -> Option<Betting> {
         contributed[p] = s.contributed - s.street_bet;
     }
     Some(Betting::street_start(
-        3,
+        street,
         stack,
         contributed,
         obs.rules.big_blind,
@@ -413,6 +615,12 @@ impl Bot for GtoBot {
                 None if obs.legal.can_check => Action::Check,
                 None => Action::Call,
             });
+        }
+        if self.turn.is_some()
+            && obs.street == Street::Turn
+            && let Some(action) = self.turn_action(obs)
+        {
+            return Some(action);
         }
         if self.river.is_some()
             && obs.street == Street::River

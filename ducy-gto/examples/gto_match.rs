@@ -14,6 +14,12 @@
 //! `--river-solve N` makes the measured bot solve the river in real time
 //! with N iterations per solve (the opponents, `self` included, keep playing
 //! the blueprint), and runs LBR against the river-solving bot too.
+//! `--turn-solve N` makes it solve the turn too, depth-limited, with N
+//! iterations per solve. LBR then compares it with the river-solving bot
+//! alone, and a `river-solve` opponent (GtoBot solving the river, with the
+//! `--river-solve` iterations) joins the match:
+//! `--only river-solve --turn-solve 100 --river-solve 200` is turn and river
+//! solving against river solving alone.
 //!
 //! Duplicate mode plays every deal twice with the seats swapped, which
 //! cancels most of the luck of the cards. The interval comes from the
@@ -26,9 +32,9 @@ use ducy_gto::{
     holdem::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
-        bot::{GtoBot, RiverSolving},
+        bot::{GtoBot, RiverSolving, TurnSolving},
         hunl::{BettingTree, Hunl, HunlConfig},
-        lbr::{LbrResult, lbr_hands},
+        lbr::{LbrResult, lbr_hands_solving},
     },
 };
 use ducy_play::{
@@ -49,6 +55,7 @@ fn main() {
     let mut only: Option<String> = None;
     let mut lbr = 0usize;
     let mut river = 0usize;
+    let mut turn = 0usize;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut v = || it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
@@ -60,6 +67,7 @@ fn main() {
             "--only" => only = Some(v()),
             "--lbr" => lbr = v().replace('_', "").parse().expect("--lbr"),
             "--river-solve" => river = v().parse().expect("--river-solve"),
+            "--turn-solve" => turn = v().parse().expect("--turn-solve"),
             f => panic!("unknown option {f}"),
         }
     }
@@ -85,15 +93,22 @@ fn main() {
             Blueprint::from_profile(&game, &cards, &m.average())
         }
     };
-    let runs = if river > 0 { vec![0, river] } else { vec![0] };
+    // (turn, river) iterations per run; the last is compared with the first.
+    let runs = match (turn, river) {
+        (0, 0) => vec![(0, 0)],
+        (0, r) => vec![(0, 0), (0, r)],
+        (t, r) => vec![(0, r), (t, r)],
+    };
     let mut per_hand = Vec::new();
-    for &iterations in runs.iter().filter(|_| lbr > 0) {
+    for &(t_iter, r_iter) in runs.iter().filter(|_| lbr > 0) {
         let t = Instant::now();
-        let hands = lbr_hands(&game, &cards, &blueprint, lbr, 99, iterations);
+        let hands = lbr_hands_solving(&game, &cards, &blueprint, lbr, 99, t_iter, r_iter);
         let r = LbrResult::of(&hands);
-        let what = match iterations {
-            0 => "the blueprint".to_string(),
-            n => format!("river solving ({n} iterations)"),
+        let what = match (t_iter, r_iter) {
+            (0, 0) => "the blueprint".to_string(),
+            (0, r) => format!("river solving ({r} iterations)"),
+            (t, 0) => format!("turn solving ({t} iterations)"),
+            (t, r) => format!("turn and river solving ({t} and {r} iterations)"),
         };
         println!(
             "LBR vs {what} over {} hands: {:.0} ± {:.0} mbb/hand ({:.0}s)",
@@ -105,11 +120,12 @@ fn main() {
         per_hand.push(hands);
     }
     if let [plain, solving] = &per_hand[..] {
-        // The same hands up to the river: compare them pairwise.
+        // The same hands up to the street solved: compare them pairwise.
         let diff: Vec<f64> = solving.iter().zip(plain).map(|(a, b)| a - b).collect();
         let r = LbrResult::of(&diff);
+        let what = if turn > 0 { "turn" } else { "river" };
         println!(
-            "LBR change from river solving: {:+.0} ± {:.0} mbb/hand (paired)",
+            "LBR change from {what} solving: {:+.0} ± {:.0} mbb/hand (paired)",
             r.mbb_per_hand, r.ci95
         );
     }
@@ -132,6 +148,14 @@ fn main() {
             Box::new(|_| Box::new(CallingStation) as Box<dyn Bot>),
         ),
     ];
+    if turn > 0 && river > 0 {
+        opponents.push((
+            "river-solve".into(),
+            Box::new(|s| {
+                Box::new(gto(s).with_river_solving(RiverSolving::new(river))) as Box<dyn Bot>
+            }),
+        ));
+    }
     for p in Personality::ALL {
         opponents.push((
             p.id().to_string(),
@@ -152,7 +176,10 @@ fn main() {
         let mut rates = Vec::with_capacity(BLOCKS);
         let mut hands = 0;
         // One bot pair for the whole match, so adaptive opponents keep learning.
-        let me = gto(1000).with_river_solving(RiverSolving::new(river));
+        let mut me = gto(1000).with_river_solving(RiverSolving::new(river));
+        if turn > 0 {
+            me = me.with_turn_solving(TurnSolving::new(turn));
+        }
         let mut bots: Vec<Box<dyn Bot>> = vec![Box::new(me), make(2000)];
         for b in 0..BLOCKS {
             let m = MatchConfig::new(rules, per_block, 7919 * b as u64 + 1)

@@ -5,8 +5,8 @@ use ducy_gto::{
     holdem::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
-        bot::{GtoBot, RiverSolving, pseudo_harmonic},
-        hunl::{Hunl, HunlConfig},
+        bot::{GtoBot, RiverSolving, TurnSolving, pseudo_harmonic},
+        hunl::{BetMenu, Hunl, HunlConfig, Size},
     },
 };
 use ducy_play::{
@@ -161,6 +161,65 @@ fn river_solving_plays_legally_at_other_stakes() {
     );
     assert_eq!(illegal, 0);
     assert!(solves > 0, "never solved a river");
+}
+
+/// Turn solving (with river solving after it) plays legally, against wild
+/// bets that force re-solves, and at other stakes.
+#[test]
+fn turn_solving_plays_legally() {
+    use std::sync::Mutex;
+    struct Shared(Arc<Mutex<GtoBot>>);
+    impl Bot for Shared {
+        fn act(&mut self, o: &ducy_play::Observation) -> Option<ducy_play::Action> {
+            self.0.lock().unwrap().act(o)
+        }
+        fn hand_over(&mut self, s: &ducy_play::HandSummary) {
+            self.0.lock().unwrap().hand_over(s)
+        }
+    }
+    // A small menu keeps each solve quick in a debug build.
+    let small = HunlConfig {
+        menu: BetMenu {
+            preflop: BetMenu::default().preflop,
+            postflop: vec![vec![Size::Pot(0.75), Size::AllIn], vec![Size::AllIn]],
+        },
+        ..HunlConfig::default()
+    };
+    let turn = TurnSolving {
+        config: small.clone(),
+        ..TurnSolving::new(2)
+    };
+    let river = RiverSolving {
+        config: small,
+        ..RiverSolving::new(4)
+    };
+    let cases: Vec<(Box<dyn Bot>, TableRules, u64)> = vec![
+        (
+            Box::new(RandomBot::new(Some(31))),
+            TableRules::no_limit_holdem(1, 2),
+            200,
+        ),
+        (
+            Box::new(ducy_play::bots::CallingStation),
+            TableRules::no_limit_holdem(5, 10),
+            400,
+        ),
+    ];
+    for (other, rules, stack) in cases {
+        let gto = bot(32)
+            .with_turn_solving(turn.clone())
+            .with_river_solving(river.clone());
+        let gto = Arc::new(Mutex::new(gto));
+        let mut bots: Vec<Box<dyn Bot>> = vec![Box::new(Shared(gto.clone())), other];
+        let config = MatchConfig::new(rules, 20, 19)
+            .with_starting_stack(stack)
+            .duplicate();
+        let r = run_match(&config, &mut bots).unwrap();
+        let g = gto.lock().unwrap();
+        assert_eq!(r.fallbacks[0], 0, "illegal actions");
+        assert!(g.turn_solves > 0, "never solved a turn");
+        assert!(g.river_solves > 0, "never solved a river");
+    }
 }
 
 #[test]

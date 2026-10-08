@@ -41,6 +41,8 @@ crate finds equilibria and measures exploitability exactly.
   real time (see [below](#solving-the-river-in-real-time)).
 - `holdem::review`: grading a player's decisions in a hand against the
   blueprint, in big blinds lost (see [below](#reviewing-hands-against-the-blueprint)).
+- `holdem::turn`: a depth-limited turn solver whose leaves play out every
+  river with the blueprint (see [below](#solving-the-turn-depth-limited)).
 - `games::kuhn` and `games::leduc`: Kuhn poker and Leduc hold'em, small games
   with known equilibrium values, for checking the solver.
 
@@ -367,6 +369,91 @@ the review time per decision on each street. `GtoBot` should be charged
 about nothing, and the bots it beats most (`gto_match`) should be charged
 the most.
 
+## Solving the turn, depth-limited
+
+Solving the turn exactly would mean solving all 48 rivers behind it as well.
+`GtoBot::with_turn_solving(TurnSolving::new(N))` instead solves only the
+turn's betting and values what comes after from the blueprint (Brown,
+Sandholm and Amos 2018, the method of Modicum):
+
+- **The subgame** (`holdem::turn`) is the turn's betting from the real pot
+  and stacks, with the opponent's real bet sizes added, as on the river.
+- **Leaves** are where the turn's betting closes. Each one deals every river
+  card and plays the river out with a *continuation strategy*: the
+  blueprint's river strategy carried over to the real chips. Showdowns and
+  folds are valued in O(n) per river, as in the river solver.
+- **The opponent picks a continuation** at each leaf, per hand: the
+  blueprint's, or the blueprint with folds, calls or raises made five times
+  as likely. So the turn strategy has to hold up whatever the opponent does
+  on the river, rather than assume they keep playing the blueprint.
+- **Safety:** the same resolving gadget as on the river, with targets from a
+  best response to the blueprint's turn strategy.
+- **Re-solving** after an off-tree bet freezes the bot's own earlier turn
+  actions. With river solving on too, the river's ranges follow the turn
+  solution instead of the blueprint.
+- **Sampled rivers:** valuing a leaf deals all 48 rivers, the bulk of the
+  cost. `TurnSolver::set_river_samples(k, seed)` deals `k` random rivers per
+  iteration instead (8 by default in `TurnSolving`), an unbiased estimate, so
+  it still converges; best responses always use every river.
+
+`cargo run --release -p ducy-gto --example turn_solve -- 50 8` times it with
+random ranges, uniform continuations and the default menu, 12 cores, 8
+rivers per iteration:
+
+| Board | Pot | Behind | Leaves | 25 iterations | 50 iterations | 50, opponent choosing |
+|---|---|---|---|---|---|---|
+| Qs Td 7h 4c | 20 | 190 | 27 | 2.6% (5.5 s) | 0.54% (10.6 s) | 0.71% (28.9 s) |
+| Ah Kh 8d 8c | 60 | 170 | 19 | 1.6% (2.7 s) | 0.50% (5.8 s) | 0.48% (15.9 s) |
+| Kc Jd 5s 4h | 120 | 140 | 11 | 0.46% (1.3 s) | 0.21% (2.4 s) | 0.28% (8.2 s) |
+
+Exploitability is in the depth-limited game, in percent of the pot. Those
+times are from before leaves were valued from per-bucket tables: as the bot
+uses it (the real model, 200 river buckets, the opponent choosing, 8
+rivers), an iteration now takes 60–70 ms, down from 180–330 ms
+(`examples/turn_bench`).
+
+To measure the bot, `gto_match --turn-solve N` (with `--river-solve`) runs
+LBR against turn and river solving paired with river solving alone
+(`lbr::lbr_hands_solving`), and adds a `river-solve` opponent for a
+duplicate match of the two:
+
+```sh
+cargo run --release -p ducy-gto --example gto_match -- \
+    --cards cards.bin --blueprint blueprint.bin --only river-solve \
+    --deals 2000 --lbr 4000 --turn-solve 50 --river-solve 200
+```
+
+### What it's worth
+
+Measured against river solving alone, with 50 turn and 200 river
+iterations, the `gto-hunl-300m` model, and the LBR hands paired up to the
+turn:
+
+| 70,000 paired hands | LBR wins (mbb/hand, lower is better) |
+|---|---|
+| River solving only | 186 ± 164 |
+| Turn and river solving | −11 ± 162 |
+| **Change** | **−197 ± 97** |
+
+So turn solving makes the bot clearly harder to exploit: the whole 95%
+interval of the change is below zero. In a duplicate match of 3,000 deals
+the two bots were even (−6.8 ± 24.9 bb/100), as two near-equilibrium
+strategies should be. The cost is about 3–4 s a turn decision on 12 cores,
+and about 150 MB.
+
+So `GtoBot::with_solving()` turns on both, at `TurnSolving::default()` (50
+iterations) and `RiverSolving::default()` (200). In the page (ducy-wasm),
+the GTO bot solves both too, with 20 turn iterations: WebAssembly runs on
+one core, where 50 take about 6.5 s a turn decision and 20 about 3 s.
+`setGtoSolving(turn, river)` changes that, 0 playing the blueprint on that
+street.
+
+The tests check that check-down leaf values match brute force over every
+pair of hands and river, that exploitability falls toward 0 (with all rivers
+and with 8 sampled), that a chooser's best response gains from its
+continuations, that the gadget holds, and that the bot plays legally with
+turn and river solving on.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
@@ -376,5 +463,5 @@ the most.
 5. **Done:** Train and store the blueprint strategy (#89)
 6. **Done:** `GtoBot`: play the blueprint in ducy-play, with action translation (#90)
 7. Evaluation: Local Best Response and duplicate matches against the built-in bots (#91)
-8. Real-time depth-limited subgame solving (#92): **the river is done**;
-   depth-limited solving of the turn is next
+8. **Done:** Real-time subgame solving (#92): the river exactly, the turn
+   depth-limited, both on by default

@@ -73,6 +73,10 @@ pub struct Follower {
     pub street: usize,
     /// Every step taken on the tree.
     pub steps: Vec<Step>,
+    /// The tree node the turn starts at.
+    pub turn_root: Option<u32>,
+    /// The real turn actions so far, in chips.
+    pub turn_path: Vec<HunlAction>,
     /// The tree node the river starts at.
     pub river_root: Option<u32>,
     /// The real river actions so far, in chips.
@@ -97,6 +101,8 @@ impl Follower {
             real: RealBetting::default(),
             street: 0,
             steps: Vec::new(),
+            turn_root: None,
+            turn_path: Vec::new(),
             river_root: None,
             river_path: Vec::new(),
             pending: None,
@@ -135,21 +141,23 @@ impl Follower {
                 // The tree may still be on an earlier street if a real bet was
                 // mapped to a smaller one: close the round with calls/checks.
                 self.catch_up(tree);
-                if street == Street::River {
-                    self.river_root = self.node;
+                match street {
+                    Street::Turn => self.turn_root = self.node,
+                    Street::River => self.river_root = self.node,
+                    _ => {}
                 }
             }
             Event::Fold { seat } => {
-                self.on_river(HunlAction::Fold);
+                self.record(HunlAction::Fold);
                 self.step(tree, side(seat), Real::Fold, rng)
             }
             Event::Check { seat } => {
-                self.on_river(HunlAction::Check);
+                self.record(HunlAction::Check);
                 self.step(tree, side(seat), Real::Check, rng)
             }
             Event::Call { seat, amount, .. } => {
                 let p = side(seat);
-                self.on_river(HunlAction::Call);
+                self.record(HunlAction::Call);
                 self.step(tree, p, Real::Call, rng);
                 self.real.street_bet[p] += amount;
                 self.real.contributed[p] += amount;
@@ -159,7 +167,7 @@ impl Follower {
                 let r = self.real;
                 let to_call = r.current_bet.saturating_sub(r.street_bet[p]);
                 let frac = pot_fraction(to, r.current_bet, to_call, r.pot());
-                self.on_river(if r.current_bet == 0 {
+                self.record(if r.current_bet == 0 {
                     HunlAction::Bet(to)
                 } else {
                     HunlAction::Raise(to)
@@ -176,16 +184,24 @@ impl Follower {
 
     /// The steps before the river: what the ranges at the river depend on.
     pub fn steps_before_river(&self, tree: &BettingTree) -> Vec<(u32, usize)> {
+        self.steps_before(tree, 3)
+    }
+
+    /// The steps before `street` (0 preflop to 3 river).
+    pub fn steps_before(&self, tree: &BettingTree, street: usize) -> Vec<(u32, usize)> {
         self.steps
             .iter()
-            .filter(|s| tree.nodes[s.node as usize].betting.street < 3)
+            .filter(|s| tree.nodes[s.node as usize].betting.street < street)
             .map(|s| (s.node, s.action))
             .collect()
     }
 
-    fn on_river(&mut self, a: HunlAction) {
-        if self.street == 3 {
-            self.river_path.push(a);
+    /// Records a real action on the turn or river.
+    fn record(&mut self, a: HunlAction) {
+        match self.street {
+            2 => self.turn_path.push(a),
+            3 => self.river_path.push(a),
+            _ => {}
         }
     }
 
