@@ -1345,7 +1345,39 @@ mod test {
     pub fn test_set_flop_wrong_card_count() {
         let mut game = HoldemGameState::new();
         game.add_player(Deck::parse("As Ks").unwrap()).unwrap();
-        assert!(game.set_flop(Deck::parse("Qd Jd").unwrap()).is_err());
+        assert!(game.set_flop(Deck::empty()).is_err());
+        assert!(game.set_flop(Deck::parse("Qd Jd Td 9d").unwrap()).is_err());
+        // One or two cards are a partial flop, but then there's no turn yet.
+        game.set_flop(Deck::parse("Qd Jd").unwrap()).unwrap();
+        assert!(game.set_turn(Card::parse("2c").unwrap()).is_err());
+        assert!(
+            game.set_flop(Deck::parse("Td").unwrap()).is_err(),
+            "the flop is set once"
+        );
+    }
+
+    #[test]
+    pub fn test_partial_flop_sampling_matches_exact() {
+        // AA vs a range of KK and QQ with one known flop card (a king): exact
+        // equity over every completion, against seeded sampling.
+        let mut game = HoldemGameState::new();
+        game.add_player(Deck::parse("As Ah").unwrap()).unwrap();
+        game.set_flop(Deck::parse("Ks").unwrap()).unwrap();
+        let ranges = [HoldemRange::parse("KK, QQ").unwrap()];
+        let eval = HoldemGameEvaluation {};
+        let exact = eval.range_equity(&game, &ranges).unwrap();
+        let s = eval
+            .sample_range_equity_seeded(&game, &ranges, 40_000, Some(7))
+            .unwrap();
+        let sampled: Vec<f64> = s.equity_sum.iter().map(|e| e / s.samples as f64).collect();
+        for (e, s) in exact.iter().zip(&sampled) {
+            let e: f64 = (*e).try_into().unwrap();
+            assert!((e - s).abs() < 0.01, "exact {exact:?} sampled {sampled:?}");
+        }
+        let again = eval
+            .sample_range_equity_seeded(&game, &ranges, 40_000, Some(7))
+            .unwrap();
+        assert_eq!(again.equity_sum, s.equity_sum, "seeded runs repeat");
     }
 
     #[test]

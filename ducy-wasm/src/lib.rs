@@ -202,6 +202,8 @@ impl HoldemGame {
         self.state.add_player(deck).map_err(to_js_err)
     }
 
+    /// The flop: three cards, or one or two known flop cards, in which case
+    /// equity and sampling deal the rest of the flop with each runout.
     pub fn set_flop(&mut self, cards: &str) -> Result<(), JsError> {
         let deck = Deck::parse(cards).map_err(to_js_err)?;
         self.state.set_flop(deck).map_err(to_js_err)
@@ -335,6 +337,8 @@ impl OmahaGame {
         self.state.add_player(deck).map_err(to_js_err)
     }
 
+    /// The flop: three cards, or one or two known flop cards, in which case
+    /// equity and sampling deal the rest of the flop with each runout.
     pub fn set_flop(&mut self, cards: &str) -> Result<(), JsError> {
         let deck = Deck::parse(cards).map_err(to_js_err)?;
         self.state.set_flop(deck).map_err(to_js_err)
@@ -408,6 +412,8 @@ impl OmahaHiLoGame {
         self.state.add_player(deck).map_err(to_js_err)
     }
 
+    /// The flop: three cards, or one or two known flop cards, in which case
+    /// equity and sampling deal the rest of the flop with each runout.
     pub fn set_flop(&mut self, cards: &str) -> Result<(), JsError> {
         let deck = Deck::parse(cards).map_err(to_js_err)?;
         self.state.set_flop(deck).map_err(to_js_err)
@@ -479,6 +485,8 @@ impl OmahaBombPotGame {
         self.state.add_player(deck).map_err(to_js_err)
     }
 
+    /// Board `board_index`'s flop: three cards, or one or two known flop
+    /// cards, in which case sampling deals the rest with each runout.
     pub fn set_flop(&mut self, board_index: usize, cards: &str) -> Result<(), JsError> {
         let deck = Deck::parse(cards).map_err(to_js_err)?;
         self.state.set_flop(board_index, deck).map_err(to_js_err)
