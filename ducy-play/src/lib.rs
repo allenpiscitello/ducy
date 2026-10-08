@@ -64,6 +64,7 @@ mod matchup;
 pub mod personality;
 #[cfg(feature = "process")]
 mod process;
+pub mod replay;
 mod rules;
 mod showdown;
 pub mod snapshot;
