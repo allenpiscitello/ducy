@@ -1,6 +1,6 @@
 use ducy_play::{
-    Command, Event, Outgoing, Personality, Table, TableHost, TableRules, TableSeat, TableView,
-    Update,
+    Command, Event, Outgoing, Personality, Refund, Table, TableHost, TableRules, TableSeat,
+    TableView, Update,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -1027,4 +1027,105 @@ fn coming_back_on_the_small_blind_still_owes_the_big_blind() {
     assert_eq!(v.seats[0].street_bet, 2, "a full big blind in");
     fold_out(&mut t);
     assert_eq!(total(&t), 800);
+}
+
+#[test]
+fn a_mid_hand_top_up_is_capped_at_the_maximum_and_the_rest_handed_back() {
+    // Ann has 100 and tops up 100 mid-hand (fine: 200 is the maximum). She
+    // then wins the hand, so at the next deal only enough to reach 200 goes
+    // on her stack, and the rest comes back as a refund. She keeps her seat.
+    let mut h = friends(0);
+    h.handle("a", join("Ann"), 0);
+    h.handle("a", request(100), 0);
+    h.approve_chips(1, 0);
+    h.new_hand(1).unwrap();
+    assert!(!rejected(&h.handle("a", request(100), 2), "a"));
+    h.approve_chips(1, 3);
+    assert!(h.take_refunds().is_empty());
+    // The host folds as soon as it's their turn; Ann checks or calls.
+    host_folds_to_ann(&mut h);
+    let won = h.table().stack(1);
+    assert!(won > 100, "Ann won the blinds: {won}");
+    let host_before = h.table().stack(0);
+    h.new_hand(5).unwrap();
+    let v = h.table().view(1);
+    assert_eq!(
+        v.seats[0].stack + v.seats[0].street_bet,
+        200,
+        "capped at the maximum"
+    );
+    let refunds = h.take_refunds();
+    assert_eq!(
+        refunds,
+        vec![Refund {
+            client_id: "a".into(),
+            seat: 1,
+            chips: won + 100 - 200
+        }]
+    );
+    assert!(h.take_refunds().is_empty(), "reported once");
+    assert!(h.take_departures().is_empty(), "she didn't leave");
+    // Every chip is somewhere: on the table, or handed back.
+    let h_view = h.host_view();
+    let on_table: u64 = h_view
+        .seats
+        .iter()
+        .map(|s| s.stack + s.street_bet)
+        .sum::<u64>();
+    assert_eq!(on_table + refunds[0].chips, host_before + won + 100);
+}
+
+#[test]
+fn a_top_up_that_fits_isnt_refunded() {
+    let mut h = friends(0);
+    h.handle("a", join("Ann"), 0);
+    h.handle("a", request(100), 0);
+    h.approve_chips(1, 0);
+    h.new_hand(1).unwrap();
+    h.handle("a", request(40), 2);
+    h.approve_chips(1, 3);
+    play_out(&mut h, &["a"], 4);
+    h.new_hand(5).unwrap();
+    assert!(h.take_refunds().is_empty());
+}
+
+#[test]
+fn a_capped_top_up_survives_a_snapshot() {
+    // Approved chips waiting for the deal are part of a saved table, and a
+    // refund not yet taken is too.
+    let mut h = friends(0);
+    h.handle("a", join("Ann"), 0);
+    h.handle("a", request(150), 0);
+    h.approve_chips(1, 0);
+    h.new_hand(1).unwrap();
+    h.handle("a", request(50), 2);
+    h.approve_chips(1, 3);
+    host_folds_to_ann(&mut h);
+    h.new_hand(5).unwrap();
+    let snap = h.snapshot(6);
+    let mut back = TableHost::restore(&snap, 6, |_| None).unwrap();
+    assert_eq!(back.take_refunds(), h.take_refunds());
+}
+
+/// Plays the hand at `friends` with Ann in seat 1: the host folds the first
+/// time it's their turn (checking if they can't fold), Ann checks or calls.
+fn host_folds_to_ann(h: &mut TableHost) {
+    while h.table().in_hand() {
+        match h.table().to_act() {
+            Some(0) => {
+                if h.host_act("fold", 0, 4).is_err() {
+                    h.host_act("check", 0, 4).unwrap();
+                }
+            }
+            Some(1) => {
+                let legal = h.table().view(1).legal.expect("Ann's turn");
+                let kind = if legal.can_check { "check" } else { "call" };
+                let r = h.handle("a", act(h.seq(), kind), 4);
+                assert!(!rejected(&r, "a"), "Ann {kind}");
+            }
+            _ => {
+                h.advance(4).unwrap();
+            }
+        }
+    }
 }

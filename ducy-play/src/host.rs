@@ -142,6 +142,19 @@ pub struct Departure {
     pub chips: u64,
 }
 
+/// Chips approved for someone (with a bank) that didn't fit: a top-up is
+/// checked against the maximum when it's asked for, and added at the next
+/// deal, by which time the player may have won chips. Only enough to reach
+/// the maximum is added; the rest is handed back, and the app returns it to
+/// wherever the chips came from. The player keeps their seat.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Refund {
+    pub client_id: String,
+    pub seat: usize,
+    pub chips: u64,
+}
+
 /// A person at the table and the chips that are theirs: their stack (none
 /// yet if they sit down at the next hand) plus chips approved but not yet
 /// added. Between hands this is everything they'd leave with; during a hand
@@ -218,6 +231,8 @@ pub struct TableHost {
     has_host: bool,
     /// People who left with chips since [`Self::take_departures`].
     departed: Vec<Departure>,
+    /// Approved chips over the maximum since [`Self::take_refunds`].
+    refunds: Vec<Refund>,
     /// When the table was paused ([`Self::pause`]): its clocks stand still.
     paused_at: Option<u64>,
     /// Milliseconds a person may sit out before the seat is given up (0: no limit).
@@ -272,6 +287,7 @@ impl TableHost {
             host_approved: 0,
             has_host,
             departed: Vec::new(),
+            refunds: Vec::new(),
             sit_out_limit_ms: 0,
             paused_at: None,
         }
@@ -433,6 +449,12 @@ impl TableHost {
         std::mem::take(&mut self.departed)
     }
 
+    /// Approved chips that didn't fit under the table maximum at the deal,
+    /// since the last call, oldest first (see [`Refund`]).
+    pub fn take_refunds(&mut self) -> Vec<Refund> {
+        std::mem::take(&mut self.refunds)
+    }
+
     /// Time left for the person acting, if any.
     pub fn turn_ms_left(&self, now: u64) -> Option<u64> {
         let now = self.clock(now);
@@ -510,6 +532,7 @@ impl TableHost {
             host_approved: self.host_approved,
             has_host: self.has_host,
             departed: self.departed.clone(),
+            refunds: self.refunds.clone(),
             sit_out_limit_ms: self.sit_out_limit_ms,
         }
     }
@@ -568,6 +591,7 @@ impl TableHost {
             host_approved: s.host_approved,
             has_host: s.has_host,
             departed: s.departed.clone(),
+            refunds: s.refunds.clone(),
             sit_out_limit_ms: s.sit_out_limit_ms,
             paused_at: Some(now),
         })
@@ -822,18 +846,30 @@ impl TableHost {
         {
             self.release_seat(i);
         }
-        // Chips approved during the last hand.
+        // Chips approved during the last hand, up to the table maximum: a
+        // player may have won chips since asking. What doesn't fit is handed
+        // back (a Refund); the host's own chips come from nowhere, so theirs
+        // just aren't added.
         let host_chips = std::mem::take(&mut self.host_approved);
-        if host_chips > 0 {
-            let _ = self.table.add_chips(0, host_chips);
+        let (fits, _) = self.fit(0, host_chips);
+        if fits > 0 {
+            let _ = self.table.add_chips(0, fits);
         }
         for i in 0..self.players.len() {
             let seat = self.players[i].seat;
             // (Someone sitting down gets theirs in take_seat.)
             if !self.players[i].pending {
                 let chips = std::mem::take(&mut self.players[i].approved);
-                if chips > 0 {
-                    let _ = self.table.add_chips(seat, chips);
+                let (fits, over) = self.fit(seat, chips);
+                if fits > 0 {
+                    let _ = self.table.add_chips(seat, fits);
+                }
+                if over > 0 {
+                    self.refunds.push(Refund {
+                        client_id: self.players[i].client_id.clone(),
+                        seat,
+                        chips: over,
+                    });
                 }
             }
             if self.players[i].pending {
@@ -922,6 +958,16 @@ impl TableHost {
         }
         out.extend(self.changed(now));
         out
+    }
+
+    /// How much of `chips` fits on `seat`'s stack under the maximum (with a
+    /// bank; all of it without), and how much is over.
+    fn fit(&self, seat: usize, chips: u64) -> (u64, u64) {
+        let Some(bank) = self.bank else {
+            return (chips, 0);
+        };
+        let fits = chips.min(bank.max.saturating_sub(self.table.stack(seat)));
+        (fits, chips - fits)
     }
 
     fn take_seat(&mut self, seat: usize, name: String) {
