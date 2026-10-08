@@ -62,6 +62,60 @@ fn plain_js(value: &impl serde::Serialize) -> Result<JsValue, JsError> {
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
+fn hand_cards(cards: &str) -> Result<Vec<Card>, JsError> {
+    cards
+        .split([',', ' '])
+        .filter(|c| !c.is_empty())
+        .map(|c| Card::parse(c).map_err(to_js_err))
+        .collect()
+}
+
+#[derive(serde::Serialize)]
+struct OmahaHandInfo {
+    /// Feature values, in `features` order.
+    values: Vec<f64>,
+    features: Vec<&'static str>,
+    tags: Vec<&'static str>,
+    nut_flush_block: f64,
+    score: Option<f64>,
+    /// 0 (best) to 100 (worst) among hands of the same size.
+    percentile: Option<f64>,
+}
+
+/// Omaha starting-hand analysis for 4-6 cards like "As Ad Kh Qh"
+/// (`ducy::games::omaha_analysis`): feature values and names, tags,
+/// nut-flush blocking, and the fitted model's score and percentile (0 best).
+#[wasm_bindgen(js_name = omahaHand)]
+pub fn omaha_hand(cards: &str) -> Result<JsValue, JsError> {
+    use ducy::games::omaha_analysis as oa;
+    let hand = hand_cards(cards)?;
+    if !(4..=6).contains(&hand.len()) {
+        return Err(JsError::new("an Omaha hand has 4, 5 or 6 cards"));
+    }
+    let info = OmahaHandInfo {
+        values: oa::hand_features(&hand),
+        features: oa::FEATURE_NAMES.to_vec(),
+        tags: oa::hand_tags(&hand),
+        nut_flush_block: oa::nut_flush_block(&hand),
+        score: oa::score(&hand),
+        percentile: oa::percentile(&hand),
+    };
+    serde_wasm_bindgen::to_value(&info).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Each Omaha hand tag and its description ("you play too many ___").
+#[wasm_bindgen(js_name = omahaTagLabels)]
+pub fn omaha_tag_labels() -> Result<JsValue, JsError> {
+    use serde::Serialize;
+    let labels: std::collections::BTreeMap<&str, &str> = ducy::games::omaha_analysis::TAG_LABELS
+        .iter()
+        .copied()
+        .collect();
+    labels
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
 #[derive(serde::Serialize)]
 struct OmahaRangeReport {
     combos: f64,
