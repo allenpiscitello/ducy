@@ -105,6 +105,65 @@ pub fn bot_reads(
     })
 }
 
+#[derive(Serialize)]
+struct PresetInfo {
+    id: &'static str,
+    label: &'static str,
+    minutes: u32,
+}
+
+/// The tournament blind presets (ducy_play::structure): [{id, label, minutes}].
+#[wasm_bindgen(js_name = blindPresets)]
+pub fn blind_presets() -> Result<JsValue, JsError> {
+    let list: Vec<PresetInfo> = ducy_play::structure::PRESETS
+        .iter()
+        .map(|p| PresetInfo {
+            id: p.id,
+            label: p.label,
+            minutes: p.minutes,
+        })
+        .collect();
+    to_js(&list)
+}
+
+/// A preset's blind structure for a starting stack: a list of
+/// {sb, bb, ante, minutes} levels and {break: true, minutes} breaks.
+#[wasm_bindgen(js_name = blindPreset)]
+pub fn blind_preset(id: &str, stack: u64) -> Result<JsValue, JsError> {
+    to_js(&ducy_play::structure::preset_structure(id, stack).map_err(|e| JsError::new(&e))?)
+}
+
+/// What's wrong with a structure as typed into a form, as messages to show
+/// (none means it's playable).
+#[wasm_bindgen(js_name = checkBlindStructure)]
+pub fn check_blind_structure(steps: JsValue) -> Result<Vec<String>, JsError> {
+    let steps: Vec<ducy_play::structure::StepInput> =
+        serde_wasm_bindgen::from_value(steps).map_err(err)?;
+    Ok(ducy_play::structure::check_structure(&steps))
+}
+
+/// About how long a tournament takes to find a winner: {minutes, hands,
+/// level}. `steps` must be playable (see `checkBlindStructure`).
+#[wasm_bindgen(js_name = estimateTournament)]
+pub fn estimate_tournament(
+    steps: JsValue,
+    stack: u64,
+    players: u32,
+    table_size: u32,
+    hands_per_hour: Option<f64>,
+) -> Result<JsValue, JsError> {
+    let steps: Vec<ducy_play::structure::Step> =
+        serde_wasm_bindgen::from_value(steps).map_err(err)?;
+    let o = ducy_play::structure::EstimateOptions {
+        stack,
+        players,
+        table_size,
+        hands_per_hour: hands_per_hour.unwrap_or(ducy_play::structure::HANDS_PER_HOUR),
+        ..Default::default()
+    };
+    to_js(&ducy_play::structure::estimate(&steps, &o))
+}
+
 fn rules_for(game: Option<&str>, small_blind: u64, big_blind: u64) -> Result<TableRules, JsError> {
     Ok(match game.unwrap_or("nlhe") {
         "nlhe" => TableRules::no_limit_holdem(small_blind, big_blind),

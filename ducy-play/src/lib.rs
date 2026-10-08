@@ -39,6 +39,7 @@ mod showdown;
 pub mod snapshot;
 pub mod stats;
 pub mod strength;
+pub mod structure;
 mod table;
 mod tournament;
 
