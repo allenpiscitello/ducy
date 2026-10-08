@@ -60,7 +60,13 @@ assert.equal(caught.party, 3, 'names the host');
   const r = s.request();
   assert.equal(r.kind, 'shuffle');
   const out = ps[r.to].shuffle(r.deck);
+  // Anyone can check a shuffle on its own, given the party's key and context.
+  const ctx = s.contextFor('ann');
+  assert.equal(w.shuffleVerifyShuffle(ps.ann.key(), r.deck, out.deck, out.proof, ctx), true, 'an honest shuffle checks out');
+  assert.equal(w.shuffleVerifyShuffle(ps.bob.key(), r.deck, out.deck, out.proof, ctx), false, 'not under another key');
+  assert.equal(w.shuffleVerifyShuffle(ps.ann.key(), r.deck, out.deck, out.proof, s.contextFor('bob')), false, 'not in another context');
   [out.deck[0], out.deck[1]] = [out.deck[1], out.deck[0]];
+  assert.equal(w.shuffleVerifyShuffle(ps.ann.key(), r.deck, out.deck, out.proof, ctx), false, 'a tampered shuffle doesn’t');
   assert.deepEqual(s.shuffled(r.to, out.deck, out.proof), {kind: 'restart', left: 'ann'});
   assert.deepEqual(s.players(), ['bob', 'cy']);
 }

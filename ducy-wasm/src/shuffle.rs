@@ -377,6 +377,26 @@ pub fn shuffle_verify_unlock(
     Ok(UnlockProof::from_bytes(&unhex(proof)?).is_some_and(|p| p.verify(&k, &pairs, &ctx)))
 }
 
+/// Checks a shuffle round: whether `outputs` are `inputs` permuted and
+/// locked with the secret behind `publicKey`, as `proof` (from
+/// `ShuffleParty.shuffle`) says. Lets every player check a party's shuffle
+/// themselves, the host's included, rather than trust whoever relays it.
+#[wasm_bindgen(js_name = shuffleVerifyShuffle)]
+pub fn shuffle_verify_shuffle(
+    public_key: &str,
+    inputs: Vec<String>,
+    outputs: Vec<String>,
+    proof: &str,
+    context: &str,
+) -> Result<bool, JsError> {
+    let (k, i, o) = (key(public_key)?, cards(&inputs)?, cards(&outputs)?);
+    if i.len() != o.len() {
+        return Ok(false);
+    }
+    let ctx = unhex(context)?;
+    Ok(ShuffleProof::from_bytes(&unhex(proof)?).is_some_and(|p| p.verify(&k, &i, &o, &ctx)))
+}
+
 /// Whether a secret published at showdown is the one behind `publicKey`.
 #[wasm_bindgen(js_name = shuffleSecretMatches)]
 pub fn shuffle_secret_matches(public_key: &str, secret: &str) -> Result<bool, JsError> {
