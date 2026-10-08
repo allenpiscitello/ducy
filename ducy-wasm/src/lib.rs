@@ -16,6 +16,105 @@ fn to_js_err(e: ducy::error::DucyError) -> JsError {
     JsError::new(&e.to_string())
 }
 
+/// What range text covers, for a range picker: `{ok: true, classes,
+/// combos}`, or `{ok: false, error: {term, start, message}}` naming the term
+/// that didn't parse and its byte offset.
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum RangeAnswer<T> {
+    Ok {
+        ok: bool,
+        #[serde(flatten)]
+        report: T,
+    },
+    Err {
+        ok: bool,
+        error: ducy::games::holdem::RangeTextError,
+    },
+}
+
+impl<T> RangeAnswer<T> {
+    fn from(r: Result<T, ducy::games::holdem::RangeTextError>) -> Self {
+        match r {
+            Ok(report) => RangeAnswer::Ok { ok: true, report },
+            Err(error) => RangeAnswer::Err { ok: false, error },
+        }
+    }
+}
+
+/// Hold'em range text (`QQ+, AKs, A5s-A2s, KQo, AhKh`, ...) as ducy reads
+/// it: the hand classes it covers (strongest first) and its combos, leaving
+/// out combos that use a card in `dead` (e.g. "As Kd"). See
+/// `ducy::games::holdem::HoldemRange` for the notation.
+#[wasm_bindgen(js_name = holdemRangeReport)]
+pub fn holdem_range_report(text: &str, dead: Option<String>) -> Result<JsValue, JsError> {
+    let dead = match dead.as_deref().map(str::trim) {
+        Some(d) if !d.is_empty() => Deck::parse(d).map_err(to_js_err)?,
+        _ => Deck::empty(),
+    };
+    plain_js(&RangeAnswer::from(HoldemRange::report(text, dead)))
+}
+
+/// A value as plain JS objects (not Maps), as JSON would give it.
+fn plain_js(value: &impl serde::Serialize) -> Result<JsValue, JsError> {
+    value
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[derive(serde::Serialize)]
+struct OmahaRangeReport {
+    combos: f64,
+    total: f64,
+    coverage: f64,
+}
+
+/// Omaha range text (`AAxx$ds, $rd0-1`, ...) for hands of `cards_per_player`
+/// cards: `{ok: true, combos, total, coverage}`, or the term that didn't parse
+/// as for `holdemRangeReport`.
+#[wasm_bindgen(js_name = omahaRangeReport)]
+pub fn omaha_range_report(text: &str, cards_per_player: usize) -> Result<JsValue, JsError> {
+    let mut range = omaha_range::OmahaRange::new(cards_per_player);
+    let mut answer = Ok(());
+    for (start, term) in range_terms(text) {
+        if range.add(term, rust_decimal::Decimal::ONE).is_err() {
+            answer = Err(ducy::games::holdem::RangeTextError {
+                term: term.to_string(),
+                start,
+                message: format!(
+                    "“{term}” isn’t an Omaha range term (e.g. AAxx$ds, $rd0-1, KK$ss)."
+                ),
+            });
+            break;
+        }
+    }
+    let answer = answer.map(|()| OmahaRangeReport {
+        combos: range.combos() as f64,
+        total: range.total_hands() as f64,
+        coverage: range.coverage(),
+    });
+    plain_js(&RangeAnswer::from(answer))
+}
+
+/// The terms of range text (separated by commas or whitespace), each with its byte offset.
+fn range_terms(text: &str) -> Vec<(usize, &str)> {
+    let mut out = Vec::new();
+    let mut start = None;
+    for (i, ch) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ',')))
+    {
+        if matches!(ch, ',' | ' ' | '\t' | '\n' | '\r') {
+            if let Some(s) = start.take() {
+                out.push((s, &text[s..i]));
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    out
+}
+
 /// JS numbers are f64; seeds are whole numbers up to 2^53.
 fn to_seed(seed: Option<f64>) -> Option<u64> {
     seed.map(|s| s as u64)
