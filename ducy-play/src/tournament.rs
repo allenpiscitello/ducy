@@ -1,62 +1,5 @@
-//! Multi-table tournaments: random seating, blind levels, eliminations,
-//! balancing and breaking tables, and hand-for-hand play on the bubble.
-//!
-//! [`Tournament`] is pure game logic over several [`Table`]s, with no clock
-//! and no I/O. The host drives it:
-//!
-//! 1. [`Tournament::new_hand`] deals the next hand at a table, at the current
-//!    level's blinds.
-//! 2. Play the hand through [`Tournament::table_mut`] (`act`, `advance`).
-//! 3. [`Tournament::finish_hand`] once it's over: it records who busted and
-//!    their places, then moves players to keep the tables balanced (and
-//!    breaks tables) and reports what moved.
-//!
-//! [`Tournament::set_level`] raises the blinds; each table picks the new level
-//! up at its next hand. Players can't be removed. One who isn't there is
-//! marked absent ([`Tournament::set_absent`]): they're still dealt in, post
-//! blinds and antes, and check or fold when it's their turn ("blinded off").
-//!
-//! A player who sits down at a table that's been playing (moved there, or a
-//! late entry) isn't dealt in on the button or the small blind, so no one
-//! plays an orbit without paying a big blind ([`Table::arrive`]).
-//!
-//! [`Tournament::snapshot`] saves the whole tournament, hands in progress
-//! included, and [`Tournament::restore`] carries on from it exactly as the
-//! original would, e.g. after a host or server restarts.
-//!
-//! ```
-//! use ducy_play::{Entrant, Level, Tournament, TournamentConfig, Variant, BettingStructure};
-//! use ducy_play::bots::CallingStation;
-//!
-//! let config = TournamentConfig {
-//!     variant: Variant::Holdem,
-//!     structure: BettingStructure::NoLimit,
-//!     table_size: 6,
-//!     starting_stack: 100,
-//!     levels: vec![Level::new(5, 10, 0), Level::new(25, 50, 5)],
-//!     paid: 2,
-//!     seed: 7,
-//! };
-//! let players = (0..10)
-//!     .map(|i| Entrant::bot(format!("p{i}"), format!("P{i}"), Box::new(CallingStation)))
-//!     .collect();
-//! let mut t = Tournament::new(config, players).unwrap();
-//! assert_eq!(t.table_ids().len(), 2);
-//! t.set_level(1);
-//! while !t.is_over() {
-//!     for id in t.table_ids() {
-//!         if !t.can_deal(id) {
-//!             continue;
-//!         }
-//!         t.new_hand(id).unwrap();
-//!         let table = t.table_mut(id).unwrap();
-//!         while table.advance().unwrap() {}
-//!         t.finish_hand(id).unwrap();
-//!     }
-//! }
-//! assert_eq!(t.finishes().len(), 9); // everyone but the winner
-//! assert_eq!(t.winner().unwrap().place, 1);
-//! ```
+//! Multi-table tournaments: see [`Tournament`], which carries the overview
+//! and an example (this module is private, so its docs aren't published).
 
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -69,13 +12,16 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Level {
+    /// The small blind.
     pub small_blind: u64,
+    /// The big blind.
     pub big_blind: u64,
     /// Posted by every player dealt in.
     pub ante: u64,
 }
 
 impl Level {
+    /// A level with these blinds and ante.
     pub fn new(small_blind: u64, big_blind: u64, ante: u64) -> Self {
         Self {
             small_blind,
@@ -89,7 +35,9 @@ impl Level {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TournamentConfig {
+    /// The game: Hold'em, or Omaha with 4 to 6 cards.
     pub variant: Variant,
+    /// No-limit or pot-limit.
     pub structure: BettingStructure,
     /// Seats per table, 2 to [`MAX_PLAYERS`].
     pub table_size: usize,
@@ -106,12 +54,16 @@ pub struct TournamentConfig {
 
 /// Someone entering the tournament: a person, or a bot that plays their seat.
 pub struct Entrant {
+    /// A unique id for the entry.
     pub id: String,
+    /// The name shown.
     pub name: String,
+    /// The bot that plays the seat, or `None` for a person.
     pub bot: Option<Box<dyn Bot>>,
 }
 
 impl Entrant {
+    /// A person, who plays through [`Tournament::table_mut`].
     pub fn person(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -120,6 +72,7 @@ impl Entrant {
         }
     }
 
+    /// A bot that plays its own seat.
     pub fn bot(id: impl Into<String>, name: impl Into<String>, bot: Box<dyn Bot>) -> Self {
         Self {
             id: id.into(),
@@ -140,7 +93,9 @@ impl Entrant {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SeatRef {
+    /// The table id.
     pub table: usize,
+    /// The seat at that table.
     pub seat: usize,
 }
 
@@ -148,8 +103,11 @@ pub struct SeatRef {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Finish {
+    /// The entry's id.
     pub id: String,
+    /// Their name.
     pub name: String,
+    /// The place they finished in (1 = winner).
     pub place: usize,
 }
 
@@ -157,8 +115,11 @@ pub struct Finish {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Move {
+    /// Who moved.
     pub id: String,
+    /// Where they were.
     pub from: SeatRef,
+    /// Where they sit now.
     pub to: SeatRef,
 }
 
@@ -180,14 +141,77 @@ pub struct HandReport {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Standing {
+    /// The entry's id.
     pub id: String,
+    /// Their name.
     pub name: String,
+    /// Chips they have.
     pub stack: u64,
+    /// Where they sit.
     pub at: SeatRef,
+    /// Marked absent: dealt in and blinded off (see [`Tournament::set_absent`]).
     pub absent: bool,
 }
 
-/// A multi-table tournament. See the [module docs](self).
+/// A multi-table tournament: random seating, blind levels, eliminations,
+/// balancing and breaking tables, and hand-for-hand play on the bubble.
+///
+/// It's pure game logic over several [`Table`]s, with no clock and no I/O.
+/// The host drives it:
+///
+/// 1. [`Tournament::new_hand`] deals the next hand at a table, at the current
+///    level's blinds.
+/// 2. Play the hand through [`Tournament::table_mut`] (`act`, `advance`).
+/// 3. [`Tournament::finish_hand`] once it's over: it records who busted and
+///    their places, then moves players to keep the tables balanced (and
+///    breaks tables) and reports what moved.
+///
+/// [`Tournament::set_level`] raises the blinds; each table picks the new level
+/// up at its next hand. Players can't be removed. One who isn't there is
+/// marked absent ([`Tournament::set_absent`]): they're still dealt in, post
+/// blinds and antes, and check or fold when it's their turn ("blinded off").
+///
+/// A player who sits down at a table that's been playing (moved there, or a
+/// late entry) isn't dealt in on the button or the small blind, so no one
+/// plays an orbit without paying a big blind ([`Table::arrive`]).
+///
+/// [`Tournament::snapshot`] saves the whole tournament, hands in progress
+/// included, and [`Tournament::restore`] carries on from it exactly as the
+/// original would, e.g. after a host or server restarts.
+///
+/// ```
+/// use ducy_play::{Entrant, Level, Tournament, TournamentConfig, Variant, BettingStructure};
+/// use ducy_play::bots::CallingStation;
+///
+/// let config = TournamentConfig {
+///     variant: Variant::Holdem,
+///     structure: BettingStructure::NoLimit,
+///     table_size: 6,
+///     starting_stack: 100,
+///     levels: vec![Level::new(5, 10, 0), Level::new(25, 50, 5)],
+///     paid: 2,
+///     seed: 7,
+/// };
+/// let players = (0..10)
+///     .map(|i| Entrant::bot(format!("p{i}"), format!("P{i}"), Box::new(CallingStation)))
+///     .collect();
+/// let mut t = Tournament::new(config, players).unwrap();
+/// assert_eq!(t.table_ids().len(), 2);
+/// t.set_level(1);
+/// while !t.is_over() {
+///     for id in t.table_ids() {
+///         if !t.can_deal(id) {
+///             continue;
+///         }
+///         t.new_hand(id).unwrap();
+///         let table = t.table_mut(id).unwrap();
+///         while table.advance().unwrap() {}
+///         t.finish_hand(id).unwrap();
+///     }
+/// }
+/// assert_eq!(t.finishes().len(), 9); // everyone but the winner
+/// assert_eq!(t.winner().unwrap().place, 1);
+/// ```
 pub struct Tournament {
     config: TournamentConfig,
     /// Indexed by table id; `None` once a table is broken.
@@ -315,6 +339,7 @@ impl Tournament {
         }
     }
 
+    /// How the tournament is played.
     pub fn config(&self) -> &TournamentConfig {
         &self.config
     }
@@ -324,6 +349,7 @@ impl Tournament {
         self.level
     }
 
+    /// The blinds and ante now.
     pub fn current_level(&self) -> Level {
         self.config.levels[self.level.min(self.config.levels.len() - 1)]
     }
@@ -341,6 +367,7 @@ impl Tournament {
             .collect()
     }
 
+    /// Table `id`, if it's still in play.
     pub fn table(&self, id: usize) -> Option<&Table> {
         self.tables.get(id)?.as_ref()
     }
@@ -380,10 +407,12 @@ impl Tournament {
         &self.finishes
     }
 
+    /// The winner, once there is one.
     pub fn winner(&self) -> Option<&Finish> {
         self.winner.as_ref()
     }
 
+    /// Whether one player has all the chips.
     pub fn is_over(&self) -> bool {
         self.winner.is_some()
     }

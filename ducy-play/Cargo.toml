@@ -6,8 +6,13 @@ rust-version = "1.85.0"
 license = "MIT"
 description = "Play out poker hands: blinds, betting, side pots and showdown, built on ducy."
 repository = "https://github.com/allenpiscitello/ducy"
+documentation = "https://docs.rs/ducy-play"
+readme = "README.md"
 categories = ["game-engines"]
 keywords = ["poker", "holdem", "omaha", "simulation"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["process"]
@@ -17,7 +22,7 @@ serde = ["dep:serde", "ducy/serde"]
 process = ["serde", "dep:serde_json"]
 
 [dependencies]
-ducy = { path = "..", default-features = false }
+ducy = { version = "0.3.0", path = "..", default-features = false }
 rand = "0.10.2"
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }

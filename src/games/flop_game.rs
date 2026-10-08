@@ -89,6 +89,8 @@ impl FlopGameState {
             .collect()
     }
 
+    /// Every way the rest of the board can come, as complete boards: just the
+    /// current board when it's already complete.
     pub fn enumerate_runout_community_cards(&self) -> impl Iterator<Item = Deck> + '_ {
         let cards_needed = self.cards_needed();
 
@@ -113,6 +115,7 @@ impl FlopGameState {
             .chain(combos.map(move |c| base_community | c))
     }
 
+    /// Each player's hole cards, in the order they were added.
     pub fn hole_cards(&self) -> &[Deck] {
         &self.hole_cards[..self.num_players]
     }

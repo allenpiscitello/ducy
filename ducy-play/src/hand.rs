@@ -104,35 +104,88 @@ pub struct LegalActions {
 #[cfg_attr(feature = "serde", serde(tag = "type", rename_all = "snake_case"))]
 pub enum Event {
     /// A seat posted an ante.
-    Ante { seat: usize, amount: u64 },
+    Ante {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+        /// Chips posted.
+        amount: u64,
+    },
     /// A seat posted the small blind (less if all-in).
-    SmallBlind { seat: usize, amount: u64 },
+    SmallBlind {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+        /// Chips posted.
+        amount: u64,
+    },
     /// A seat posted the big blind (less if all-in).
-    BigBlind { seat: usize, amount: u64 },
+    BigBlind {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+        /// Chips posted.
+        amount: u64,
+    },
     /// A seat coming back after missing blinds posted them: `dead` goes
     /// into the pot without counting toward their bet, `live` counts as
     /// their bet (see [`Post`]).
-    Post { seat: usize, dead: u64, live: u64 },
+    Post {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+        /// Chips into the pot that don't count toward their bet.
+        dead: u64,
+        /// Chips that count as their bet for the street.
+        live: u64,
+    },
     /// A seat folded.
-    Fold { seat: usize },
+    Fold {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+    },
     /// A seat checked.
-    Check { seat: usize },
+    Check {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+    },
     /// A seat called, adding `amount`.
     Call {
+        /// The seat, as an index into the hand's stacks.
         seat: usize,
+        /// Chips added to call.
         amount: u64,
+        /// Whether that was all their chips.
         all_in: bool,
     },
     /// A seat bet to `to` for the street.
-    Bet { seat: usize, to: u64, all_in: bool },
+    Bet {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+        /// Their total bet for the street.
+        to: u64,
+        /// Whether that was all their chips.
+        all_in: bool,
+    },
     /// A seat raised to `to` for the street.
-    Raise { seat: usize, to: u64, all_in: bool },
+    Raise {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+        /// Their total bet for the street.
+        to: u64,
+        /// Whether that was all their chips.
+        all_in: bool,
+    },
     /// Board cards dealt for a new street.
-    Board { street: Street, cards: Vec<Card> },
+    Board {
+        /// The street dealt.
+        street: Street,
+        /// The new cards (3 on the flop, then 1).
+        cards: Vec<Card>,
+    },
     /// A seat won chips from pot `pot` (0 is the main pot).
     Award {
+        /// The seat, as an index into the hand's stacks.
         seat: usize,
+        /// Which pot: 0 is the main pot, then the side pots in order.
         pot: usize,
+        /// Chips won.
         amount: u64,
     },
 }
@@ -183,7 +236,9 @@ impl Seat {
 pub struct Post {
     /// The player, as an index into the hand's stacks.
     pub player: usize,
+    /// Chips into the pot that don't count toward their bet.
     pub dead: u64,
+    /// Chips that count as their bet for the street.
     pub live: u64,
 }
 

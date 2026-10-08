@@ -102,18 +102,25 @@ impl TableSeat {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TableView {
+    /// Hands dealt so far at the table; this is the current or last one.
     pub hand_number: u64,
     /// `None` once the hand is over.
     pub street: Option<Street>,
+    /// The board cards so far, e.g. `"Ah"`.
     pub board: Vec<String>,
+    /// Chips in the pot, including this street's bets.
     pub pot: u64,
+    /// The bet to call on this street.
     pub current_bet: u64,
+    /// The button's seat.
     pub button: usize,
     /// Always 0: the viewer.
     pub hero: usize,
     /// The viewer's real seat number at the table.
     pub seat: usize,
+    /// The small blind.
     pub small_blind: u64,
+    /// The big blind.
     pub big_blind: u64,
     /// Hole cards per player: 2 for Hold'em, 4 to 6 for Omaha.
     pub hole_cards: usize,
@@ -123,10 +130,15 @@ pub struct TableView {
     pub to_act: Option<usize>,
     /// What the viewer may do, when it's their turn.
     pub legal: Option<LegalActions>,
+    /// Every seat, from the viewer round.
     pub seats: Vec<SeatState>,
+    /// What has happened in the hand so far, in order.
     pub events: Vec<Event>,
+    /// The hand is over.
     pub complete: bool,
+    /// The hand went to a showdown.
     pub showdown: bool,
+    /// The main pot, then the side pots.
     pub pots: Vec<Pot>,
 }
 
@@ -134,6 +146,7 @@ pub struct TableView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SeatState {
+    /// The name shown.
     pub name: String,
     /// Personality id, or the person's id.
     pub id: String,
@@ -148,9 +161,13 @@ pub struct SeatState {
     /// won't be dealt in).
     #[cfg_attr(feature = "serde", serde(default))]
     pub sitting_out: bool,
+    /// Chips behind.
     pub stack: u64,
+    /// Chips bet on this street.
     pub street_bet: u64,
+    /// Folded this hand.
     pub folded: bool,
+    /// All in this hand.
     pub all_in: bool,
     /// The viewer's own cards always; anyone else's only once shown down.
     pub cards: Option<Vec<String>>,
@@ -285,6 +302,7 @@ impl Table {
         self.seed.is_none()
     }
 
+    /// The game and blinds in play.
     pub fn rules(&self) -> &TableRules {
         &self.rules
     }
@@ -352,10 +370,12 @@ impl Table {
         self.returning[seat] == Return::Arriving
     }
 
+    /// How many seats the table has.
     pub fn num_seats(&self) -> usize {
         self.seats.len()
     }
 
+    /// Seat `seat`. Panics if there's no such seat.
     pub fn seat(&self, seat: usize) -> &TableSeat {
         &self.seats[seat]
     }
@@ -388,6 +408,7 @@ impl Table {
         self.hand.as_ref()?.summary(self.hand_index(seat)?)
     }
 
+    /// Hands dealt so far.
     pub fn hand_number(&self) -> u64 {
         self.hand_number
     }

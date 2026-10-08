@@ -79,7 +79,9 @@ impl GameState for OmahaHiLoGameState {}
 
 /// Result of a Hi-Lo hand evaluation: high winners and optional low winners.
 pub struct HiLoResult {
+    /// The best high hand (more than one on a tie).
     pub high_winners: Vec<GameWinner<StandardHandRanks>>,
+    /// The best qualifying 8-or-better low; empty if no one has one.
     pub low_winners: Vec<GameWinner<LowHandRanks>>,
 }
 

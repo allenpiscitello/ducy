@@ -13,10 +13,15 @@ pub enum LowHandRanks {
     NoLow,
     /// A qualifying low, ranked from highest to lowest card.
     Low {
+        /// The highest card.
         c1: Rank,
+        /// The second highest.
         c2: Rank,
+        /// The third.
         c3: Rank,
+        /// The fourth.
         c4: Rank,
+        /// The lowest card.
         c5: Rank,
     },
 }
@@ -65,6 +70,7 @@ impl std::fmt::Display for LowHandRanks {
     }
 }
 
+/// Ranks 8-or-better low hands, for the low half of hi-lo games.
 pub struct LowHandRanker;
 
 impl LowHandRanker {

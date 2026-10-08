@@ -356,6 +356,7 @@ impl OmahaRange {
     }
 
     /// Hole cards per hand.
+    /// How many cards each hand in the range has (4, 5 or 6).
     pub fn cards_per_player(&self) -> usize {
         self.cards_per_player
     }

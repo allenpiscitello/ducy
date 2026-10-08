@@ -1,6 +1,9 @@
 use crate::deck::{Deck, Rank};
 use crate::ranking::hand_rank::{HandRanking, StandardHandRanker, StandardHandRanks};
 
+/// A deuce-to-seven lowball hand's rank: aces are high, and straights and
+/// flushes count against you; the best hand is 7-5-4-3-2 offsuit. Greater is
+/// better.
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct DeuceToSevenRanks {
     pub(crate) high_rank: StandardHandRanks,
@@ -26,9 +29,11 @@ impl std::fmt::Display for DeuceToSevenRanks {
     }
 }
 
+/// Ranks deuce-to-seven lowball hands.
 pub struct DeuceToSevenRanker;
 
 impl DeuceToSevenRanker {
+    /// The rank of exactly 5 cards.
     pub fn get_rank(deck: &Deck) -> DeuceToSevenRanks {
         let standard = StandardHandRanker::get_rank(deck);
         let high_rank = match standard {
@@ -65,6 +70,7 @@ impl DeuceToSevenRanker {
         DeuceToSevenRanks { high_rank }
     }
 
+    /// The best 5-card hand from `deck` (5 or more cards).
     pub fn get_best_from(deck: &Deck) -> DeuceToSevenRanks {
         if deck.num_cards() <= 5 {
             return Self::get_rank(deck);

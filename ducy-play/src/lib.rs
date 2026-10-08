@@ -19,6 +19,35 @@
 //! let result = hand.result().unwrap();
 //! assert_eq!(result.final_stacks.iter().sum::<u64>(), 600);
 //! ```
+//!
+//! # From one hand to a tournament
+//!
+//! - [`Hand`]: one hand, from the blinds to the payout, with its [`Event`]
+//!   history and each player's [`LegalActions`].
+//! - [`Table`]: seats over many hands: the button moves, people sit out and
+//!   come back (posting missed blinds or waiting for the big blind), and bots
+//!   play their seats ([`Table::advance`]).
+//! - [`TableHost`]: a table for remote players. It takes each player's
+//!   [`Command`]s and answers with [`Update`]s showing only what that player
+//!   may see. It also runs turn clocks, chip requests at a table with a bank,
+//!   and sit-out limits. It can be saved mid-hand and restored ([`snapshot`]).
+//! - [`Tournament`]: several tables with blind [`Level`]s, eliminations,
+//!   balancing and hand-for-hand play on the bubble.
+//! - Bots: the [`Bot`] trait, simple [`bots`], 15 [`Personality`] bots,
+//!   [`run_match`] for duplicate matches, and `ProcessBot` (feature
+//!   `process`) for bots in any language, talking JSON over stdin/stdout.
+//!
+//! # Features
+//!
+//! - `process` (default): `ProcessBot`, and `serde`.
+//! - `serde`: `Serialize`/`Deserialize` for rules, actions, events, views,
+//!   commands and updates (JSON for external bots and clients) and snapshots.
+//!
+//! A seed makes deals reproducible. Without one ([`Deal::random`] with
+//! `None`, or [`Table::with_secure_deals`]) every deal comes from fresh system
+//! randomness: use that whenever people play each other.
+
+#![warn(missing_docs)]
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]

@@ -33,13 +33,19 @@ use crate::{
 pub enum Command {
     /// Take an open seat, or get your seat back after reconnecting with the
     /// same `client_id`.
-    Join { name: String },
+    Join {
+        /// The name shown at the table.
+        name: String,
+    },
     /// Play an action: "fold", "check", "call", "bet", "raise" or "allin",
     /// with `amount` the street total for a bet or raise. `seq` is the
     /// state the player saw, so a stale or repeated action is rejected.
     Act {
+        /// The state number the player acted on.
         seq: u64,
+        /// "fold", "check", "call", "bet", "raise" or "allin".
         kind: String,
+        /// The street total, for a bet or raise.
         #[cfg_attr(feature = "serde", serde(default))]
         amount: u64,
     },
@@ -51,6 +57,7 @@ pub enum Command {
     /// posted at once (one small blind dead, one big blind live), or, with
     /// `wait_for_big_blind`, by waiting until the big blind comes round.
     SitIn {
+        /// Wait for the big blind instead of posting missed blinds now.
         #[cfg_attr(feature = "serde", serde(default))]
         wait_for_big_blind: bool,
     },
@@ -58,7 +65,10 @@ pub enum Command {
     Leave,
     /// Ask the host for `amount` more chips (0 withdraws the request). The
     /// stack after it must be within the table's buy-in limits.
-    RequestChips { amount: u64 },
+    RequestChips {
+        /// Chips wanted (0 withdraws the request).
+        amount: u64,
+    },
 }
 
 /// A message from the host to one player.
@@ -67,10 +77,15 @@ pub enum Command {
 #[cfg_attr(feature = "serde", serde(tag = "type", rename_all = "snake_case"))]
 pub enum Update {
     /// You have a seat. You play from the next hand if one is going.
-    Welcome { seat: usize },
+    Welcome {
+        /// Your seat number at the table.
+        seat: usize,
+    },
     /// The table as you see it (you are seat 0), as of state `seq`.
     State {
+        /// The state number; send it back with your next action.
         seq: u64,
+        /// The table from your seat.
         view: Box<TableView>,
         /// Time left for whoever is acting, if a person is on the clock.
         turn_ms_left: Option<u64>,
@@ -88,7 +103,10 @@ pub enum Update {
         me: Option<SeatStatus>,
     },
     /// Your command was refused.
-    Rejected { reason: String },
+    Rejected {
+        /// Why, for the player.
+        reason: String,
+    },
 }
 
 /// What a player knows about chips at a table with a bank, sent with each
@@ -98,6 +116,7 @@ pub enum Update {
 pub struct ChipsView {
     /// The smallest and largest stack a request may bring you to.
     pub min: u64,
+    /// See `min`.
     pub max: u64,
     /// Chips you've asked for and the host hasn't answered.
     pub requested: u64,
@@ -115,6 +134,7 @@ pub struct SeatStatus {
     pub waiting_for_big_blind: bool,
     /// Blinds missed while out, posted on coming back.
     pub missed_small_blind: bool,
+    /// See `missed_small_blind`.
     pub missed_big_blind: bool,
     /// Time left before the seat is given up, while out (with a sit-out limit).
     pub out_ms_left: Option<u64>,
@@ -124,8 +144,11 @@ pub struct SeatStatus {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ChipRequest {
+    /// The player's seat.
     pub seat: usize,
+    /// The player's name.
     pub name: String,
+    /// Chips asked for.
     pub amount: u64,
     /// Chips the player has now.
     pub stack: u64,
@@ -137,8 +160,11 @@ pub struct ChipRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Departure {
+    /// Who left.
     pub client_id: String,
+    /// The seat they had.
     pub seat: usize,
+    /// The chips they took.
     pub chips: u64,
 }
 
@@ -150,8 +176,11 @@ pub struct Departure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Refund {
+    /// The player's client id.
     pub client_id: String,
+    /// Their seat at the table.
     pub seat: usize,
+    /// The chips handed back.
     pub chips: u64,
 }
 
@@ -162,8 +191,11 @@ pub struct Refund {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SeatedPlayer {
+    /// Who.
     pub client_id: String,
+    /// Their seat.
     pub seat: usize,
+    /// Their chips, as above.
     pub chips: u64,
     /// Sits down at the next hand.
     pub pending: bool,
@@ -174,7 +206,9 @@ pub struct SeatedPlayer {
 /// An update and the client it's for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outgoing {
+    /// The client it's for.
     pub to: String,
+    /// The update.
     pub update: Update,
 }
 
@@ -402,6 +436,7 @@ impl TableHost {
         Ok(())
     }
 
+    /// The table being hosted.
     pub fn table(&self) -> &Table {
         &self.table
     }

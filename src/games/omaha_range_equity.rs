@@ -1,7 +1,7 @@
 //! Monte Carlo equity for Omaha and Omaha Hi-Lo players holding shorthand
 //! ranges (the [`OmahaRange`](crate::games::omaha_range::OmahaRange) syntax).
 //!
-//! [`OmahaRangeSampler`] parses the same terms as `OmahaRange` but never lists
+//! [`OmahaRangeSampler`](crate::games::omaha_range_equity::OmahaRangeSampler) parses the same terms as `OmahaRange` but never lists
 //! every starting hand up front, which is impractical for PLO6 (about 20.4M
 //! hands). Narrow ranges are expanded into an explicit list of hands, built
 //! from each term's required cards so only candidates that can match are
@@ -88,6 +88,7 @@ impl OmahaRangeSampler {
         Ok(())
     }
 
+    /// How many cards each hand in the range has (4, 5 or 6).
     pub fn cards_per_player(&self) -> usize {
         self.cards_per_player
     }
