@@ -164,6 +164,11 @@ pub fn replay_frames(events: &[Event], stacks: &[u64], names: &[String]) -> Vec<
                 format!("{} folds", name(seat))
             }
             Event::Check { seat } => format!("{} checks", name(seat)),
+            Event::Reveal { seat, ref cards } => {
+                let cards: Vec<String> = cards.iter().map(|c| c.to_string()).collect();
+                format!("{} shows {}", name(seat), cards.join(" "))
+            }
+            Event::Forfeit { seat } => format!("{} doesn't show, and can't win", name(seat)),
             Event::Board {
                 street: next,
                 ref cards,
