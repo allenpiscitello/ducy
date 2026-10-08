@@ -599,6 +599,16 @@ struct HostResult<'a> {
     /// or null for a secure random deal.
     #[serde(skip_serializing_if = "Option::is_none")]
     seed: Option<Option<String>>,
+    /// What a hidden hand (`newHandHidden`) waits for, or null:
+    /// {kind: 'board', cards: how many} or {kind: 'reveals', seats}.
+    awaiting: Option<AwaitingOut>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum AwaitingOut {
+    Board { cards: usize },
+    Reveals { seats: Vec<usize> },
 }
 
 #[derive(Serialize)]
@@ -774,6 +784,16 @@ impl MultiTable {
                 })
                 .collect(),
             seed,
+            awaiting: self.host.awaiting().map(|a| match a {
+                ducy_play::Awaiting::Board(street) => AwaitingOut::Board {
+                    cards: if street == ducy_play::Street::Flop {
+                        3
+                    } else {
+                        1
+                    },
+                },
+                ducy_play::Awaiting::Reveals(seats) => AwaitingOut::Reveals { seats },
+            }),
         })
     }
 
@@ -818,6 +838,55 @@ impl MultiTable {
         }
         .map_err(err)?;
         self.result_with_seed(&out, now as u64, Some(seed.map(|s| s.to_lowercase())))
+    }
+
+    /// Deals the next hand from a trustless shuffle's deck (ducy-shuffle),
+    /// made for `players` (client ids, seat order): only they're dealt in.
+    /// The host never learns a hole card. The hand then waits (the result's
+    /// `awaiting`) for the board, street by street (`dealBoard`), and at
+    /// showdown for hands (`reveal`, `forfeit`); `tick` forfeits anyone out
+    /// of time to show. Not at a table with bots or a host seat.
+    #[wasm_bindgen(js_name = newHandHidden)]
+    pub fn new_hand_hidden(&mut self, now: f64, players: Vec<String>) -> Result<JsValue, JsError> {
+        let out = self
+            .host
+            .new_hand_hidden(now as u64, &players)
+            .map_err(err)?;
+        self.result(&out, now as u64)
+    }
+
+    /// The board cards a hidden hand waits for ("Ah", …), unlocked by the host.
+    #[wasm_bindgen(js_name = dealBoard)]
+    pub fn deal_board(&mut self, cards: Vec<String>, now: f64) -> Result<JsValue, JsError> {
+        let cards = cards
+            .iter()
+            .map(|c| ducy::deck::Card::parse(c).map_err(err))
+            .collect::<Result<Vec<_>, _>>()?;
+        let out = self.host.deal_board(&cards, now as u64).map_err(err)?;
+        self.result(&out, now as u64)
+    }
+
+    /// At showdown, `seat` showed these cards, checked against the shuffle
+    /// (`shuffleOpenWith` with their published secret).
+    pub fn reveal(
+        &mut self,
+        seat: usize,
+        cards: Vec<String>,
+        now: f64,
+    ) -> Result<JsValue, JsError> {
+        let mut deck = ducy::deck::Deck::empty();
+        for c in &cards {
+            deck |= ducy::deck::Card::parse(c).map_err(err)?;
+        }
+        let out = self.host.reveal(seat, deck, now as u64).map_err(err)?;
+        self.result(&out, now as u64)
+    }
+
+    /// At showdown, `seat` doesn't show, or its cards didn't check out: it
+    /// can't win.
+    pub fn forfeit(&mut self, seat: usize, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.forfeit(seat, now as u64).map_err(err)?;
+        self.result(&out, now as u64)
     }
 
     /// Lets a bot (or an away player) act.

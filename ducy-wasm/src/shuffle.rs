@@ -103,6 +103,16 @@ impl ShuffleParty {
         })
     }
 
+    /// A party saved from `reveal` ({secret, perm}) with the same context:
+    /// a host picking up mid-hand with the board still to unlock. Keep the
+    /// saved secret where only this party can read it.
+    pub fn restore(context: &str, secret: &str, perm: Vec<u32>) -> Result<ShuffleParty, JsError> {
+        let s = Secret::from_bytes(&bytes32(secret)?).ok_or_else(|| err("not a secret"))?;
+        Ok(ShuffleParty {
+            party: SetupParty::restore(&unhex(context)?, s, perm),
+        })
+    }
+
     /// The public key to send the host first (hex).
     pub fn key(&self) -> String {
         hex(&self.party.key().to_bytes())

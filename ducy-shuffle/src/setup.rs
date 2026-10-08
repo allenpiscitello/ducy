@@ -17,6 +17,12 @@
 //! 4. **Ready:** each player's hole cards carry only their own lock, and the
 //!    board only the host's ([`Ready`]).
 //!
+//! **The host keeps the ready deck to itself until the hand starts,** then
+//! sends each player their hole cards. Setup runs while the previous hand is
+//! still played, and no player may know their next cards before it's over.
+//! Nothing a player is sent during setup opens with their key: their own
+//! hole cards never pass through them with the other locks off.
+//!
 //! If a player drops out or sends a bad proof before the deck is ready, their
 //! lock is on every card, so the setup starts again without them, with fresh
 //! keys ([`Step::Restart`]). Fewer than two players left: [`Step::Waiting`].
@@ -367,6 +373,17 @@ impl SetupParty {
         SetupParty {
             secret: Secret::from_rng(rng),
             perm: Vec::new(),
+            context: context.to_vec(),
+        }
+    }
+
+    /// A party saved with [`SetupParty::reveal`] (and its context), e.g. a
+    /// host restarting mid-hand that still has the board to unlock. Keep
+    /// the saved secret where only this party can read it.
+    pub fn restore(context: &[u8], secret: Secret, perm: Vec<u32>) -> Self {
+        SetupParty {
+            secret,
+            perm,
             context: context.to_vec(),
         }
     }

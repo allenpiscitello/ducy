@@ -21,10 +21,23 @@
 //! A stack after a request must be between the table's minimum and maximum
 //! buy-in. Without one, every seat is topped back up to the buy-in.
 
+use ducy::deck::{Card, Deck};
+
 use crate::{
-    Action, Bot, PlayError, Table, TableView,
+    Action, Awaiting, Bot, PlayError, Table, TableView,
     snapshot::{HostSnapshot, PlayerSnapshot, SNAPSHOT_VERSION},
 };
+
+/// Where the next hand's cards come from.
+#[derive(Clone, Copy)]
+enum DealWith<'a> {
+    /// The table's own shuffle.
+    Random,
+    /// A provably fair seed.
+    Seed(&'a [u8; 32]),
+    /// A trustless shuffle's deck, made for these players.
+    Hidden(&'a [String]),
+}
 
 /// A message from a player to the host.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -245,6 +258,10 @@ struct Bank {
 
 /// Hands a disconnected person can miss before they're removed.
 pub const DROP_AFTER_HANDS: u32 = 3;
+
+/// How long players have to show at showdown in a hidden hand, at a table
+/// without a turn clock (otherwise they get a turn's time).
+pub const REVEAL_MS: u64 = 30_000;
 
 /// Runs a table for the host (seat 0) and remote players.
 pub struct TableHost {
@@ -830,6 +847,8 @@ impl TableHost {
         if !p.pending {
             self.table.seat_mut(seat).away = true;
         }
+        // Gone at showdown in a hidden hand: they can't show, so they can't win.
+        self.forfeit_absent();
         self.changed(now)
     }
 
@@ -871,7 +890,7 @@ impl TableHost {
     /// disconnected for [`DROP_AFTER_HANDS`] hands is removed. Fails, dealing
     /// nothing, with fewer than two players in.
     pub fn new_hand(&mut self, now: u64) -> Result<Vec<Outgoing>, PlayError> {
-        self.deal_next(now, None)
+        self.deal_next(now, DealWith::Random)
     }
 
     /// Like [`TableHost::new_hand`], dealt from a provably fair seed the
@@ -883,10 +902,79 @@ impl TableHost {
         now: u64,
         seed: &[u8; 32],
     ) -> Result<Vec<Outgoing>, PlayError> {
-        self.deal_next(now, Some(seed))
+        self.deal_next(now, DealWith::Seed(seed))
     }
 
-    fn deal_next(&mut self, now: u64, seed: Option<&[u8; 32]>) -> Result<Vec<Outgoing>, PlayError> {
+    /// Like [`TableHost::new_hand`], with cards the host never sees: a
+    /// trustless shuffle (#134) prepared a deck for `players` (client ids),
+    /// and only they can be dealt in; anyone else seated sits this hand out.
+    /// The hand then waits for the board street by street
+    /// ([`TableHost::deal_board`]) and for hands at showdown
+    /// ([`TableHost::reveal`]); [`TableHost::awaiting`] says which. Not at a
+    /// table with bots, which would need their cards, or with a host seat.
+    pub fn new_hand_hidden(
+        &mut self,
+        now: u64,
+        players: &[String],
+    ) -> Result<Vec<Outgoing>, PlayError> {
+        if self.has_host || (0..self.table.num_seats()).any(|s| self.table.seat(s).bot.is_some()) {
+            return Err(PlayError::InvalidSetup);
+        }
+        self.deal_next(now, DealWith::Hidden(players))
+    }
+
+    /// What a hidden hand is waiting for: board cards, or these seats'
+    /// hands at showdown.
+    pub fn awaiting(&self) -> Option<Awaiting> {
+        self.table.awaiting()
+    }
+
+    /// The board cards a hidden hand is waiting for, unlocked by the host.
+    pub fn deal_board(&mut self, cards: &[Card], now: u64) -> Result<Vec<Outgoing>, PlayError> {
+        self.table.deal_board(cards)?;
+        Ok(self.changed(now))
+    }
+
+    /// At showdown, `seat` showed its hand, checked against the shuffle by
+    /// the caller.
+    pub fn reveal(
+        &mut self,
+        seat: usize,
+        cards: Deck,
+        now: u64,
+    ) -> Result<Vec<Outgoing>, PlayError> {
+        self.table.reveal(seat, cards)?;
+        Ok(self.changed(now))
+    }
+
+    /// At showdown, `seat` doesn't show (or its cards didn't check out): it
+    /// can't win.
+    pub fn forfeit(&mut self, seat: usize, now: u64) -> Result<Vec<Outgoing>, PlayError> {
+        self.table.forfeit(seat)?;
+        Ok(self.changed(now))
+    }
+
+    /// Seats a hidden hand waits on to show, who can't: disconnected or
+    /// gone. They forfeit (not while paused: everyone is waited for then).
+    fn forfeit_absent(&mut self) {
+        if self.is_paused() {
+            return;
+        }
+        let Some(Awaiting::Reveals(seats)) = self.table.awaiting() else {
+            return;
+        };
+        for seat in seats {
+            let here = self
+                .players
+                .iter()
+                .any(|p| p.seat == seat && p.connected && !p.leaving);
+            if !here {
+                let _ = self.table.forfeit(seat);
+            }
+        }
+    }
+
+    fn deal_next(&mut self, now: u64, with: DealWith) -> Result<Vec<Outgoing>, PlayError> {
         if self.table.in_hand() {
             return Err(PlayError::IllegalAction);
         }
@@ -930,13 +1018,17 @@ impl TableHost {
                     self.table.seat_mut(seat).away = true;
                 }
             }
-            // Away (disconnected, or timed out twice): not dealt in.
-            let away = self.table.seat(seat).away || self.players[i].out_by_choice;
+            // Away (disconnected, or timed out twice): not dealt in. Nor, in
+            // a hidden deal, anyone the deck wasn't made for.
+            let away = self.table.seat(seat).away
+                || self.players[i].out_by_choice
+                || matches!(with, DealWith::Hidden(ids) if !ids.contains(&self.players[i].client_id));
             self.table.seat_mut(seat).sitting_out = away;
         }
-        match seed {
-            Some(seed) => self.table.new_hand_from_seed(seed)?,
-            None => self.table.new_hand()?,
+        match with {
+            DealWith::Random => self.table.new_hand()?,
+            DealWith::Seed(seed) => self.table.new_hand_from_seed(seed)?,
+            DealWith::Hidden(_) => self.table.new_hand_hidden()?,
         }
         for p in &mut self.players {
             p.missed = if p.connected { 0 } else { p.missed + 1 };
@@ -961,6 +1053,14 @@ impl TableHost {
             return out;
         };
         if now < deadline {
+            return out;
+        }
+        // Out of time to show at showdown: whoever hasn't can't win.
+        if let Some(Awaiting::Reveals(seats)) = self.table.awaiting() {
+            for seat in seats {
+                let _ = self.table.forfeit(seat);
+            }
+            out.extend(self.changed(now));
             return out;
         }
         let Some(seat) = self.table.to_act() else {
@@ -1099,6 +1199,8 @@ impl TableHost {
                 self.release_seat(i);
             }
         }
+        // A hidden hand at showdown doesn't wait for anyone who can't show.
+        self.forfeit_absent();
         self.seq += 1;
         let turn = self
             .table
@@ -1110,6 +1212,15 @@ impl TableHost {
             let person = self.table.to_act().is_some() && !self.table.auto_to_act();
             let clock = self.clock(now);
             self.deadline = (person && self.turn_ms > 0).then(|| clock + self.turn_ms);
+            // Showing at showdown is on the clock too, even at a table without one.
+            if matches!(self.table.awaiting(), Some(Awaiting::Reveals(_))) {
+                let ms = if self.turn_ms > 0 {
+                    self.turn_ms
+                } else {
+                    REVEAL_MS
+                };
+                self.deadline = Some(clock + ms);
+            }
         }
         self.updates(now)
     }
