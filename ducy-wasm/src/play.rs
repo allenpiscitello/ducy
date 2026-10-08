@@ -167,6 +167,21 @@ pub fn estimate_tournament(
     to_js(&ducy_play::structure::estimate(&steps, &o))
 }
 
+/// A finished hand replayed one event at a time (ducy_play::replay): frames
+/// of {street, board, pot, seats: [{stack, bet, folded, all_in}], text,
+/// event}, one before any action and one after each event. `events` is the
+/// hand's event list as table views give it, `stacks` each seat's stack when
+/// the hand started, `names` the seats' names for the text.
+#[wasm_bindgen(js_name = replayFrames)]
+pub fn replay_frames(
+    events: JsValue,
+    stacks: Vec<u64>,
+    names: Vec<String>,
+) -> Result<JsValue, JsError> {
+    let events: Vec<ducy_play::Event> = serde_wasm_bindgen::from_value(events).map_err(err)?;
+    to_js(&ducy_play::replay::replay_frames(&events, &stacks, &names))
+}
+
 pub(crate) fn rules_for(
     game: Option<&str>,
     small_blind: u64,
