@@ -2,6 +2,7 @@ use wasm_bindgen::prelude::*;
 
 mod fair;
 mod play;
+mod shuffle;
 pub use play::{BotTable, MultiTable};
 
 use ducy::deck::{Card, Deck};

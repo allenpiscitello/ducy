@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 ducy = { version = "0.3.0", path = "..", default-features = false }
 ducy-play = { version = "0.1.0", path = "../ducy-play", default-features = false, features = ["serde"] }
 ducy-gto = { path = "../ducy-gto", default-features = false, features = ["serde"] }
+ducy-shuffle = { path = "../ducy-shuffle" }
+rand = "0.10.2"
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"

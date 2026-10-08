@@ -28,6 +28,10 @@
 //! The host never sees anyone's hole cards. The host does see the board
 //! before it's dealt (decided on #134: the host has no seat at club tables).
 //!
+//! Every step can carry a zero-knowledge proof ([`proof`], #140), checked
+//! before the deal goes on, and [`setup`] runs a whole deck's setup that way
+//! for the host, leaving out anyone who drops out (#137).
+//!
 //! This is the cryptographic core only: no networking or table logic. It
 //! should be reviewed by someone with cryptography expertise before it's
 //! trusted with real games.
@@ -56,8 +60,12 @@
 #![forbid(unsafe_code)]
 
 mod audit;
+pub mod proof;
+pub mod setup;
 
 pub use audit::{Fault, FaultKind, PartyRound, Transcript, Unlock, audit};
+pub use proof::{PublicKey, ShuffleProof, UnlockProof};
+pub use setup::{DeckSetup, Ready, Request, SetupParty, Step};
 
 use std::collections::HashMap;
 use std::ops::Range;
