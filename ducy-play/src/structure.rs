@@ -24,15 +24,21 @@
 pub enum Step {
     /// A blind level. `ante` is posted by every player dealt in.
     Level {
+        /// The small blind.
         sb: u64,
+        /// The big blind.
         bb: u64,
+        /// The ante.
         ante: u64,
+        /// Level length.
         minutes: u32,
     },
     /// A break between levels.
     Break {
+        /// Always true; it tells a break from a level in JSON.
         #[cfg_attr(feature = "serde", serde(rename = "break"))]
         is_break: bool,
+        /// Break length.
         minutes: u32,
     },
 }
@@ -66,7 +72,9 @@ const BREAK_MINUTES: u32 = 10;
 /// levels last, when antes start and how often there's a break.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Preset {
+    /// Its id, for [`preset_structure`].
     pub id: &'static str,
+    /// Its name to show.
     pub label: &'static str,
     /// The first big blind as a share of the starting stack.
     pub start_bb: f64,
@@ -190,14 +198,19 @@ pub fn preset_structure(id: &str, stack: u64) -> Result<Vec<Step>, String> {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
 pub struct StepInput {
+    /// A break rather than a level.
     #[cfg_attr(feature = "serde", serde(default, rename = "break"))]
     pub is_break: bool,
+    /// The small blind.
     #[cfg_attr(feature = "serde", serde(default))]
     pub sb: f64,
+    /// The big blind.
     #[cfg_attr(feature = "serde", serde(default))]
     pub bb: f64,
+    /// The ante.
     #[cfg_attr(feature = "serde", serde(default))]
     pub ante: f64,
+    /// Its length.
     #[cfg_attr(feature = "serde", serde(default))]
     pub minutes: f64,
 }
@@ -284,7 +297,9 @@ pub fn check_structure(steps: &[StepInput]) -> Vec<String> {
 /// power` players a hand, fitted to bot-only tournaments.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Model {
+    /// The scale: players lost a hand when the pot equals the average stack.
     pub elim: f64,
+    /// How fast busting speeds up as the pot grows against stacks.
     pub power: f64,
 }
 
@@ -305,6 +320,7 @@ pub struct EstimateOptions {
     pub table_size: u32,
     /// Hands a table plays an hour.
     pub hands_per_hour: f64,
+    /// The bust-out model ([`MODEL`] by default).
     pub model: Model,
 }
 
