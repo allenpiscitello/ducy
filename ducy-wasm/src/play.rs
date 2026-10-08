@@ -167,7 +167,11 @@ pub fn estimate_tournament(
     to_js(&ducy_play::structure::estimate(&steps, &o))
 }
 
-fn rules_for(game: Option<&str>, small_blind: u64, big_blind: u64) -> Result<TableRules, JsError> {
+pub(crate) fn rules_for(
+    game: Option<&str>,
+    small_blind: u64,
+    big_blind: u64,
+) -> Result<TableRules, JsError> {
     Ok(match game.unwrap_or("nlhe") {
         "nlhe" => TableRules::no_limit_holdem(small_blind, big_blind),
         g @ ("plo4" | "plo5" | "plo6") => TableRules::pot_limit_omaha(small_blind, big_blind)

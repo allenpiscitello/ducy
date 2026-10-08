@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 
+mod fair;
 mod play;
 pub use play::{BotTable, MultiTable};
 
