@@ -18,15 +18,23 @@ impl Default for DeuceToSevenGameState {
 }
 
 impl DeuceToSevenGameState {
+    /// An empty game: add each player's cards with [`add_player`](Self::add_player).
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Adds the next player's cards. Fails with
+    /// [`IncorrectCardCount`](crate::error::DucyError::IncorrectCardCount) if it
+    /// isn't this game's number of cards,
+    /// [`CardsNotAvailable`](crate::error::DucyError::CardsNotAvailable) if a card
+    /// was already dealt, or
+    /// [`TooManyPlayers`](crate::error::DucyError::TooManyPlayers) past 10 players.
     pub fn add_player(&mut self, cards: crate::deck::Deck) -> Result<(), crate::error::DucyError> {
         self.state.add_player(cards)
     }
 }
 
+/// Finds the winners of a [`DeuceToSevenGameState`]: the best hand, ties sharing.
 pub struct DeuceToSevenGameEvaluation;
 
 impl GameEvaluation<DeuceToSevenGameState, DeuceToSevenRanks> for DeuceToSevenGameEvaluation {

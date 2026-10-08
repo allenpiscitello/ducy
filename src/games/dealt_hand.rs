@@ -17,6 +17,7 @@ pub struct DealtHandGameState {
 impl GameState for DealtHandGameState {}
 
 impl DealtHandGameState {
+    /// An empty game where each player holds `cards_per_player` cards.
     pub fn new(cards_per_player: u32) -> Self {
         Self {
             hole_cards: [Deck::empty(); MAX_PLAYERS],
@@ -26,6 +27,11 @@ impl DealtHandGameState {
         }
     }
 
+    /// Adds the next player's cards. Fails with
+    /// [`IncorrectCardCount`](DucyError::IncorrectCardCount) if it isn't
+    /// `cards_per_player` cards, [`CardsNotAvailable`](DucyError::CardsNotAvailable)
+    /// if a card was already dealt, or [`TooManyPlayers`](DucyError::TooManyPlayers)
+    /// past 10 players.
     pub fn add_player(&mut self, cards: Deck) -> Result<(), DucyError> {
         if cards.num_cards() != self.cards_per_player {
             return Err(DucyError::IncorrectCardCount);
@@ -42,6 +48,7 @@ impl DealtHandGameState {
         Ok(())
     }
 
+    /// Each player's cards, in the order they were added.
     pub fn hole_cards(&self) -> &[Deck] {
         &self.hole_cards[..self.num_players]
     }

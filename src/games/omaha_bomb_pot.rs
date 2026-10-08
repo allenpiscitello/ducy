@@ -70,6 +70,8 @@ impl BoardState {
 
 /// Per-board winner results for a bomb pot.
 pub struct BombPotResult {
+    /// The winners on each board, by board index (more than one on a tie);
+    /// each board is worth an equal share of the pot.
     pub board_winners: Vec<Vec<GameWinner<StandardHandRanks>>>,
 }
 
@@ -85,6 +87,10 @@ impl OmahaBombPotGameState {
         }
     }
 
+    /// Adds the next player's hole cards. Fails with
+    /// [`IncorrectCardCount`](DucyError::IncorrectCardCount) if it isn't the
+    /// game's number of hole cards, or
+    /// [`CardsNotAvailable`](DucyError::CardsNotAvailable) if a card was already dealt.
     pub fn add_player(&mut self, cards: Deck) -> Result<(), DucyError> {
         if cards.num_cards() != self.num_hole_cards_per_player {
             return Err(DucyError::IncorrectCardCount);
@@ -97,6 +103,10 @@ impl OmahaBombPotGameState {
         Ok(())
     }
 
+    /// Sets board `board_index`'s flop (3 cards). Fails with
+    /// [`InvalidBoardIndex`](DucyError::InvalidBoardIndex),
+    /// [`IncorrectCardCount`](DucyError::IncorrectCardCount) or
+    /// [`CardsNotAvailable`](DucyError::CardsNotAvailable).
     pub fn set_flop(&mut self, board_index: usize, cards: Deck) -> Result<(), DucyError> {
         if board_index >= self.num_boards {
             return Err(DucyError::InvalidBoardIndex);
@@ -113,6 +123,8 @@ impl OmahaBombPotGameState {
         Ok(())
     }
 
+    /// Sets board `board_index`'s turn; its flop must be set first
+    /// ([`FlopNotSet`](DucyError::FlopNotSet)).
     pub fn set_turn(&mut self, board_index: usize, card: Card) -> Result<(), DucyError> {
         if board_index >= self.num_boards {
             return Err(DucyError::InvalidBoardIndex);
@@ -129,6 +141,8 @@ impl OmahaBombPotGameState {
         Ok(())
     }
 
+    /// Sets board `board_index`'s river; its turn must be set first
+    /// ([`TurnNotSet`](DucyError::TurnNotSet)).
     pub fn set_river(&mut self, board_index: usize, card: Card) -> Result<(), DucyError> {
         if board_index >= self.num_boards {
             return Err(DucyError::InvalidBoardIndex);
@@ -154,14 +168,17 @@ impl OmahaBombPotGameState {
         Ok(())
     }
 
+    /// Board `board_index`'s cards so far. Panics if there's no such board.
     pub fn get_board_community_cards(&self, board_index: usize) -> Deck {
         self.boards[board_index].community_cards
     }
 
+    /// Each player's hole cards, in the order they were added.
     pub fn get_player_hole_cards(&self) -> &[Deck] {
         &self.hole_cards
     }
 
+    /// How many boards are run.
     pub fn num_boards(&self) -> usize {
         self.num_boards
     }

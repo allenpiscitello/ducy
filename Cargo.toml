@@ -3,15 +3,19 @@ members = [".", "ducy-wasm", "ducy-play", "ducy-play-wasm", "ducy-gto", "ducy-sh
 
 [package]
 name = "ducy"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/allenpiscitello/ducy"
+documentation = "https://docs.rs/ducy"
 description = "A performant analysis library for poker."
 categories = ["game-engines", "algorithms"]
 keywords = ["poker", "holdem", "omaha", "equity", "cards"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["parallel"]

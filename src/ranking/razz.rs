@@ -50,6 +50,7 @@ impl std::fmt::Display for RazzRanks {
     }
 }
 
+/// Ranks ace-to-five low hands, as in razz and California lowball.
 pub struct RazzRanker;
 
 impl RazzRanker {

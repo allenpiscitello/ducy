@@ -1,5 +1,7 @@
 use std::fmt;
 
+/// Why a ducy operation failed: bad card text, cards already in use, the
+/// wrong number of cards, or an invalid range.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DucyError {

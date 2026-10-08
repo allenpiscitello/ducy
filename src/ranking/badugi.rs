@@ -2,6 +2,9 @@ use crate::deck::Deck;
 use crate::ranking::hand_rank::HandRanking;
 use crate::ranking::standard_hand_ranker::RankOrder;
 
+/// A badugi hand's rank: more cards of different suits and ranks beat
+/// fewer, then lower cards win (ace low). Compare with `<`/`>`: greater is
+/// better.
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct BadugiRanks {
     count: u8,
@@ -42,9 +45,11 @@ impl std::fmt::Display for BadugiRanks {
     }
 }
 
+/// Ranks badugi hands.
 pub struct BadugiRanker;
 
 impl BadugiRanker {
+    /// The best badugi in `deck` (up to 4 cards).
     pub fn get_rank(deck: &Deck) -> BadugiRanks {
         let cards: Vec<_> = deck.iter(false).collect();
         let n = cards.len();

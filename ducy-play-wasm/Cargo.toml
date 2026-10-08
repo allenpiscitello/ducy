@@ -6,13 +6,15 @@ rust-version = "1.85.0"
 license = "MIT"
 description = "WebAssembly bindings for ducy-play: play Hold'em and Omaha hands in the browser."
 repository = "https://github.com/allenpiscitello/ducy"
+# Built with wasm-pack for JavaScript; not a crates.io crate.
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ducy = { path = "..", default-features = false }
-ducy-play = { path = "../ducy-play", default-features = false }
+ducy = { version = "0.3.0", path = "..", default-features = false }
+ducy-play = { version = "0.1.0", path = "../ducy-play", default-features = false }
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"

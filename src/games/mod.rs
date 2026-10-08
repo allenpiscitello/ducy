@@ -60,14 +60,18 @@ impl<H: HandRanking> GameWinner<H> {
         }
     }
 
+    /// The winner's index, in the order players were added.
     pub fn player_index(&self) -> usize {
         self.player_index
     }
 
+    /// The share of the pot this winner takes (1 split by the number of
+    /// winners, or by the share of runouts won in an equity calculation).
     pub fn pot_amount(&self) -> Decimal {
         self.pot_amount
     }
 
+    /// The hand that won.
     pub fn winning_hand(&self) -> &H {
         &self.winning_hand
     }

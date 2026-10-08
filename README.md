@@ -11,7 +11,7 @@ A performant analysis library for poker, supporting Texas Hold'em and Omaha.
 - **Range support** — build weighted hand ranges using notation like `"AQo+"` and `"AJs+"`
 - **Omaha ranges** — PPT-style hand classes (`AAxx$ds`, `$rd0-1`, `TT$3rd`) with preflop coverage, for PLO, PLO5 and PLO6
 - **Board analysis** — flush texture analysis for Omaha boards
-- **Playing hands** — the [`ducy-play`](ducy-play/README.md) crate plays out Hold'em and Omaha hands: blinds, no-limit and pot-limit betting, side pots and showdown ([`ducy-play-wasm`](ducy-play-wasm/README.md) for JavaScript)
+- **Playing hands** — the [`ducy-play`](https://crates.io/crates/ducy-play) crate plays out Hold'em and Omaha hands: blinds, no-limit and pot-limit betting, side pots and showdown ([`ducy-play-wasm`](https://github.com/allenpiscitello/ducy/blob/master/ducy-play-wasm/README.md) for JavaScript)
 
 ## Quick start
 
@@ -19,7 +19,7 @@ Add ducy to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ducy = "0.2.0"
+ducy = "0.3"
 ```
 
 ### Evaluate a Hold'em hand

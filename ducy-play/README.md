@@ -1,6 +1,6 @@
 # ducy-play
 
-Play out poker hands on top of [ducy](../README.md): antes and blinds, betting
+Play out poker hands on top of [ducy](https://crates.io/crates/ducy): antes and blinds, betting
 rounds, side pots and the showdown.
 
 - **Games:** Texas Hold'em and Omaha (high) with 4, 5 or 6 hole cards
@@ -8,6 +8,19 @@ rounds, side pots and the showdown.
 - **Cards:** shuffled from a seed (reproducible) or supplied exactly, e.g. to replay a hand
 - **History:** every post, action, board card and award is recorded as an `Event`
 - **Bots:** a `Bot` trait, simple built-in bots, 15 personality bots (Doug Poker, Phil Bigmouth, Rampart, Milk King, ...), a match runner with stack resets and duplicate deals, and `ProcessBot` for bots written in any language
+- **Tables:** `Table` keeps seats over many hands: the button moves, players sit out and come back posting missed blinds (or wait for the big blind), and bots play their seats
+- **Hosting:** `TableHost` runs a table for remote players, with commands in and per-player views out (no one sees another's cards before showdown), turn clocks, chip requests and sit-out limits, and snapshots to resume a hand after a restart
+- **Tournaments:** `Tournament` runs several tables with blind levels, eliminations, table balancing and hand-for-hand play
+
+## Install
+
+```toml
+[dependencies]
+ducy-play = "0.1"
+```
+
+Features: `process` (default) adds `ProcessBot` and `serde`; `serde` alone
+serializes rules, actions, events, views and snapshots.
 
 ## Example
 
@@ -238,7 +251,7 @@ For Omaha, `variant` is `{"omaha": {"hole_cards": 4}}`. The summary has
 `seat`, `result` (pots, payouts, final stacks, net), `shown` (hole cards
 revealed at showdown, by seat), `board` and `history`.
 
-[`examples/bots/simple_bot.py`](examples/bots/simple_bot.py) is a complete
+[`examples/bots/simple_bot.py`](https://github.com/allenpiscitello/ducy/blob/master/ducy-play/examples/bots/simple_bot.py) is a complete
 bot in about 40 lines of Python:
 
 ```sh
