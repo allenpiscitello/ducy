@@ -871,6 +871,22 @@ impl TableHost {
     /// disconnected for [`DROP_AFTER_HANDS`] hands is removed. Fails, dealing
     /// nothing, with fewer than two players in.
     pub fn new_hand(&mut self, now: u64) -> Result<Vec<Outgoing>, PlayError> {
+        self.deal_next(now, None)
+    }
+
+    /// Like [`TableHost::new_hand`], dealt from a provably fair seed the
+    /// players and the host agreed ([`crate::fair_deal`]): the hole cards go
+    /// to the dealt seats in seat order, so anyone with the seed can check
+    /// every card ([`crate::Deal::from_seed`]).
+    pub fn new_hand_from_seed(
+        &mut self,
+        now: u64,
+        seed: &[u8; 32],
+    ) -> Result<Vec<Outgoing>, PlayError> {
+        self.deal_next(now, Some(seed))
+    }
+
+    fn deal_next(&mut self, now: u64, seed: Option<&[u8; 32]>) -> Result<Vec<Outgoing>, PlayError> {
         if self.table.in_hand() {
             return Err(PlayError::IllegalAction);
         }
@@ -918,7 +934,10 @@ impl TableHost {
             let away = self.table.seat(seat).away || self.players[i].out_by_choice;
             self.table.seat_mut(seat).sitting_out = away;
         }
-        self.table.new_hand()?;
+        match seed {
+            Some(seed) => self.table.new_hand_from_seed(seed)?,
+            None => self.table.new_hand()?,
+        }
         for p in &mut self.players {
             p.missed = if p.connected { 0 } else { p.missed + 1 };
         }
