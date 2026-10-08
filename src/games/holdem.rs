@@ -518,59 +518,65 @@ impl HoldemRange {
         right: &str,
         weight: Decimal,
     ) -> Result<(), DucyError> {
-        let left_chars: Vec<char> = left.chars().collect();
-        let right_chars: Vec<char> = right.chars().collect();
+        // One side of the dash: two ranks, high first, and an optional
+        // "s" or "o".
+        let side = |s: &str| -> Result<(Rank, Rank, Option<char>), DucyError> {
+            let c: Vec<char> = s.chars().collect();
+            let suffix = match c.len() {
+                2 => None,
+                3 => match c[2].to_ascii_lowercase() {
+                    x @ ('s' | 'o') => Some(x),
+                    _ => return Err(DucyError::InvalidRange),
+                },
+                _ => return Err(DucyError::InvalidRange),
+            };
+            let (a, b) = (Rank::try_from_char(&c[0])?, Rank::try_from_char(&c[1])?);
+            Ok(if RankOrder::AceIsHigh.cmp(a, b) == Ordering::Less {
+                (b, a, suffix)
+            } else {
+                (a, b, suffix)
+            })
+        };
+        let (lh, ll, ls) = side(left)?;
+        let (rh, rl, rs) = side(right)?;
 
-        match (left_chars.len(), right_chars.len()) {
-            (2, 2) => {
-                let lr1 = Rank::try_from_char(&left_chars[0])?;
-                let lr2 = Rank::try_from_char(&left_chars[1])?;
-                let rr1 = Rank::try_from_char(&right_chars[0])?;
-                let rr2 = Rank::try_from_char(&right_chars[1])?;
-                if lr1 != lr2 || rr1 != rr2 {
-                    return Err(DucyError::InvalidRange);
-                }
-                self.add_pair_range(lr1, rr1, weight)
+        // Pairs: "77-TT".
+        if lh == ll || rh == rl {
+            if lh != ll || rh != rl || ls.is_some() || rs.is_some() {
+                return Err(DucyError::InvalidRange);
             }
-            (3, 3) => {
-                let lr1 = Rank::try_from_char(&left_chars[0])?;
-                let lr2 = Rank::try_from_char(&left_chars[1])?;
-                let rr1 = Rank::try_from_char(&right_chars[0])?;
-                let rr2 = Rank::try_from_char(&right_chars[1])?;
-                let left_suffix = left_chars[2].to_ascii_lowercase();
-                let right_suffix = right_chars[2].to_ascii_lowercase();
-
-                if left_suffix != right_suffix || (left_suffix != 'o' && left_suffix != 's') {
-                    return Err(DucyError::InvalidRange);
-                }
-                if lr1 != rr1 {
-                    return Err(DucyError::InvalidRange);
-                }
-
-                let high = lr1;
-                let (low_start, low_end) = if RankOrder::AceIsHigh.cmp(lr2, rr2) == Ordering::Less {
-                    (lr2, rr2)
-                } else {
-                    (rr2, lr2)
-                };
-
-                for rank in RankOrder::AceIsHigh.get_ranks_between(&low_start, None) {
-                    if RankOrder::AceIsHigh.cmp(rank, high) != Ordering::Less {
-                        break;
-                    }
-                    if left_suffix == 'o' {
-                        self.add_offsuit_combo(high, rank, weight);
-                    } else {
-                        self.add_suited_combo(high, rank, weight);
-                    }
-                    if rank == low_end {
-                        break;
-                    }
-                }
-                Ok(())
-            }
-            _ => Err(DucyError::InvalidRange),
+            return self.add_pair_range(lh, rh, weight);
         }
+        // The same top card, kickers from one to the other: "A8s-ATs",
+        // "A8o-ATo", "A8-AT" (both), and "A5s-A2" (the suffix given once).
+        let suffix = match (ls, rs) {
+            (Some(a), Some(b)) if a != b => return Err(DucyError::InvalidRange),
+            (a, b) => a.or(b),
+        };
+        if lh != rh {
+            return Err(DucyError::InvalidRange);
+        }
+        let high = lh;
+        let (low_start, low_end) = if RankOrder::AceIsHigh.cmp(ll, rl) == Ordering::Less {
+            (ll, rl)
+        } else {
+            (rl, ll)
+        };
+        for rank in RankOrder::AceIsHigh.get_ranks_between(&low_start, None) {
+            if RankOrder::AceIsHigh.cmp(rank, high) != Ordering::Less {
+                break;
+            }
+            if suffix != Some('s') {
+                self.add_offsuit_combo(high, rank, weight);
+            }
+            if suffix != Some('o') {
+                self.add_suited_combo(high, rank, weight);
+            }
+            if rank == low_end {
+                break;
+            }
+        }
+        Ok(())
     }
 
     /// Parses a list of range patterns separated by commas or whitespace,
@@ -695,6 +701,112 @@ impl HoldemRange {
 impl Default for HoldemRange {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// What a range's text covers, for showing it: the hand classes it touches
+/// ("AA", "AKs", "AKo"), strongest first, and its two-card combos.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct RangeReport {
+    /// Classes with at least one combo in the range, in grid order: by top
+    /// card, then kicker, suited before offsuit.
+    pub classes: Vec<String>,
+    /// Combos in the range, not counting any that use a dead card.
+    pub combos: u64,
+}
+
+/// Why range text didn't parse: the term at fault and where it starts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct RangeTextError {
+    /// The term, as written.
+    pub term: String,
+    /// Its byte offset in the text.
+    pub start: usize,
+    /// A message to show, naming the term.
+    pub message: String,
+}
+
+impl std::fmt::Display for RangeTextError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// The class of a two-card hand: "AA", "AKs" or "AKo".
+pub fn hand_class(a: Card, b: Card) -> String {
+    let (hi, lo) = if RankOrder::AceIsHigh.cmp(a.rank(), b.rank()) == Ordering::Less {
+        (b, a)
+    } else {
+        (a, b)
+    };
+    if hi.rank() == lo.rank() {
+        format!("{}{}", hi.rank(), lo.rank())
+    } else {
+        let s = if hi.suit() == lo.suit() { 's' } else { 'o' };
+        format!("{}{}{s}", hi.rank(), lo.rank())
+    }
+}
+
+impl HoldemRange {
+    /// Parses range text like [`HoldemRange::parse`], and reports what it
+    /// covers, leaving out combos that use a card in `dead`. A term that
+    /// doesn't parse is named, with where it starts, so a page can point
+    /// at it.
+    pub fn report(text: &str, dead: Deck) -> Result<RangeReport, RangeTextError> {
+        let mut range = Self::new();
+        let mut start = None;
+        for (i, ch) in text
+            .char_indices()
+            .chain(std::iter::once((text.len(), ',')))
+        {
+            if matches!(ch, ',' | ' ' | '\t' | '\n' | '\r') {
+                if let Some(s) = start.take() {
+                    let term = &text[s..i];
+                    range.add(term, Decimal::ONE).map_err(|_| RangeTextError {
+                        term: term.to_string(),
+                        start: s,
+                        message: format!(
+                            "“{term}” isn’t a hand or range (e.g. QQ+, AKs, A5s-A2s, KQo, AhKh)."
+                        ),
+                    })?;
+                }
+            } else if start.is_none() {
+                start = Some(i);
+            }
+        }
+        let dead = u64::from(dead);
+        let mut combos = 0;
+        let mut classes = std::collections::HashSet::new();
+        for item in range.iter() {
+            let deck = item.get_deck();
+            if u64::from(deck) & dead != 0 {
+                continue;
+            }
+            let cards: Vec<Card> = deck.iter(true).collect();
+            if let [a, b] = cards[..] {
+                combos += 1;
+                classes.insert(hand_class(a, b));
+            }
+        }
+        let order = |c: &String| {
+            let ch: Vec<char> = c.chars().collect();
+            let r = |x: &char| RankOrder::AceIsHigh.get_score(&Rank::try_from_char(x).unwrap());
+            let kind = match ch.get(2) {
+                None => 0,
+                Some('s') => 1,
+                _ => 2,
+            };
+            (
+                std::cmp::Reverse(r(&ch[0])),
+                std::cmp::Reverse(r(&ch[1])),
+                kind,
+            )
+        };
+        let mut classes: Vec<String> = classes.into_iter().collect();
+        classes.sort_by_key(order);
+        Ok(RangeReport { classes, combos })
     }
 }
 
@@ -1257,5 +1369,50 @@ mod test {
         game.add_player(Deck::parse("As Ks").unwrap()).unwrap();
         game.set_flop(Deck::parse("Qd Jd Td").unwrap()).unwrap();
         assert!(game.set_turn(Card::parse("As").unwrap()).is_err());
+    }
+
+    fn report(text: &str) -> super::RangeReport {
+        HoldemRange::report(text, Deck::empty()).unwrap()
+    }
+
+    #[test]
+    pub fn test_range_report() {
+        let r = report("AKo, AA, AKs");
+        assert_eq!(r.classes, ["AA", "AKs", "AKo"]);
+        assert_eq!(r.combos, 6 + 4 + 12);
+        // Overlapping terms count each combo once.
+        assert_eq!(report("AK, AKs, AKo, AsKs").combos, 16);
+        // Dead cards remove the combos that use them.
+        let dead = HoldemRange::report("AA, AKs, AKo", Deck::parse("As").unwrap()).unwrap();
+        assert_eq!(dead.combos, 3 + 3 + 9);
+        // A specific combo is its class.
+        assert_eq!(report("AhKh").classes, ["AKs"]);
+        assert_eq!(report("QQ+").classes, ["AA", "KK", "QQ"]);
+    }
+
+    #[test]
+    pub fn test_range_dash_forms() {
+        // The same as the page's grammar: no suffix covers both, a suffix on
+        // one side applies to the whole range, either order.
+        assert_eq!(
+            report("A8-AT").classes,
+            ["ATs", "ATo", "A9s", "A9o", "A8s", "A8o"]
+        );
+        assert_eq!(report("A5s-A2").classes, ["A5s", "A4s", "A3s", "A2s"]);
+        assert_eq!(report("ATo-A8o").classes, report("A8o-ATo").classes);
+        assert_eq!(report("TT-77").classes, ["TT", "99", "88", "77"]);
+        for bad in ["A8s-ATo", "A8-KT", "77-AK", "A8x-AT"] {
+            assert!(HoldemRange::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    pub fn test_range_report_errors() {
+        let e = HoldemRange::report("QQ+, AKs, AKx, 22", Deck::empty()).unwrap_err();
+        assert_eq!((e.term.as_str(), e.start), ("AKx", 10));
+        assert!(e.message.contains("AKx"));
+        let e = HoldemRange::report("  zz", Deck::empty()).unwrap_err();
+        assert_eq!((e.term.as_str(), e.start), ("zz", 2));
+        assert_eq!(report("").combos, 0);
     }
 }
