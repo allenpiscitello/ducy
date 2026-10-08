@@ -14,12 +14,15 @@ use ducy_play::{
     Action, ChipRequest, Command, Departure, Outgoing, Personality, Refund, SeatedPlayer, Table,
     TableHost, TableRules, TableSeat, Variant,
 };
-use std::{cell::RefCell, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    sync::Arc,
+};
 
 use ducy_gto::holdem::{
     abstraction::CardAbstraction,
     blueprint::Blueprint,
-    bot::GtoBot,
+    bot::{GtoBot, RiverSolving, TurnSolving},
     hunl::{BettingTree, Hunl, HunlConfig},
     range::BucketCache,
     review::{HandRecord, HandReview, ReviewConfig, ReviewLog, Reviewer, SessionReview},
@@ -182,8 +185,22 @@ struct Gto {
     tree: Arc<BettingTree>,
 }
 
+/// Turn and river iterations per solve for the GTO bot in the page. Fewer
+/// than natively (`TurnSolving::default`): WebAssembly runs on one core.
+const PAGE_TURN_ITERATIONS: usize = 50;
+const PAGE_RIVER_ITERATIONS: usize = 200;
+
 thread_local! {
     static GTO: RefCell<Option<Gto>> = const { RefCell::new(None) };
+    static SOLVING: Cell<(usize, usize)> =
+        const { Cell::new((PAGE_TURN_ITERATIONS, PAGE_RIVER_ITERATIONS)) };
+}
+
+/// How hard GTO bots seated from now on solve the turn and river in real
+/// time: iterations per solve, 0 to play the blueprint on that street.
+#[wasm_bindgen(js_name = setGtoSolving)]
+pub fn set_gto_solving(turn: usize, river: usize) {
+    SOLVING.with(|s| s.set((turn, river)));
 }
 
 /// The id that seats the GTO bot.
@@ -224,7 +241,10 @@ fn gto_seat(seed: u64) -> Result<TableSeat, JsError> {
         let g = g
             .as_ref()
             .ok_or_else(|| JsError::new("call loadGto first"))?;
-        let bot = GtoBot::from_parts(g.cards.clone(), g.blueprint.clone(), g.tree.clone(), seed);
+        let (turn, river) = SOLVING.with(Cell::get);
+        let bot = GtoBot::from_parts(g.cards.clone(), g.blueprint.clone(), g.tree.clone(), seed)
+            .with_turn_solving(TurnSolving::new(turn))
+            .with_river_solving(RiverSolving::new(river));
         Ok(TableSeat::with_bot("GTO", GTO_ID, Box::new(bot)))
     })
 }

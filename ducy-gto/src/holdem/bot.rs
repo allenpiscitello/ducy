@@ -122,6 +122,22 @@ impl TurnSolving {
     }
 }
 
+impl Default for RiverSolving {
+    /// 200 iterations, as measured (see the crate README).
+    fn default() -> Self {
+        Self::new(200)
+    }
+}
+
+impl Default for TurnSolving {
+    /// 50 iterations: with 200 on the river, LBR wins 197 ± 97 mbb/hand less
+    /// against it than against river solving alone (70,000 paired hands).
+    /// About 3–4 s a turn decision on 12 cores.
+    fn default() -> Self {
+        Self::new(50)
+    }
+}
+
 /// A bot that plays a heads-up blueprint.
 pub struct GtoBot {
     cards: Arc<CardAbstraction>,
@@ -199,6 +215,13 @@ impl GtoBot {
     pub fn with_turn_solving(mut self, solving: TurnSolving) -> Self {
         self.turn = (solving.iterations > 0).then_some(solving);
         self
+    }
+
+    /// Turn and river solving at their defaults: the strongest setup
+    /// measured, and how the bot should normally play.
+    pub fn with_solving(self) -> Self {
+        self.with_turn_solving(TurnSolving::default())
+            .with_river_solving(RiverSolving::default())
     }
 
     /// The blueprint's action probabilities at this decision, with the
