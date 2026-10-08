@@ -176,8 +176,11 @@ pub struct Departure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Refund {
+    /// The player's client id.
     pub client_id: String,
+    /// Their seat at the table.
     pub seat: usize,
+    /// The chips handed back.
     pub chips: u64,
 }
 
