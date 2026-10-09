@@ -97,9 +97,13 @@ fn bot_tournament(
         }
     }
     let mut rng = StdRng::seed_from_u64(seed);
+    // The field is drawn from the first 15 personalities, the ones the
+    // estimate was calibrated against, so adding a personality doesn't
+    // change this test's tournaments.
+    let pool = &Personality::ALL[..15];
     let field = (0..players)
         .map(|i| {
-            let p = Personality::ALL[rng.random_range(0..Personality::ALL.len())];
+            let p = pool[rng.random_range(0..pool.len())];
             let bot: Box<dyn Bot> = Box::new(p.bot(Some(seed * 100 + i as u64)));
             Entrant::bot(format!("b{i}"), p.name(), bot)
         })

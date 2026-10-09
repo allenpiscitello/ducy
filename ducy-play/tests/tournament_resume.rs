@@ -106,22 +106,63 @@ fn twelve_players_play_to_a_winner_through_restarts() {
                 _ => None,
             });
             let Some((who, seq, legal)) = mine else {
-                panic!("no one to act at seq {}", h.seq());
+                let t = h.tournament();
+                let tables: Vec<String> = t
+                    .table_ids()
+                    .into_iter()
+                    .map(|id| {
+                        let x = t.table(id).unwrap();
+                        let to_act = x.to_act().map(|s| x.seat(s).id.clone());
+                        format!(
+                            "table {id}: in hand {}, can deal {}, to act {to_act:?}, auto {}",
+                            x.in_hand(),
+                            t.can_deal(id),
+                            x.auto_to_act()
+                        )
+                    })
+                    .collect();
+                let sent: Vec<String> = last
+                    .iter()
+                    .map(|o| match &o.update {
+                        Update::State { seq, view, .. } => format!(
+                            "{}@{seq}{}",
+                            o.to,
+                            if view.legal.is_some() { "*" } else { "" }
+                        ),
+                        other => format!("{}: {other:?}", o.to),
+                    })
+                    .collect();
+                panic!(
+                    "no one to act at seq {} (step {steps}): {tables:?}; last sent: {sent:?}",
+                    h.seq()
+                );
             };
             let kind = match rng.random_range(0..10) {
                 1 => "allin",
                 _ if legal.can_check => "check",
                 _ => "call",
             };
-            out.extend(h.handle(
-                &who,
-                Command::Act {
-                    seq,
-                    kind: kind.to_string(),
-                    amount: 0,
-                },
-                now,
-            ));
+            let act = |h: &mut TournamentHost, kind: &str| {
+                h.handle(
+                    &who,
+                    Command::Act {
+                        seq,
+                        kind: kind.to_string(),
+                        amount: 0,
+                    },
+                    now,
+                )
+            };
+            let mut sent = act(&mut h, kind);
+            // A move that isn't legal just now (a call that has to be all-in,
+            // say) is refused: check or fold instead, as a person would.
+            if sent
+                .iter()
+                .all(|o| matches!(o.update, Update::Rejected { .. }))
+            {
+                sent = act(&mut h, if legal.can_check { "check" } else { "fold" });
+            }
+            out.extend(sent);
         }
         h.take_events();
         if !out.is_empty() {

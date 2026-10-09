@@ -113,15 +113,27 @@ fn twelve_players_over_two_tables_play_to_a_winner() {
             } else {
                 kind
             };
-            out.extend(h.handle(
-                &who,
-                Command::Act {
-                    seq,
-                    kind: kind.to_string(),
-                    amount: 0,
-                },
-                now,
-            ));
+            let act = |h: &mut TournamentHost, kind: &str| {
+                h.handle(
+                    &who,
+                    Command::Act {
+                        seq,
+                        kind: kind.to_string(),
+                        amount: 0,
+                    },
+                    now,
+                )
+            };
+            let mut sent = act(&mut h, kind);
+            // A move that isn't legal just now (a call that has to be all-in,
+            // say) is refused: check or fold instead, as a person would.
+            if sent
+                .iter()
+                .all(|o| matches!(o.update, Update::Rejected { .. }))
+            {
+                sent = act(&mut h, if legal.can_check { "check" } else { "fold" });
+            }
+            out.extend(sent);
         }
         private(&out);
         assert!(out.iter().all(|o| o.to != "p11"), "p11 isn't connected");
