@@ -23,7 +23,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     Command, Entrant, Finish, Move, Outgoing, PlayError, Standing, TableView, Tournament,
-    TournamentConfig, Update, host::parse_action,
+    TournamentConfig, TournamentHostSnapshot, Update, host::parse_action,
+    snapshot::TOURNAMENT_SNAPSHOT_VERSION,
 };
 
 /// What happened since the last [`TournamentHost::take_events`].
@@ -88,6 +89,79 @@ impl TournamentHost {
             h.t.set_absent(&id, true)?;
         }
         Ok(h)
+    }
+
+    /// The whole host as saved data at time `now` (JSON with the `serde`
+    /// feature), the hands in play included, so a host that restarts carries
+    /// on where it was ([`Self::restore`]). It holds every card of every
+    /// hand in play: keep it where only the host can read it.
+    pub fn snapshot(&self, now: u64) -> TournamentHostSnapshot {
+        let mut people: Vec<String> = self.people.iter().cloned().collect();
+        people.sort();
+        let mut timeouts: Vec<(String, u32)> =
+            self.timeouts.iter().map(|(k, &v)| (k.clone(), v)).collect();
+        timeouts.sort();
+        let mut turns: Vec<(usize, (u64, usize))> =
+            self.turns.iter().map(|(&k, &v)| (k, v)).collect();
+        turns.sort();
+        let mut turn_ms_left: Vec<(usize, u64)> = self
+            .deadlines
+            .iter()
+            .map(|(&k, &d)| (k, d.saturating_sub(now)))
+            .collect();
+        turn_ms_left.sort();
+        TournamentHostSnapshot {
+            version: TOURNAMENT_SNAPSHOT_VERSION,
+            tournament: self.t.snapshot(),
+            turn_ms: self.turn_ms,
+            seq: self.seq,
+            people,
+            timeouts,
+            turns,
+            turn_ms_left,
+        }
+    }
+
+    /// Loads a host saved with [`Self::snapshot`] at time `now`: the same
+    /// tournament, hands and clocks, each turn with the time it had left.
+    /// No one is connected yet; people are back when they join again, and
+    /// meanwhile they're treated as before (someone who was playing still
+    /// is, and runs out of time if they don't come back). `bot(id)` gives the
+    /// bot for each entrant who had one, as [`Tournament::restore`].
+    pub fn restore(
+        s: &TournamentHostSnapshot,
+        now: u64,
+        bot: impl FnMut(&str) -> Option<Box<dyn crate::Bot>>,
+    ) -> Result<Self, PlayError> {
+        if s.version != TOURNAMENT_SNAPSHOT_VERSION {
+            return Err(PlayError::InvalidSnapshot);
+        }
+        let t = Tournament::restore(&s.tournament, bot)?;
+        let live: HashSet<usize> = t.table_ids().into_iter().collect();
+        // Clocks only for tables still in play.
+        let tables = s
+            .turns
+            .iter()
+            .map(|(k, _)| k)
+            .chain(s.turn_ms_left.iter().map(|(k, _)| k));
+        if tables.into_iter().any(|k| !live.contains(k)) {
+            return Err(PlayError::InvalidSnapshot);
+        }
+        Ok(Self {
+            t,
+            turn_ms: s.turn_ms,
+            seq: s.seq,
+            people: s.people.iter().cloned().collect(),
+            connected: HashSet::new(),
+            timeouts: s.timeouts.iter().cloned().collect(),
+            turns: s.turns.iter().copied().collect(),
+            deadlines: s
+                .turn_ms_left
+                .iter()
+                .map(|&(k, left)| (k, now + left))
+                .collect(),
+            events: TournamentEvents::default(),
+        })
     }
 
     /// The tournament itself, to read (standings, tables, finishes).

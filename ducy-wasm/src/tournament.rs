@@ -161,6 +161,22 @@ impl ClubTournament {
         })
     }
 
+    /// The whole tournament as JSON, hands in play and clocks included, for
+    /// `restore` after the host restarts. It holds every card of every hand
+    /// in play: keep it where only the host can read it.
+    pub fn save(&self, now: f64) -> Result<String, JsError> {
+        serde_json::to_string(&self.host.snapshot(now as u64)).map_err(err)
+    }
+
+    /// Loads a tournament saved with `save`: it carries on where it was,
+    /// each turn with the time it had left. No one is connected; people are
+    /// back when they join again. Fails for a snapshot of another version.
+    pub fn restore(json: &str, now: f64) -> Result<ClubTournament, JsError> {
+        let s: ducy_play::TournamentHostSnapshot = serde_json::from_str(json).map_err(err)?;
+        let host = TournamentHost::restore(&s, now as u64, |_| None).map_err(err)?;
+        Ok(ClubTournament { host })
+    }
+
     /// Where things stand, with no messages.
     pub fn state(&mut self, now: f64) -> Result<JsValue, JsError> {
         self.result(&[], now as u64)

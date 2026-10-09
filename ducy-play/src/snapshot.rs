@@ -107,6 +107,28 @@ pub struct TournamentSnapshot {
     pub(crate) secure: bool,
 }
 
+/// A whole [`crate::TournamentHost`]: see [`crate::TournamentHost::snapshot`].
+/// The tournament, and the hosting around it: who's in it, each table's turn
+/// clock (as time left), and timeouts in a row. Who's absent is part of the
+/// tables.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TournamentHostSnapshot {
+    /// [`TOURNAMENT_SNAPSHOT_VERSION`] when it was saved.
+    pub version: u32,
+    pub(crate) tournament: TournamentSnapshot,
+    pub(crate) turn_ms: u64,
+    pub(crate) seq: u64,
+    /// The people in it (sorted).
+    pub(crate) people: Vec<String>,
+    /// Turns in a row each person ran out of time.
+    pub(crate) timeouts: Vec<(String, u32)>,
+    /// Per table: the turn on the clock (hand number, events so far), and
+    /// the time it had left.
+    pub(crate) turns: Vec<(usize, (u64, usize))>,
+    pub(crate) turn_ms_left: Vec<(usize, u64)>,
+}
+
 /// One person at a [`HostSnapshot`]'s table.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
