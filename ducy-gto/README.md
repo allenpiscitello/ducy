@@ -693,6 +693,48 @@ blueprint load in 41 ms. Over 200 hands (746 decisions) a decision took
 0.1 ms on average and 1.2 ms at most (`ducy-wasm/tests/gto-plo.cjs` with
 `DUCY_PLO_*` pointing at the model).
 
+### Solving the river in real time (#132)
+
+PLO ranges are far too big to solve whole (over 100,000 hands, about 100
+times Hold'em's), so `omaha::river` samples them:
+
+- **Ranges:** each player's river range is sampled from hands weighted by
+  the blueprint's probability of the actions taken, then importance-
+  resampled. The bot's own hand is always kept, as hand 0.
+- **The solve:** `PloRiverSolver` runs Discounted CFR over the river's
+  real-chip betting on those hands. A win/lose/blocked table per pair of
+  hands handles the many sampled hands that share cards. Hold'em's resolving
+  gadget keeps the opponent's hands from doing worse than the blueprint's
+  river gives them.
+- **Playing:** `PloGtoBot::with_river_solving` solves at its first river
+  decision, and again when the opponent bets a size the solution lacks.
+- **Measuring:** `best_response_value` scores a river strategy against a
+  fresh, larger sample of the opponent's range.
+
+```sh
+cargo run --release -p ducy-gto --example plo_river -- \
+    --cards plo-cards.bin --blueprint plo-blueprint.bin --spots 300
+```
+
+Over 300 river spots from the blueprint's self-play, with each player as
+the bot (600 solves of 200 iterations, 256 hands per range, an exploiter of
+1,024 hands):
+
+| Best response against | mbb/hand (± 95%) |
+|---|---|
+| the blueprint's river | 1,396 ± 295 |
+| the solved river | 971 ± 275 |
+| **change from solving (paired)** | **−425 ± 51** |
+
+- **Less exploitable:** solving takes about 30% off what a best response
+  wins on the river.
+- **Fast enough:** a solve takes 394 ms on average (median 390 ms, slowest
+  627 ms) on one core, while other work shared the machine.
+- **Head to head:** river solving against the plain blueprint, over 5,000
+  deals (10,000 hands), came out at +1.2 ± 28.5 bb/100. The gain doesn't
+  show up at that size; a match against the blueprint (which doesn't try to
+  exploit it) is a weak test of exploitability. That match took 19 minutes.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
