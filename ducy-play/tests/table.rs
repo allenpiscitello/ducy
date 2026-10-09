@@ -401,6 +401,74 @@ fn last_chips(out: &[Outgoing], client: &str) -> Option<ducy_play::ChipsView> {
 
 /// Plays the current hand out: the host and every remote person check or
 /// call (a person who is away is played by the table).
+#[test]
+fn a_hosted_table_rotates_games_between_hands_and_tells_everyone() {
+    use ducy_play::{BettingStructure, PlayError, Variant};
+    let seats = vec![
+        TableSeat::human("Host", "you"),
+        bot_seat(Personality::ALL[0], 1),
+        bot_seat(Personality::ALL[1], 2),
+        bot_seat(Personality::ALL[2], 3),
+    ];
+    let mut table = Table::new(TableRules::no_limit_holdem(1, 2), seats, 200, 42).unwrap();
+    // No top-ups, so the chips at the table stay the same.
+    table.set_top_up(false);
+    let mut h = TableHost::new(table, vec![false, true, true, false], 0).unwrap();
+    h.handle("c1", join("Alice"), 0);
+    let total = |h: &TableHost| (0..4).map(|s| h.table().stack(s)).sum::<u64>();
+    let chips = total(&h);
+    let plo = TableRules {
+        variant: Variant::Omaha { hole_cards: 4 },
+        structure: BettingStructure::PotLimit,
+        small_blind: 2,
+        big_blind: 5,
+        ante: 1,
+    };
+    h.new_hand(0).unwrap();
+    assert_eq!(
+        h.set_rules(plo, 0),
+        Err(PlayError::IllegalAction),
+        "not mid-hand"
+    );
+    play_out(&mut h, &["c1"], 0);
+    // Between hands: everyone connected is sent the new game straight away.
+    let out = h.set_rules(plo, 0).unwrap();
+    let (_, v) = last_view(&out, "c1").unwrap();
+    assert_eq!(
+        (
+            v.hole_cards,
+            v.pot_limit,
+            v.small_blind,
+            v.big_blind,
+            v.ante
+        ),
+        (4, true, 2, 5, 1)
+    );
+    // The next hand is PLO4 with the new blinds and antes; chips are kept.
+    h.new_hand(0).unwrap();
+    let hand = h.table().hand().unwrap();
+    assert!(
+        hand.deal()
+            .unwrap()
+            .hole_cards()
+            .iter()
+            .all(|c| c.num_cards() == 4)
+    );
+    assert_eq!(hand.rules().big_blind, 5);
+    let antes = hand
+        .events()
+        .iter()
+        .filter(|e| matches!(e, Event::Ante { amount: 1, .. }))
+        .count();
+    assert_eq!(antes, 4, "everyone posts the ante");
+    play_out(&mut h, &["c1"], 0);
+    assert_eq!(total(&h), chips, "chips are conserved across the change");
+    // And back to Hold'em.
+    h.set_rules(TableRules::no_limit_holdem(1, 2), 0).unwrap();
+    assert_eq!(h.host_view().hole_cards, 2);
+    assert_eq!(h.host_view().ante, 0);
+}
+
 fn play_out(h: &mut TableHost, players: &[&str], now: u64) {
     while h.table().in_hand() {
         let out = run_to_person(h, now);
