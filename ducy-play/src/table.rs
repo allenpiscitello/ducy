@@ -140,6 +140,16 @@ pub struct TableView {
     pub showdown: bool,
     /// The main pot, then the side pots.
     pub pots: Vec<Pot>,
+    /// Everyone left is all-in: the players still in are choosing whether
+    /// to run it twice ([`Table::choose_runs`]).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub run_choice: bool,
+    /// How many times the board is run (1 or 2), once chosen; 0 before.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub runs: u8,
+    /// Running it twice: the second board, once it's dealt.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub second_board: Vec<String>,
 }
 
 /// One seat as a viewer sees it.
@@ -208,6 +218,8 @@ pub struct Table {
     returning: Vec<Return>,
     /// The seats of the last hand's small and big blinds.
     last_blinds: Option<(usize, usize)>,
+    /// Players all-in may choose to run the board twice (cash games).
+    run_it_twice: bool,
 }
 
 /// Where the next hand's cards come from.
@@ -266,6 +278,7 @@ impl Table {
             top_up: true,
             seed: Some(seed),
             missed: vec![(false, false); n],
+            run_it_twice: false,
             returning: vec![Return::Ready; n],
             last_blinds: None,
         })
@@ -527,7 +540,33 @@ impl Table {
             Awaiting::Reveals(players) => {
                 Awaiting::Reveals(players.iter().map(|&i| self.dealt[i]).collect())
             }
+            Awaiting::RunChoice(players) => {
+                Awaiting::RunChoice(players.iter().map(|&i| self.dealt[i]).collect())
+            }
         })
+    }
+
+    /// Lets players who are all-in with cards to come run it twice: from the
+    /// next hand, the hand waits for their choice ([`Awaiting::RunChoice`],
+    /// [`Table::choose_runs`]). For cash games.
+    pub fn set_run_it_twice(&mut self, on: bool) {
+        self.run_it_twice = on;
+    }
+
+    /// Whether players may run it twice (see [`Table::set_run_it_twice`]).
+    pub fn run_it_twice(&self) -> bool {
+        self.run_it_twice
+    }
+
+    /// The players' choice: run the rest of the board once or twice (see
+    /// [`Hand::choose_runs`]).
+    pub fn choose_runs(&mut self, runs: u8) -> Result<(), PlayError> {
+        self.hand
+            .as_mut()
+            .ok_or(PlayError::IllegalAction)?
+            .choose_runs(runs)?;
+        self.finish_if_over();
+        Ok(())
     }
 
     /// The board cards the hand is waiting for (see [`Hand::deal_board`]).
@@ -690,6 +729,9 @@ impl Table {
                 Hand::with_dealer(self.rules, &stacks, button, &HiddenDeal { players }, &posts)?
             }
         });
+        if let Some(h) = &mut self.hand {
+            h.offer_run_twice(self.run_it_twice);
+        }
         self.dealt = dealt;
         self.synced = false;
         Ok(())
@@ -803,6 +845,9 @@ impl Table {
                 complete: true,
                 showdown: false,
                 pots: Vec::new(),
+                run_choice: false,
+                runs: 0,
+                second_board: Vec::new(),
             };
         };
         let result = hand.result();
@@ -875,6 +920,9 @@ impl Table {
             pots: result.map_or_else(Vec::new, |r| {
                 r.pots.iter().map(|p| rotate_pot(p, seat_of)).collect()
             }),
+            run_choice: matches!(hand.awaiting(), Some(Awaiting::RunChoice(_))),
+            runs: hand.runs(),
+            second_board: hand.second_board().iter().map(Card::to_string).collect(),
         }
     }
 
@@ -946,7 +994,7 @@ fn rotate_event(e: &Event, rot: impl Fn(usize) -> usize) -> Event {
         | Event::Reveal { seat, .. }
         | Event::Forfeit { seat }
         | Event::Award { seat, .. } => *seat = rot(*seat),
-        Event::Board { .. } => {}
+        Event::Board { .. } | Event::Runs { .. } | Event::SecondBoard { .. } => {}
     }
     e
 }
@@ -1011,6 +1059,7 @@ impl Table {
             missed: self.missed.clone(),
             returning: self.returning.iter().map(|r| r.name().into()).collect(),
             last_blinds: self.last_blinds,
+            run_it_twice: self.run_it_twice,
         }
     }
 
@@ -1079,6 +1128,7 @@ impl Table {
             missed: s.missed.clone(),
             returning,
             last_blinds: s.last_blinds,
+            run_it_twice: s.run_it_twice,
         })
     }
 }

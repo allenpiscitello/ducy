@@ -194,6 +194,12 @@ enum EventJs {
     Forfeit {
         seat: usize,
     },
+    Runs {
+        count: u8,
+    },
+    SecondBoard {
+        cards: Vec<String>,
+    },
     Award {
         seat: usize,
         pot: usize,
@@ -251,6 +257,10 @@ impl From<&Event> for EventJs {
                 cards: cards.iter().map(|c| c.to_string()).collect(),
             },
             Event::Forfeit { seat } => Self::Forfeit { seat: *seat },
+            Event::Runs { count } => Self::Runs { count: *count },
+            Event::SecondBoard { cards } => Self::SecondBoard {
+                cards: cards.iter().map(|c| c.to_string()).collect(),
+            },
             Event::Award { seat, pot, amount } => Self::Award {
                 seat: *seat,
                 pot: *pot,

@@ -82,6 +82,14 @@ pub enum Command {
         /// Chips wanted (0 withdraws the request).
         amount: u64,
     },
+    /// Everyone left is all-in and the hand asks whether to run it twice:
+    /// `yes` to run it twice. It's run twice only if every person still in
+    /// says yes (bots go along with them); anyone saying no, or not
+    /// answering in time, runs it once.
+    RunTwice {
+        /// Run it twice.
+        yes: bool,
+    },
 }
 
 /// A message from the host to one player.
@@ -151,6 +159,13 @@ pub struct SeatStatus {
     pub missed_big_blind: bool,
     /// Time left before the seat is given up, while out (with a sit-out limit).
     pub out_ms_left: Option<u64>,
+    /// Your answer to running it twice, while the hand waits for everyone's
+    /// (see [`Command::RunTwice`]); `None` before you answer.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub run_twice: Option<bool>,
 }
 
 /// A request for chips, for the host to approve or deny.
@@ -263,6 +278,10 @@ pub const DROP_AFTER_HANDS: u32 = 3;
 /// without a turn clock (otherwise they get a turn's time).
 pub const REVEAL_MS: u64 = 30_000;
 
+/// Longest the players all-in have to choose whether to run it twice (less
+/// at a table with a shorter turn clock); then it's run once.
+pub const RUN_CHOICE_MS: u64 = 15_000;
+
 /// Runs a table for the host (seat 0) and remote players.
 pub struct TableHost {
     table: Table,
@@ -288,6 +307,8 @@ pub struct TableHost {
     paused_at: Option<u64>,
     /// Milliseconds a person may sit out before the seat is given up (0: no limit).
     sit_out_limit_ms: u64,
+    /// Answers so far to running it twice: (seat, yes).
+    run_answers: Vec<(usize, bool)>,
 }
 
 /// Most characters kept from a player's name.
@@ -341,6 +362,7 @@ impl TableHost {
             refunds: Vec::new(),
             sit_out_limit_ms: 0,
             paused_at: None,
+            run_answers: Vec::new(),
         }
     }
 
@@ -646,6 +668,8 @@ impl TableHost {
             refunds: s.refunds.clone(),
             sit_out_limit_ms: s.sit_out_limit_ms,
             paused_at: Some(now),
+            // Answers to running it twice aren't saved: they're asked again.
+            run_answers: Vec::new(),
         })
     }
 
@@ -783,6 +807,13 @@ impl TableHost {
                 self.remove_player(i);
                 self.changed(now)
             }
+            (Command::RunTwice { yes }, Some(i)) => {
+                let seat = self.players[i].seat;
+                if !self.answer_runs(seat, yes) {
+                    return reject("there's nothing to choose");
+                }
+                self.changed(now)
+            }
             (Command::RequestChips { amount }, Some(i)) => {
                 let Some(bank) = self.bank else {
                     return reject("this table has no chip requests");
@@ -857,6 +888,61 @@ impl TableHost {
     /// Checked by [`Self::tick`].
     pub fn set_sit_out_limit(&mut self, ms: u64) {
         self.sit_out_limit_ms = ms;
+    }
+
+    /// The host's own answer to running it twice (seat 0).
+    pub fn host_run_twice(&mut self, yes: bool, now: u64) -> Result<Vec<Outgoing>, PlayError> {
+        if !self.has_host || !self.answer_runs(0, yes) {
+            return Err(PlayError::IllegalAction);
+        }
+        Ok(self.changed(now))
+    }
+
+    /// Records `seat`'s answer to running it twice, if the hand is asking it.
+    fn answer_runs(&mut self, seat: usize, yes: bool) -> bool {
+        let Some(Awaiting::RunChoice(seats)) = self.table.awaiting() else {
+            return false;
+        };
+        if !seats.contains(&seat) || self.run_answers.iter().any(|&(s, _)| s == seat) {
+            return false;
+        }
+        self.run_answers.push((seat, yes));
+        true
+    }
+
+    /// Settles running it twice once it can be: twice if every person still
+    /// in said yes (bots go along with them), once if anyone said no or is
+    /// away, or if only bots are left. Otherwise it keeps waiting.
+    fn decide_runs(&mut self) {
+        if self.is_paused() {
+            return;
+        }
+        let Some(Awaiting::RunChoice(seats)) = self.table.awaiting() else {
+            self.run_answers.clear();
+            return;
+        };
+        let people: Vec<usize> = seats
+            .into_iter()
+            .filter(|&s| self.table.seat(s).human)
+            .collect();
+        let answer = |s: usize| {
+            self.run_answers
+                .iter()
+                .find(|&&(a, _)| a == s)
+                .map(|&(_, y)| y)
+        };
+        let no = people
+            .iter()
+            .any(|&s| self.table.seat(s).away || answer(s) == Some(false));
+        let runs = if people.is_empty() || no {
+            1
+        } else if people.iter().all(|&s| answer(s) == Some(true)) {
+            2
+        } else {
+            return;
+        };
+        let _ = self.table.choose_runs(runs);
+        self.run_answers.clear();
     }
 
     /// The host's own action (seat 0).
@@ -1055,6 +1141,13 @@ impl TableHost {
         if now < deadline {
             return out;
         }
+        // Out of time to choose: run it once.
+        if let Some(Awaiting::RunChoice(_)) = self.table.awaiting() {
+            let _ = self.table.choose_runs(1);
+            self.run_answers.clear();
+            out.extend(self.changed(now));
+            return out;
+        }
         // Out of time to show at showdown: whoever hasn't can't win.
         if let Some(Awaiting::Reveals(seats)) = self.table.awaiting() {
             for seat in seats {
@@ -1199,8 +1292,10 @@ impl TableHost {
                 self.release_seat(i);
             }
         }
-        // A hidden hand at showdown doesn't wait for anyone who can't show.
+        // A hidden hand at showdown doesn't wait for anyone who can't show,
+        // and running it twice is settled once everyone has chosen.
         self.forfeit_absent();
+        self.decide_runs();
         self.seq += 1;
         let turn = self
             .table
@@ -1212,6 +1307,15 @@ impl TableHost {
             let person = self.table.to_act().is_some() && !self.table.auto_to_act();
             let clock = self.clock(now);
             self.deadline = (person && self.turn_ms > 0).then(|| clock + self.turn_ms);
+            // So is choosing whether to run it twice.
+            if matches!(self.table.awaiting(), Some(Awaiting::RunChoice(_))) {
+                let ms = if self.turn_ms > 0 {
+                    self.turn_ms.min(RUN_CHOICE_MS)
+                } else {
+                    RUN_CHOICE_MS
+                };
+                self.deadline = Some(clock + ms);
+            }
             // Showing at showdown is on the clock too, even at a table without one.
             if matches!(self.table.awaiting(), Some(Awaiting::Reveals(_))) {
                 let ms = if self.turn_ms > 0 {
@@ -1256,6 +1360,11 @@ impl TableHost {
                         .out_since
                         .filter(|_| self.sit_out_limit_ms > 0)
                         .map(|t| self.sit_out_limit_ms.saturating_sub(now.saturating_sub(t))),
+                    run_twice: self
+                        .run_answers
+                        .iter()
+                        .find(|&&(s, _)| s == p.seat)
+                        .map(|&(_, y)| y),
                 };
                 Outgoing {
                     to: p.client_id.clone(),

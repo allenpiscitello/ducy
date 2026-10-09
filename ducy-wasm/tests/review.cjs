@@ -34,6 +34,11 @@ function playHand(table) {
       state = table.advance();
       continue;
     }
+    // All-in with cards to come: run it once.
+    if (state.run_choice) {
+      state = table.runTwice(false);
+      continue;
+    }
     const legal = state.legal;
     if (legal.bet) {
       const to = Math.min(
@@ -99,6 +104,10 @@ console.log(`${hands} hands played and reviewed, ${ms.toFixed(0)} ms per hand`);
         state = table.advance();
         continue;
       }
+      if (state.run_choice) {
+        state = table.runTwice(false);
+        continue;
+      }
       state = table.act(state.legal.can_check ? "check" : "call", 0n);
       const t0 = Date.now();
       const d = table.reviewLastDecision();
@@ -132,6 +141,7 @@ const behind = s => Number(s.stack) + Number(s.street_bet);
 assert.deepEqual(fresh.seats.map(behind), [200, 200]);
 while (!table.state().complete) {
   if (table.botToAct()) table.advance();
+  else if (table.state().run_choice) table.runTwice(false);
   else table.act(table.state().legal.can_check ? "check" : "call", 0n);
 }
 
