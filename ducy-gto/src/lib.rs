@@ -36,6 +36,7 @@ pub mod games;
 pub mod holdem;
 mod key;
 mod mccfr;
+pub mod omaha;
 mod profile;
 mod rng;
 

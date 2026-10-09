@@ -500,6 +500,48 @@ and with 8 sampled), that a chooser's best response gains from its
 continuations, that the gadget holds, and that the bot plays legally with
 turn and river solving on.
 
+## Heads-up pot-limit Omaha (#125)
+
+The same pipeline for heads-up PLO. The abstract game is `Hunl` with four
+hole cards (`holdem::hunl::HuPlo`) and pot-limit betting
+(`HunlConfig::pot_limit_omaha`); what differs from Hold'em lives in `omaha`.
+
+### Showdowns and equity (#129)
+
+- **Showdowns** (`omaha::showdown`): an Omaha hand plays exactly two hole
+  cards and three from the board, so it's the best of 60 five-card hands.
+  `RiverBoard` keeps the board's ten triples and scores each with ducy's
+  bit-twiddling scorer. Results match ducy's exact Omaha evaluator on 12,000
+  random PLO4/5/6 deals (`tests/omaha.rs`).
+- **Equity** (`equity_vs_random`): sampled against a random hand, a random
+  runout and opponent per sample, with its standard error. That error is at
+  most 0.5/√samples: ±1% at 2,500 samples, ±0.5% at 10,000. A test checks it
+  against exact turn equity, enumerating every river and all 123,410
+  opponent hands.
+- **River tables** (`PairTable`): every two-card pair's best hand on one
+  river, after which a hand's strength is 6 lookups.
+
+`cargo run --release -p ducy-gto --example plo_bench`, 12 cores:
+
+| | Speed |
+|---|---|
+| Showdown, two four-card hands (one core) | 2.3 µs (430,000/s) |
+| Equity sample vs a random hand, preflop to turn (one core) | 2.4–2.7 µs |
+| Equity sample on the river, after a 213 µs pair table (one core) | 0.23 µs |
+| MCCFR, PLO 100 BB, every hand in one bucket (tree and showdowns only) | 13,000 iterations/s |
+| MCCFR, 16 buckets from the top two ranks | 6,700 iterations/s |
+| MCCFR, buckets from 25 equity samples per hand per street | 1,800 iterations/s |
+| MCCFR, buckets from 100 equity samples | 1,000 iterations/s |
+
+So the card abstraction can't sample equity during training: 25 samples
+(±10%) already cost three quarters of the speed. It has to be computed from
+cheap features (#128).
+
+The pot-limit tree with `BetMenu::pot_limit` is large: 263,364 nodes and
+84,428 river betting sequences, against Hold'em's 9,236. Pot-sized raises
+take four or five rounds to get 100 BB in, where no-limit ends in an all-in.
+Training (#130) needs a leaner menu.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
