@@ -24,8 +24,14 @@
 //! Duplicate mode plays every deal twice with the seats swapped, which
 //! cancels most of the luck of the cards. The interval comes from the
 //! spread of results across blocks of deals.
+//!
+//! `--game plo` plays heads-up pot-limit Omaha instead (#131): `--cards`
+//! is then a PLO abstraction (`plo_abstraction` builds one), `--blueprint`
+//! a PLO blueprint or `train_plo` checkpoint, and `--bb N` the depth it was
+//! trained for (default 100). The bot is `omaha::bot::PloGtoBot`, against
+//! itself, `EquityBot`, a calling station and every personality bot.
 
-use std::{sync::Arc, time::Instant};
+use std::{cell::Cell, rc::Rc, sync::Arc, time::Instant};
 
 use ducy_gto::{
     Config, Discount, Mccfr,
@@ -33,9 +39,10 @@ use ducy_gto::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
         bot::{GtoBot, RiverSolving, TurnSolving},
-        hunl::{BettingTree, Hunl, HunlConfig},
+        hunl::{BettingTree, HuPlo, Hunl, HunlConfig},
         lbr::{LbrResult, lbr_hands_solving},
     },
+    omaha::{abstraction::PloAbstraction, bot::PloGtoBot},
 };
 use ducy_play::{
     Bot, MatchConfig, TableRules,
@@ -56,6 +63,8 @@ fn main() {
     let mut lbr = 0usize;
     let mut river = 0usize;
     let mut turn = 0usize;
+    let mut plo = false;
+    let mut bb = 100u64;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut v = || it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
@@ -68,8 +77,21 @@ fn main() {
             "--lbr" => lbr = v().replace('_', "").parse().expect("--lbr"),
             "--river-solve" => river = v().parse().expect("--river-solve"),
             "--turn-solve" => turn = v().parse().expect("--turn-solve"),
+            "--game" => plo = v() == "plo",
+            "--bb" => bb = v().parse().expect("--bb"),
             f => panic!("unknown option {f}"),
         }
+    }
+    if plo {
+        plo_match(
+            &cards_path,
+            &blueprint_path,
+            bb,
+            deals,
+            seed,
+            only.as_deref(),
+        );
+        return;
     }
     let cards = Arc::new(
         CardAbstraction::load(&std::fs::read(&cards_path).expect("read --cards"))
@@ -197,5 +219,122 @@ fn main() {
             "{name:>22} {hands:>9} {mean:>10.1} {ci:>10.1}   ({:.0}s)",
             t.elapsed().as_secs_f64()
         );
+    }
+}
+
+/// Duplicate matches between the PLO blueprint and every PLO opponent.
+fn plo_match(
+    cards_path: &str,
+    blueprint_path: &str,
+    bb: u64,
+    deals: usize,
+    seed: u64,
+    only: Option<&str>,
+) {
+    let cards = Arc::new(
+        PloAbstraction::load(&std::fs::read(cards_path).expect("read --cards"))
+            .expect("a PLO abstraction"),
+    );
+    let config = HunlConfig::pot_limit_omaha_lean(bb);
+    let game = HuPlo::with_cards(config.clone(), Some(&*cards));
+    let bytes = std::fs::read(blueprint_path).expect("read --blueprint");
+    let blueprint = match Blueprint::load(&bytes, &game, &*cards) {
+        Ok(b) => b,
+        Err(_) => {
+            let c = Config {
+                seed,
+                batch: 4096,
+                discount: Discount::DCFR,
+                prune: None,
+            };
+            let m = Mccfr::load(&game, c, &bytes)
+                .expect("a PLO blueprint, or a checkpoint for this game and --seed");
+            println!("checkpoint at {} iterations", m.iterations());
+            Blueprint::from_strategy(&game, &*cards, |info, n| {
+                m.average_at(&info)
+                    .unwrap_or_else(|| vec![1.0 / n as f64; n])
+            })
+        }
+    };
+    let blueprint = Arc::new(blueprint);
+    let tree = Arc::new(game.tree);
+    let gto = |s: u64| {
+        PloGtoBot::from_parts(
+            config.clone(),
+            cards.clone(),
+            blueprint.clone(),
+            tree.clone(),
+            s,
+        )
+    };
+    type Make<'a> = Box<dyn Fn(u64) -> Box<dyn Bot> + 'a>;
+    let mut opponents: Vec<(String, Make)> = vec![
+        (
+            "self".into(),
+            Box::new(|s| Box::new(gto(s)) as Box<dyn Bot>),
+        ),
+        (
+            "equity".into(),
+            Box::new(|s| Box::new(EquityBot::new(200, Some(s))) as Box<dyn Bot>),
+        ),
+        (
+            "calling".into(),
+            Box::new(|_| Box::new(CallingStation) as Box<dyn Bot>),
+        ),
+    ];
+    for p in Personality::ALL {
+        opponents.push((
+            p.id().to_string(),
+            Box::new(move |s| Box::new(p.bot(Some(s))) as Box<dyn Bot>),
+        ));
+    }
+    let rules = TableRules::pot_limit_omaha(config.small_blind, config.big_blind);
+    let per_block = (deals / BLOCKS).max(1);
+    println!(
+        "PLO {bb} BB. {:>12} {:>9} {:>10} {:>10} {:>8}",
+        "opponent", "hands", "bb/100", "± 95%", "off-tree"
+    );
+    for (name, make) in &opponents {
+        if only.is_some_and(|o| o != name) {
+            continue;
+        }
+        let t = Instant::now();
+        let mut rates = Vec::with_capacity(BLOCKS);
+        let mut hands = 0;
+        let off_tree = Rc::new(Cell::new(0));
+        let me = Watched(gto(1000), off_tree.clone());
+        let mut bots: Vec<Box<dyn Bot>> = vec![Box::new(me), make(2000)];
+        for b in 0..BLOCKS {
+            let m = MatchConfig::new(rules, per_block, 7919 * b as u64 + 1)
+                .with_starting_stack(config.stack)
+                .duplicate();
+            let r = run_match(&m, &mut bots).expect("match");
+            assert_eq!(r.fallbacks[0], 0, "PloGtoBot made an illegal action");
+            rates.push(r.bb_per_100(0));
+            hands += r.hands;
+        }
+        let mean = rates.iter().sum::<f64>() / BLOCKS as f64;
+        let var = rates.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (BLOCKS - 1) as f64;
+        let ci = 1.96 * (var / BLOCKS as f64).sqrt();
+        println!(
+            "{name:>22} {hands:>9} {mean:>10.1} {ci:>10.1} {:>8}   ({:.0}s)",
+            off_tree.get(),
+            t.elapsed().as_secs_f64()
+        );
+    }
+}
+
+/// The PLO bot, sharing its off-tree count with the report.
+struct Watched(PloGtoBot, Rc<Cell<u32>>);
+
+impl Bot for Watched {
+    fn act(&mut self, obs: &ducy_play::Observation) -> Option<ducy_play::Action> {
+        let a = self.0.act(obs);
+        self.1.set(self.0.off_tree);
+        a
+    }
+
+    fn hand_over(&mut self, summary: &ducy_play::HandSummary) {
+        self.0.hand_over(summary);
     }
 }

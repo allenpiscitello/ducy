@@ -276,8 +276,8 @@ const GADGET_FLOOR: f32 = 1e-3;
 /// The resolving gadget: the opponent's alternative value per hand and its
 /// own regrets for taking it (index 0) or playing (1).
 #[derive(Clone, Debug)]
-pub(super) struct Gadget {
-    pub(super) player: usize,
+pub(crate) struct Gadget {
+    pub(crate) player: usize,
     value: Vec<f32>,
     weight: Vec<f32>,
     regret: [Vec<f32>; 2],
@@ -286,7 +286,7 @@ pub(super) struct Gadget {
 impl Gadget {
     /// The gadget for `player`, whose range is `range`, with alternative
     /// values `value` (both by hand number).
-    pub(super) fn new(player: usize, range: &[f32], value: Vec<f32>) -> Self {
+    pub(crate) fn new(player: usize, range: &[f32], value: Vec<f32>) -> Self {
         let n = range.len();
         let top = range.iter().fold(0f32, |m, &x| m.max(x));
         let weight = range
@@ -302,7 +302,7 @@ impl Gadget {
     }
 
     /// The probability each hand plays the subgame.
-    pub(super) fn enter(&self) -> Vec<f32> {
+    pub(crate) fn enter(&self) -> Vec<f32> {
         let [t, f] = &self.regret;
         t.iter()
             .zip(f)
@@ -314,13 +314,13 @@ impl Gadget {
     }
 
     /// The gadget player's reach into the subgame: `enter` per hand.
-    pub(super) fn reach(&self, enter: &[f32]) -> Vec<f32> {
+    pub(crate) fn reach(&self, enter: &[f32]) -> Vec<f32> {
         self.weight.iter().zip(enter).map(|(w, e)| w * e).collect()
     }
 
     /// Updates the regrets for taking the value or playing, given the
     /// subgame's values `v` and this iteration's `enter`.
-    pub(super) fn update(&mut self, v: &[f32], enter: &[f32], d: &Discount) {
+    pub(crate) fn update(&mut self, v: &[f32], enter: &[f32], d: &Discount) {
         for h in 0..v.len() {
             let mixed = (1.0 - enter[h]) * self.value[h] + enter[h] * v[h];
             for (r, x) in self.regret.iter_mut().zip([self.value[h], v[h]]) {
@@ -782,13 +782,13 @@ fn nearest(fb: &Betting, a: &HunlAction, tb: &Betting, to: &[HunlAction]) -> usi
 
 /// Regret matching over `k` actions per hand, action-major: each hand plays
 /// its actions in proportion to positive regret, or uniformly if none.
-pub(super) fn regret_matching(regret: &[f32], n: usize) -> Vec<f32> {
+pub(crate) fn regret_matching(regret: &[f32], n: usize) -> Vec<f32> {
     normalized(regret, n, |r| r.max(0.0))
 }
 
 /// Each hand's row of `x` (action-major over `n` hands) scaled by `f` to
 /// sum to 1, uniform where it sums to 0.
-pub(super) fn normalized(x: &[f32], n: usize, f: impl Fn(f32) -> f32) -> Vec<f32> {
+pub(crate) fn normalized(x: &[f32], n: usize, f: impl Fn(f32) -> f32) -> Vec<f32> {
     let k = x.len() / n.max(1);
     let mut s = vec![0f32; k * n];
     for h in 0..n {
@@ -805,15 +805,15 @@ pub(super) fn normalized(x: &[f32], n: usize, f: impl Fn(f32) -> f32) -> Vec<f32
 }
 
 /// Discounted CFR's factors for one iteration.
-pub(super) struct Discount {
+pub(crate) struct Discount {
     positive: f32,
     negative: f32,
-    pub(super) sum: f32,
+    pub(crate) sum: f32,
 }
 
 impl Discount {
     /// The factors for iteration `t` (from 1).
-    pub(super) fn at(t: usize) -> Self {
+    pub(crate) fn at(t: usize) -> Self {
         let t = t as f64;
         Self {
             positive: (t.powf(ALPHA) / (t.powf(ALPHA) + 1.0)) as f32,
@@ -822,7 +822,7 @@ impl Discount {
         }
     }
 
-    pub(super) fn regret(&self, r: f32) -> f32 {
+    pub(crate) fn regret(&self, r: f32) -> f32 {
         r * if r > 0.0 {
             self.positive
         } else {

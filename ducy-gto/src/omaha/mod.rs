@@ -4,6 +4,8 @@
 //!
 //! - [`showdown`]: fast Omaha showdowns and sampled equity.
 //! - [`abstraction`]: the feature-based card abstraction.
+//! - [`bot`]: `PloGtoBot`, which plays a trained blueprint.
 
 pub mod abstraction;
+pub mod bot;
 pub mod showdown;

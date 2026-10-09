@@ -488,60 +488,100 @@ impl GtoBot {
 
     /// Converts an abstract action at `node` to a legal real one.
     fn realize(&self, node: u32, a: HunlAction, obs: &Observation) -> Action {
-        let legal = &obs.legal;
-        let check_or_call = if legal.can_check {
-            Action::Check
-        } else {
-            Action::Call
-        };
-        match a {
-            HunlAction::Fold if legal.can_fold => Action::Fold,
-            HunlAction::Fold | HunlAction::Check | HunlAction::Call => check_or_call,
-            HunlAction::Bet(to) | HunlAction::Raise(to) => {
-                let Some(range) = legal.bet.or(legal.raise) else {
-                    return check_or_call;
-                };
-                let b = &self.tree.nodes[node as usize].betting;
-                // The tree's largest size (all-in, or the pot under
-                // pot-limit) is the real table's largest.
-                let pot_limit = obs.rules.structure == BettingStructure::PotLimit;
-                if to >= b.max_to(pot_limit) {
-                    return if legal.bet.is_some() {
-                        Action::Bet(range.max_to)
-                    } else {
-                        Action::Raise(range.max_to)
-                    };
-                }
-                let frac = pot_fraction(to, b.current_bet, b.to_call(), b.pot());
-                let me = &obs.seats[obs.seat];
-                let to_call = obs.current_bet.saturating_sub(me.street_bet);
-                let real = obs.current_bet + (frac * (obs.pot + to_call) as f64).round() as u64;
-                let real = real.clamp(range.min_to, range.max_to);
-                if legal.bet.is_some() {
-                    Action::Bet(real)
-                } else {
-                    Action::Raise(real)
-                }
-            }
-        }
+        realize(&self.tree, node, a, obs)
     }
 
     /// Off the tree: check when free, otherwise call with enough equity
     /// against a random hand for the price.
     fn fallback(&mut self, obs: &Observation) -> Action {
         self.off_tree += 1;
-        let legal: &LegalActions = &obs.legal;
-        if legal.can_check {
-            return Action::Check;
-        }
-        let call = legal.call.unwrap_or(0);
-        let equity = ducy_play::strength::observation_equity(obs, 200, &mut self.fallback_rng);
-        if equity * (obs.pot + call) as f64 >= call as f64 {
-            Action::Call
-        } else {
-            Action::Fold
+        fallback(obs, &mut self.fallback_rng)
+    }
+}
+
+/// Converts the tree's action `a` at `node` to a legal real one: the same
+/// fraction of the real pot, clamped to what's legal, with the tree's
+/// largest size (all-in, or the pot under pot-limit) as the real table's
+/// largest.
+pub(crate) fn realize(tree: &BettingTree, node: u32, a: HunlAction, obs: &Observation) -> Action {
+    let legal = &obs.legal;
+    let check_or_call = if legal.can_check {
+        Action::Check
+    } else {
+        Action::Call
+    };
+    match a {
+        HunlAction::Fold if legal.can_fold => Action::Fold,
+        HunlAction::Fold | HunlAction::Check | HunlAction::Call => check_or_call,
+        HunlAction::Bet(to) | HunlAction::Raise(to) => {
+            let Some(range) = legal.bet.or(legal.raise) else {
+                return check_or_call;
+            };
+            let b = &tree.nodes[node as usize].betting;
+            let pot_limit = obs.rules.structure == BettingStructure::PotLimit;
+            if to >= b.max_to(pot_limit) {
+                return if legal.bet.is_some() {
+                    Action::Bet(range.max_to)
+                } else {
+                    Action::Raise(range.max_to)
+                };
+            }
+            let frac = pot_fraction(to, b.current_bet, b.to_call(), b.pot());
+            let me = &obs.seats[obs.seat];
+            let to_call = obs.current_bet.saturating_sub(me.street_bet);
+            let real = obs.current_bet + (frac * (obs.pot + to_call) as f64).round() as u64;
+            let real = real.clamp(range.min_to, range.max_to);
+            if legal.bet.is_some() {
+                Action::Bet(real)
+            } else {
+                Action::Raise(real)
+            }
         }
     }
+}
+
+/// Off the tree: check when free, otherwise call with enough equity
+/// against a random hand for the price.
+pub(crate) fn fallback(obs: &Observation, rng: &mut StdRng) -> Action {
+    let legal: &LegalActions = &obs.legal;
+    if legal.can_check {
+        return Action::Check;
+    }
+    let call = legal.call.unwrap_or(0);
+    let equity = ducy_play::strength::observation_equity(obs, 200, rng);
+    if equity * (obs.pot + call) as f64 >= call as f64 {
+        Action::Call
+    } else {
+        Action::Fold
+    }
+}
+
+/// The action that puts every chip in (or the largest pot-limit bet),
+/// for when the tree already has both players all-in.
+pub(crate) fn shove(obs: &Observation) -> Action {
+    match obs.legal.bet.or(obs.legal.raise) {
+        Some(r) if obs.legal.bet.is_some() => Action::Bet(r.max_to),
+        Some(r) => Action::Raise(r.max_to),
+        None if obs.legal.can_check => Action::Check,
+        None => Action::Call,
+    }
+}
+
+/// Whether the real action is the same kind as the tree's, so the tree's
+/// choice can be followed exactly once its event arrives.
+pub(crate) fn same_kind(a: HunlAction, action: Action) -> bool {
+    matches!(
+        (a, action),
+        (HunlAction::Fold, Action::Fold)
+            | (
+                HunlAction::Check | HunlAction::Call,
+                Action::Check | Action::Call
+            )
+            | (
+                HunlAction::Bet(_) | HunlAction::Raise(_),
+                Action::Bet(_) | Action::Raise(_)
+            )
+    )
 }
 
 /// Runs `iterate` for the iterations allowed, stopping early once `time`
@@ -560,7 +600,7 @@ fn run_budget(iterations: usize, time: Option<Duration>, mut iterate: impl FnMut
 
 /// Whether the real actions `path` replay legally from `root` to a decision
 /// of player `me`.
-fn replays_to_me(root: &Betting, path: &[HunlAction], me: usize) -> bool {
+pub(crate) fn replays_to_me(root: &Betting, path: &[HunlAction], me: usize) -> bool {
     let mut b = root.clone();
     for &a in path {
         if b.is_over() || b.street != root.street {
@@ -573,7 +613,7 @@ fn replays_to_me(root: &Betting, path: &[HunlAction], me: usize) -> bool {
 
 /// The real hand's betting at the start of `street` (2 the turn, 3 the
 /// river; player 0 the button).
-fn street_root(obs: &Observation, street: usize) -> Option<Betting> {
+pub(crate) fn street_root(obs: &Observation, street: usize) -> Option<Betting> {
     let seat = |p: usize| if p == 0 { obs.button } else { 1 - obs.button };
     let mut stack = [0; 2];
     let mut contributed = [0; 2];
@@ -591,7 +631,7 @@ fn street_root(obs: &Observation, street: usize) -> Option<Betting> {
 }
 
 /// A subgame action in real chips, clamped to what's legal.
-fn real_action(a: HunlAction, obs: &Observation) -> Action {
+pub(crate) fn real_action(a: HunlAction, obs: &Observation) -> Action {
     let legal = &obs.legal;
     let check_or_call = if legal.can_check {
         Action::Check
@@ -612,12 +652,7 @@ fn real_action(a: HunlAction, obs: &Observation) -> Action {
 impl Bot for GtoBot {
     fn act(&mut self, obs: &Observation) -> Option<Action> {
         if self.committed(obs) {
-            return Some(match obs.legal.bet.or(obs.legal.raise) {
-                Some(r) if obs.legal.bet.is_some() => Action::Bet(r.max_to),
-                Some(r) => Action::Raise(r.max_to),
-                None if obs.legal.can_check => Action::Check,
-                None => Action::Call,
-            });
+            return Some(shove(obs));
         }
         if self.turn.is_some()
             && obs.street == Street::Turn
@@ -639,20 +674,8 @@ impl Bot for GtoBot {
                 let action = self.realize(node, a, obs);
                 // When the real action is the same kind as the tree's, follow
                 // the tree's choice exactly once its event arrives.
-                let same = matches!(
-                    (a, action),
-                    (HunlAction::Fold, Action::Fold)
-                        | (
-                            HunlAction::Check | HunlAction::Call,
-                            Action::Check | Action::Call
-                        )
-                        | (
-                            HunlAction::Bet(_) | HunlAction::Raise(_),
-                            Action::Bet(_) | Action::Raise(_)
-                        )
-                );
                 let me = self.track.me;
-                self.track.follow.pending = same.then_some((me, i));
+                self.track.follow.pending = same_kind(a, action).then_some((me, i));
                 Some(action)
             }
             None => Some(self.fallback(obs)),
