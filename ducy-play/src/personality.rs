@@ -178,8 +178,9 @@ pub enum Personality {
     /// solver.
     DougPoker,
     /// A rock: tight and passive. Plays few hands, limps and check-calls
-    /// rather than raising, folds to pressure, almost never bluffs.
-    OldManCoffee,
+    /// rather than raising, folds to pressure, almost never bluffs. (Old Man
+    /// Coffee until 2026-10.)
+    JonnySlow,
     /// Loose-aggressive and exploitative: lots of hands, bold plays, and
     /// adjusts to every opponent's leaks.
     MisterCheating,
@@ -233,7 +234,7 @@ impl Personality {
     /// Every personality.
     pub const ALL: [Personality; 19] = [
         Self::DougPoker,
-        Self::OldManCoffee,
+        Self::JonnySlow,
         Self::MisterCheating,
         Self::MilkKing,
         Self::PhilBigmouth,
@@ -257,7 +258,7 @@ impl Personality {
     pub fn name(self) -> &'static str {
         match self {
             Self::DougPoker => "Doug Poker",
-            Self::OldManCoffee => "Old Man Coffee",
+            Self::JonnySlow => "Jonny Slow",
             Self::MisterCheating => "Mister Cheating",
             Self::MilkKing => "Milk King",
             Self::PhilBigmouth => "Phil Bigmouth",
@@ -282,7 +283,7 @@ impl Personality {
     pub fn id(self) -> &'static str {
         match self {
             Self::DougPoker => "doug_poker",
-            Self::OldManCoffee => "old_man_coffee",
+            Self::JonnySlow => "jonny_slow",
             Self::MisterCheating => "mister_cheating",
             Self::MilkKing => "milk_king",
             Self::PhilBigmouth => "phil_bigmouth",
@@ -307,7 +308,7 @@ impl Personality {
     pub fn description(self) -> &'static str {
         match self {
             Self::DougPoker => "Balanced, near-GTO: solid ranges, mixed bluffs, pot-odds defense.",
-            Self::OldManCoffee => {
+            Self::JonnySlow => {
                 "A rock: few hands, limps and check-calls, folds to pressure, never bluffs."
             }
             Self::MisterCheating => {
@@ -352,7 +353,7 @@ impl Personality {
     pub fn catchphrase(self) -> &'static str {
         match self {
             Self::DougPoker => "It's all just frequencies.",
-            Self::OldManCoffee => "I'll wait for aces. I've got time.",
+            Self::JonnySlow => "I'll wait for aces. I've got time.",
             Self::MisterCheating => "I've seen how you play.",
             Self::MilkKing => "I call. What did you have?",
             Self::PhilBigmouth => "If it weren't for luck, I'd win every hand.",
@@ -379,9 +380,11 @@ impl Personality {
     /// or by a former id or name, so saved tables and clubs still find a
     /// renamed personality.
     pub fn from_name(name: &str) -> Option<Self> {
-        const FORMER: [(&str, Personality); 2] = [
+        const FORMER: [(&str, Personality); 4] = [
             ("uncle_gary", Personality::RobinJaneLewd),
             ("Uncle Gary", Personality::RobinJaneLewd),
+            ("old_man_coffee", Personality::JonnySlow),
+            ("Old Man Coffee", Personality::JonnySlow),
         ];
         if let Some(&(_, p)) = FORMER.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)) {
             return Some(p);
@@ -396,7 +399,7 @@ impl Personality {
         let base = Style::default();
         match self {
             Self::DougPoker => base,
-            Self::OldManCoffee => Style {
+            Self::JonnySlow => Style {
                 // Tight preflop, but limps most of what he plays.
                 vpip: 0.1,
                 pfr: 0.03,
