@@ -63,8 +63,14 @@ fn personalities_play_legal_full_matches() {
         TableRules::no_limit_holdem(1, 2),
         TableRules::pot_limit_omaha(1, 2).with_ante(1),
     ] {
-        // Tables of 4, so every personality plays.
-        for (t, table) in Personality::ALL.chunks(4).enumerate() {
+        // Tables of 4, so every personality plays; the last is filled out
+        // from the start of the list, so no one sits alone.
+        let all = Personality::ALL;
+        let tables: Vec<Vec<Personality>> = (0..all.len())
+            .step_by(4)
+            .map(|s| (s..s + 4).map(|i| all[i % all.len()]).collect())
+            .collect();
+        for (t, table) in tables.iter().enumerate() {
             let config = MatchConfig::new(rules, 6, t as u64).duplicate();
             let mut bots: Vec<Box<dyn Bot>> = table
                 .iter()
@@ -459,6 +465,48 @@ fn lodge_regulars_play_their_styles() {
     assert!(
         rate(brad.folds_to_bets, brad.faced_bets) > rate(milk.folds_to_bets, milk.faced_bets) + 0.2,
         "{brad:?} {milk:?}"
+    );
+}
+
+#[test]
+fn the_mathematician_plays_tight_raises_what_he_plays_and_never_tilts() {
+    // Against three loose players: few hands, most of them raised (raise or
+    // fold when first in), and he doesn't come apart after losing pots.
+    let rules = TableRules::no_limit_holdem(1, 2);
+    let lineup = [
+        Personality::TheMathematician,
+        Personality::MilkKing,
+        Personality::NikAirbag,
+        Personality::UncleGary,
+    ];
+    let mut bots: Vec<PersonalityBot> = lineup
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| quick(p, 60 + i as u64))
+        .collect();
+    let n = bots.len();
+    let mut model = OpponentModel::new();
+    for h in 0..400 {
+        let deal = Deal::random(rules.variant, n, Some(1300 + h)).unwrap();
+        let mut hand = Hand::new(rules, &vec![200; n], h as usize % n, deal).unwrap();
+        let mut seated: Vec<&mut dyn Bot> = bots.iter_mut().map(|b| b as &mut dyn Bot).collect();
+        play_hand(&mut hand, &mut seated).unwrap();
+        model.record(hand.events(), n);
+    }
+    let rate = |count: u32, total: u32| count as f64 / total.max(1) as f64;
+    let math = model.seat(0);
+    let vpip = rate(math.vpip_hands, math.hands);
+    let pfr = rate(math.pfr_hands, math.hands);
+    assert!(vpip < 0.3, "the mathematician vpip {vpip}");
+    assert!(
+        pfr > 0.6 * vpip,
+        "raises most of what he plays: vpip {vpip}, pfr {pfr}"
+    );
+    let style = Personality::TheMathematician.style();
+    assert_eq!((style.tilt, style.heater), (0.0, 0.0), "no moods");
+    assert_eq!(
+        Personality::from_name("The Mathematician"),
+        Some(Personality::TheMathematician)
     );
 }
 

@@ -202,11 +202,15 @@ pub enum Personality {
     /// he gets out of the way: careful against a raise before the flop, and
     /// folds to one after it unless he's strong.
     TomCollins,
+    /// The theorist: plays by the numbers. Tight and strongly positional
+    /// starting hands, raise or fold when first in, calls by the pot odds
+    /// alone, bluffs at a balanced ratio, and never tilts.
+    TheMathematician,
 }
 
 impl Personality {
     /// Every personality.
-    pub const ALL: [Personality; 16] = [
+    pub const ALL: [Personality; 17] = [
         Self::DougPoker,
         Self::OldManCoffee,
         Self::MisterCheating,
@@ -223,6 +227,7 @@ impl Personality {
         Self::NikAirbag,
         Self::Bungleman,
         Self::TomCollins,
+        Self::TheMathematician,
     ];
 
     /// Display name, e.g. "Doug Poker".
@@ -244,6 +249,7 @@ impl Personality {
             Self::NikAirbag => "Nik Airbag",
             Self::Bungleman => "Bungleman",
             Self::TomCollins => "Tom Collins",
+            Self::TheMathematician => "The Mathematician",
         }
     }
 
@@ -266,6 +272,7 @@ impl Personality {
             Self::NikAirbag => "nik_airbag",
             Self::Bungleman => "bungleman",
             Self::TomCollins => "tom_collins",
+            Self::TheMathematician => "the_mathematician",
         }
     }
 
@@ -300,6 +307,9 @@ impl Personality {
             Self::TomCollins => {
                 "Table captain: takes charge of every pot, until someone pushes back."
             }
+            Self::TheMathematician => {
+                "Theorist: tight and positional, calls by the odds, bluffs at a balanced ratio, never tilts."
+            }
         }
     }
 
@@ -322,6 +332,9 @@ impl Personality {
             Self::NikAirbag => "Let's gamble.",
             Self::Bungleman => "I'm feeling it.",
             Self::TomCollins => "I'll take that.",
+            Self::TheMathematician => {
+                "Every time you play differently from how you would if you could see my cards, I gain."
+            }
         }
     }
 
@@ -582,6 +595,36 @@ impl Personality {
                 call_factor: 1.3,
                 pair_call_factor: 1.1,
                 caution: 0.45,
+                ..base
+            },
+            Self::TheMathematician => Style {
+                // Starting hands by the book: tight up front, much wider on
+                // the button, and first in it raises or folds.
+                vpip: 0.16,
+                pfr: 0.15,
+                three_bet: 0.05,
+                four_bet: 0.025,
+                defend: 0.5,
+                position_bonus: 0.55,
+                open_size: 3.0,
+                // Value bets reliably, sized to make the bluffing ratio work:
+                // at 3/4 pot a caller needs 30%, so about one bluff to every
+                // two value bets keeps them indifferent.
+                value_margin: 0.1,
+                aggression: 0.85,
+                trap: 0.05,
+                bluff: 0.3,
+                bluff_raise: 0.05,
+                bet_size: 0.75,
+                // Calls by the pot odds alone: no hero calls, no scared folds.
+                call_factor: 1.0,
+                pair_call_factor: 1.0,
+                caution: 0.1,
+                // No moods: the numbers don't care how the last hand went.
+                tilt: 0.0,
+                heater: 0.0,
+                // More careful sums.
+                samples: 300,
                 ..base
             },
         }
