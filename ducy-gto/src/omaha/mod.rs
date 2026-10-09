@@ -3,5 +3,7 @@
 //! four hole cards ([`crate::holdem::hunl::HuPlo`]) and a pot-limit menu.
 //!
 //! - [`showdown`]: fast Omaha showdowns and sampled equity.
+//! - [`abstraction`]: the feature-based card abstraction.
 
+pub mod abstraction;
 pub mod showdown;

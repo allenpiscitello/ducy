@@ -537,6 +537,52 @@ So the card abstraction can't sample equity during training: 25 samples
 (±10%) already cost three quarters of the speed. It has to be computed from
 cheap features (#128).
 
+### Card abstraction (#128)
+
+`omaha::abstraction::PloAbstraction` buckets hands from cheap, exact
+features instead of tables, which Omaha is far too big for:
+
+- **Preflop:** the 16,432 suit-isomorphism classes of four-card hands, each
+  clustered by its equity against a random hand and ducy's playability
+  percentile (`ducy::games::omaha_analysis`), into 500 buckets. `preflop: 0`
+  keeps one bucket per class instead.
+- **Flop and turn:** made-hand strength (the share of the board's 1,081
+  two-card holdings the hand's best two-plus-three beats), nut and other
+  flush draws, straight outs, and the board's pairing, flush and straight
+  texture. A linear model fitted to sampled equity predicts equity from them.
+  k-means over (predicted equity, made strength) forms 200 buckets, so a big
+  draw and a medium made hand of the same equity stay apart.
+- **River:** equity against 512 opponent hands sampled once per board, with
+  the board as the seed, so a hand's bucket depends only on the cards. Those
+  hands are scored from the board's pair table, skipping any that hold the
+  hand's own cards. 200 equal-mass bins.
+
+The per-board work (scoring every pair, sampling the river opponents) is
+done once for both players (`Buckets::deal_buckets`).
+
+`cargo run --release -p ducy-gto --example plo_abstraction -- --out plo-cards.bin`
+builds it in 36 s on 12 cores and measures it. The table shows the
+within-bucket spread of equity, as a standard deviation, on 4,000 hands per
+street, with equity measured from 2,000 samples each:
+
+| Street | Buckets | These buckets | Equity buckets, same cost | Equity buckets, 2,000 samples | Cost per hand |
+|---|---|---|---|---|---|
+| Flop | 200 | 0.051 | 0.125 (6 samples) | 0.014 | 15 µs |
+| Turn | 200 | 0.045 | 0.095 (16 samples) | 0.013 | 40 µs |
+| River | 200 | 0.021 | 0.042 (76 samples) | 0.012 | 98 µs |
+| Preflop | 500 | 0.015 | | | lookup |
+
+- **Same cost:** plain equity buckets with as many samples as the features
+  cost. These buckets beat them on every street, by half or more.
+- **2,000 samples:** what equity buckets reach when cost is no object. That's
+  about 300 times too slow for training, and the measurement noise (about
+  ±1.1%) is part of its spread.
+- **Training cost:** a whole deal's buckets (both players, every street) take
+  293 µs. With them, MCCFR at PLO 100 BB runs about 4,400 iterations a second
+  on 12 cores, and bucketing is about 11% of the time.
+- **Shipping:** the file is 38 KB (the preflop table and the models), and it
+  loads in 33 ms natively, enumerating the preflop classes.
+
 The pot-limit tree with `BetMenu::pot_limit` is large: 263,364 nodes and
 84,428 river betting sequences, against Hold'em's 9,236. Pot-sized raises
 take four or five rounds to get 100 BB in, where no-limit ends in an all-in.
