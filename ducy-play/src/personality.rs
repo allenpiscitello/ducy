@@ -109,6 +109,12 @@ pub struct Style {
     /// Share of its tilt or heater that wears off each hand.
     pub recovery: f64,
 
+    // --- By game ---
+    /// How much looser and more aggressive it plays in Omaha than in
+    /// Hold'em: 0 plays the same; 0.5 plays and raises half again as many
+    /// hands, re-raises more, and bets and bluffs a little more often.
+    pub omaha: f64,
+
     // --- Reading opponents ---
     /// Whether it adjusts to each opponent's tendencies (see
     /// [`PersonalityBot`]).
@@ -149,6 +155,7 @@ impl Default for Style {
             tilt: 0.0,
             heater: 0.0,
             recovery: 0.15,
+            omaha: 0.0,
             exploit: false,
             exploit_after: 10,
             samples: 150,
@@ -206,11 +213,14 @@ pub enum Personality {
     /// starting hands, raise or fold when first in, calls by the pot odds
     /// alone, bluffs at a balanced ratio, and never tilts.
     TheMathematician,
+    /// Straightforward and reasonable, and happiest at the Omaha table: in
+    /// pot-limit Omaha he plays more hands, and plays them harder.
+    AndrewFavorable,
 }
 
 impl Personality {
     /// Every personality.
-    pub const ALL: [Personality; 17] = [
+    pub const ALL: [Personality; 18] = [
         Self::DougPoker,
         Self::OldManCoffee,
         Self::MisterCheating,
@@ -228,6 +238,7 @@ impl Personality {
         Self::Bungleman,
         Self::TomCollins,
         Self::TheMathematician,
+        Self::AndrewFavorable,
     ];
 
     /// Display name, e.g. "Doug Poker".
@@ -250,6 +261,7 @@ impl Personality {
             Self::Bungleman => "Bungleman",
             Self::TomCollins => "Tom Collins",
             Self::TheMathematician => "The Mathematician",
+            Self::AndrewFavorable => "Andrew Favorable",
         }
     }
 
@@ -273,6 +285,7 @@ impl Personality {
             Self::Bungleman => "bungleman",
             Self::TomCollins => "tom_collins",
             Self::TheMathematician => "the_mathematician",
+            Self::AndrewFavorable => "andrew_favorable",
         }
     }
 
@@ -310,6 +323,9 @@ impl Personality {
             Self::TheMathematician => {
                 "Theorist: tight and positional, calls by the odds, bluffs at a balanced ratio, never tilts."
             }
+            Self::AndrewFavorable => {
+                "Straightforward and reasonable; loves PLO, where he plays more hands and plays them harder."
+            }
         }
     }
 
@@ -335,6 +351,7 @@ impl Personality {
             Self::TheMathematician => {
                 "Every time you play differently from how you would if you could see my cards, I gain."
             }
+            Self::AndrewFavorable => "Favorable.",
         }
     }
 
@@ -627,6 +644,27 @@ impl Personality {
                 samples: 300,
                 ..base
             },
+            Self::AndrewFavorable => Style {
+                // Hold'em: a straightforward, reasonable regular, with few
+                // fancy plays.
+                vpip: 0.2,
+                pfr: 0.15,
+                three_bet: 0.06,
+                four_bet: 0.02,
+                defend: 0.6,
+                position_bonus: 0.35,
+                value_margin: 0.1,
+                aggression: 0.75,
+                bluff: 0.18,
+                bluff_raise: 0.03,
+                call_factor: 1.05,
+                caution: 0.2,
+                bet_size: 0.66,
+                tilt: 0.1,
+                // Omaha is his game: half again as many hands, and harder.
+                omaha: 0.5,
+                ..base
+            },
         }
     }
 
@@ -776,6 +814,16 @@ impl PersonalityBot {
     /// is on.
     pub fn style_for(&self, obs: &Observation) -> Style {
         let mut style = self.style;
+
+        // Its Omaha game, if it has one.
+        let o = style.omaha;
+        if o > 0.0 && matches!(obs.rules.variant, Variant::Omaha { .. }) {
+            style.vpip = (style.vpip * (1.0 + o)).min(0.9);
+            style.pfr = (style.pfr * (1.0 + o)).min(style.vpip);
+            style.three_bet = (style.three_bet * (1.0 + o)).min(style.pfr);
+            style.aggression = (style.aggression + 0.2 * o).min(1.0);
+            style.bluff = (style.bluff + 0.2 * o).min(0.9);
+        }
 
         let m = self.mood;
         if m > 0.0 {

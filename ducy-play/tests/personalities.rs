@@ -469,6 +469,53 @@ fn lodge_regulars_play_their_styles() {
 }
 
 #[test]
+fn andrew_favorable_opens_up_in_omaha() {
+    // The same table in Hold'em and in pot-limit Omaha: Andrew plays far more
+    // hands in Omaha, where Doug Poker (no Omaha adjustment) plays about the
+    // same share of hands in both.
+    let vpips = |rules: TableRules| {
+        let lineup = [
+            Personality::AndrewFavorable,
+            Personality::DougPoker,
+            Personality::MichaelMiserable,
+            Personality::MilkKing,
+        ];
+        let mut bots: Vec<PersonalityBot> = lineup
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| quick(p, 80 + i as u64))
+            .collect();
+        let n = bots.len();
+        let mut model = OpponentModel::new();
+        for h in 0..400 {
+            let deal = Deal::random(rules.variant, n, Some(1700 + h)).unwrap();
+            let mut hand = Hand::new(rules, &vec![200; n], h as usize % n, deal).unwrap();
+            let mut seated: Vec<&mut dyn Bot> =
+                bots.iter_mut().map(|b| b as &mut dyn Bot).collect();
+            play_hand(&mut hand, &mut seated).unwrap();
+            model.record(hand.events(), n);
+        }
+        let v = |s: usize| {
+            let s = model.seat(s);
+            s.vpip_hands as f64 / s.hands.max(1) as f64
+        };
+        (v(0), v(1))
+    };
+    let (andrew_hu, doug_hu) = vpips(TableRules::no_limit_holdem(1, 2));
+    let (andrew_plo, doug_plo) = vpips(TableRules::pot_limit_omaha(1, 2));
+    let (andrew, doug) = (andrew_plo / andrew_hu, doug_plo / doug_hu);
+    assert!(
+        andrew > 1.25,
+        "Andrew in Omaha: {andrew_plo} vs {andrew_hu} in Hold'em"
+    );
+    assert!(
+        andrew > doug + 0.2,
+        "Andrew opens up ({andrew}), Doug doesn't ({doug})"
+    );
+    assert_eq!(Personality::AndrewFavorable.catchphrase(), "Favorable.");
+}
+
+#[test]
 fn the_mathematician_plays_tight_raises_what_he_plays_and_never_tilts() {
     // Against three loose players: few hands, most of them raised (raise or
     // fold when first in), and he doesn't come apart after losing pots.
