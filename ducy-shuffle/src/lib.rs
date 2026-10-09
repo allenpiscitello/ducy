@@ -58,6 +58,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 mod audit;
 pub mod proof;
@@ -224,8 +225,11 @@ fn is_permutation(perm: &[u32], n: usize) -> bool {
 /// `0..players`, then the host ([`Layout::host`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Layout {
+    /// Players dealt in.
     pub players: usize,
+    /// Hole cards each.
     pub hole: usize,
+    /// Board cards.
     pub board: usize,
 }
 

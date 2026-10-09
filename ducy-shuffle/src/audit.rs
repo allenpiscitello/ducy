@@ -9,7 +9,9 @@ use crate::{Layout, Masked, Secret, apply_round, decode, open_deck};
 /// One party's shuffle round as published after the hand.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PartyRound {
+    /// The party's secret for this deck.
     pub secret: Secret,
+    /// The permutation it applied: output position `i` holds input card `perm[i]`.
     pub perm: Vec<u32>,
     /// The deck this party sent on.
     pub output: Vec<Masked>,
@@ -19,9 +21,13 @@ pub struct PartyRound {
 /// `position` as they received it) into `output`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Unlock {
+    /// Who removed the lock (players, then the host).
     pub party: usize,
+    /// The deck position.
     pub position: usize,
+    /// The card before.
     pub input: Masked,
+    /// The card after.
     pub output: Masked,
 }
 
@@ -31,21 +37,28 @@ pub struct Unlock {
 /// and showdowns) with who showed them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transcript {
+    /// Whose positions are whose.
     pub layout: Layout,
+    /// Every party's round, in shuffle order.
     pub rounds: Vec<PartyRound>,
+    /// Every lock removed, in order.
     pub unlocks: Vec<Unlock>,
+    /// Cards shown: (position, card, party that showed it).
     pub revealed: Vec<(usize, Card, usize)>,
 }
 
 /// Who cheated, and how.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fault {
+    /// The party at fault (players, then the host).
     pub party: usize,
+    /// What it did.
     pub kind: FaultKind,
     /// The deck position involved, if it's about one card.
     pub position: Option<usize>,
 }
 
+/// The ways a deal can fail the audit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FaultKind {
     /// A party's round is missing from the record.
