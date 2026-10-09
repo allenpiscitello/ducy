@@ -44,12 +44,20 @@ pub enum Request<P> {
     /// Ask every party for a fresh public key for this deck.
     Keys,
     /// Ask `to` to lock and shuffle `deck`.
-    Shuffle { to: P, deck: Vec<Masked> },
+    Shuffle {
+        /// The party to ask.
+        to: P,
+        /// The deck as it is now.
+        deck: Vec<Masked>,
+    },
     /// Ask `to` to remove its lock from the cards at `positions`, as they are
     /// now (`cards`).
     Unlock {
+        /// The party to ask.
         to: P,
+        /// The deck positions.
         positions: Vec<usize>,
+        /// The cards at those positions.
         cards: Vec<Masked>,
     },
     /// The deck is ready: see [`DeckSetup::ready`].
@@ -63,7 +71,10 @@ pub enum Step<P> {
     Next,
     /// Start again without `left` (dropped out, or a bad answer): ask everyone
     /// left for new keys.
-    Restart { left: P },
+    Restart {
+        /// The player left out.
+        left: P,
+    },
     /// Fewer than two players left; wait until more are connected.
     Waiting,
     /// The host left; this deck can't be finished.
@@ -75,14 +86,19 @@ pub enum Step<P> {
 /// the board.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ready<P> {
+    /// Who's dealt in, in seat order.
     pub players: Vec<P>,
+    /// Whose positions are whose.
     pub layout: Layout,
+    /// The deck: each player's hole cards under only their own lock, the
+    /// board under only the host's.
     pub deck: Vec<Masked>,
     /// Each party's public key, in party order (players, then the host).
     pub keys: Vec<PublicKey>,
     /// What the audit needs besides the secrets and permutations: each
     /// round's output deck, and the lock removals in order.
     pub outputs: Vec<Vec<Masked>>,
+    /// Every lock removed, in order.
     pub unlocks: Vec<Unlock>,
 }
 

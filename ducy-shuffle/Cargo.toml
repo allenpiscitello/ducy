@@ -6,14 +6,13 @@ rust-version = "1.85.0"
 license = "MIT"
 description = "A trustless (mental poker) shuffle for ducy: layered, commutative encryption of a deck on Ristretto255."
 repository = "https://github.com/allenpiscitello/ducy"
+documentation = "https://docs.rs/ducy-shuffle"
+readme = "README.md"
 categories = ["cryptography", "game-engines"]
 keywords = ["poker", "mental-poker", "shuffle", "ristretto"]
-# Not on crates.io until a cryptographer has reviewed it (#136) and the API
-# has settled with its bindings (#139).
-publish = false
 
 [dependencies]
-ducy = { path = "..", default-features = false }
+ducy = { version = "0.3.0", path = "..", default-features = false }
 curve25519-dalek = { version = "4.1", features = ["digest"] }
 sha2 = "0.10"
 rand = "0.10.2"
