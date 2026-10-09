@@ -443,10 +443,13 @@ and about 150 MB.
 
 So `GtoBot::with_solving()` turns on both, at `TurnSolving::default()` (50
 iterations) and `RiverSolving::default()` (200). In the page (ducy-wasm),
-the GTO bot solves both too, with 20 turn iterations: WebAssembly runs on
-one core, where 50 take about 6.5 s a turn decision and 20 about 3 s.
-`setGtoSolving(turn, river)` changes that, 0 playing the blueprint on that
-street.
+the GTO bot solves both too, with much less turn work: WebAssembly runs on
+one core, where 50 iterations take about 6.5 s a turn decision and 20 about
+3.7 s, too slow to play against. The page's bot does 10 iterations of 4
+rivers each, about a third of the time of 20 of 8, still with the
+opponent's river styles. `setGtoSolving(turn, river)` changes the
+iterations (0 plays the blueprint on that street), and
+`setGtoTurnOptions(riverSamples, biases)` the rest.
 
 The tests check that check-down leaf values match brute force over every
 pair of hands and river, that exploitability falls toward 0 (with all rivers
