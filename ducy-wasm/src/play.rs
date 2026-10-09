@@ -435,6 +435,25 @@ impl BotTable {
         self.state()
     }
 
+    /// Changes the game and blinds from the next hand on: `game` as in the
+    /// constructor, plus an optional ante. Only between hands. Returns the
+    /// state.
+    #[wasm_bindgen(js_name = setRules)]
+    pub fn set_rules(
+        &mut self,
+        game: Option<String>,
+        small_blind: u64,
+        big_blind: u64,
+        ante: Option<u64>,
+    ) -> Result<JsValue, JsError> {
+        let rules = TableRules {
+            ante: ante.unwrap_or(0),
+            ..rules_for(game.as_deref(), small_blind, big_blind)?
+        };
+        self.table.set_rules(rules).map_err(err)?;
+        self.state()
+    }
+
     /// Lets the next bot act if it's a bot's turn; returns the state either way.
     pub fn advance(&mut self) -> Result<JsValue, JsError> {
         if self.table.hand().is_none() {
@@ -997,6 +1016,26 @@ impl MultiTable {
     #[wasm_bindgen(js_name = approveChips)]
     pub fn approve_chips(&mut self, seat: usize, now: f64) -> Result<JsValue, JsError> {
         let out = self.host.approve_chips(seat, now as u64);
+        self.result(&out, now as u64)
+    }
+
+    /// Changes the game and blinds from the next hand on, for a game
+    /// rotation or rising blinds: `game` as in the constructor, plus an
+    /// optional ante. Only between hands. Everyone is sent the new view.
+    #[wasm_bindgen(js_name = setRules)]
+    pub fn set_rules(
+        &mut self,
+        game: Option<String>,
+        small_blind: u64,
+        big_blind: u64,
+        ante: Option<u64>,
+        now: f64,
+    ) -> Result<JsValue, JsError> {
+        let rules = TableRules {
+            ante: ante.unwrap_or(0),
+            ..rules_for(game.as_deref(), small_blind, big_blind)?
+        };
+        let out = self.host.set_rules(rules, now as u64).map_err(err)?;
         self.result(&out, now as u64)
     }
 

@@ -24,7 +24,7 @@
 use ducy::deck::{Card, Deck};
 
 use crate::{
-    Action, Awaiting, Bot, PlayError, Table, TableView,
+    Action, Awaiting, Bot, PlayError, Table, TableRules, TableView,
     snapshot::{HostSnapshot, PlayerSnapshot, SNAPSHOT_VERSION},
 };
 
@@ -501,6 +501,14 @@ impl TableHost {
     /// The table being hosted.
     pub fn table(&self) -> &Table {
         &self.table
+    }
+
+    /// Changes the game or the blinds from the next hand on (a game rotation,
+    /// say), and sends everyone the new view. Only between hands; see
+    /// [`Table::set_rules`].
+    pub fn set_rules(&mut self, rules: TableRules, now: u64) -> Result<Vec<Outgoing>, PlayError> {
+        self.table.set_rules(rules)?;
+        Ok(self.changed(now))
     }
 
     /// The current state number; it goes up whenever anything changes.

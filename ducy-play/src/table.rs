@@ -126,6 +126,9 @@ pub struct TableView {
     pub hole_cards: usize,
     /// Pot-limit betting (otherwise no-limit).
     pub pot_limit: bool,
+    /// The ante each player posts, 0 for none.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub ante: u64,
     /// The seat whose turn it is, if the hand is still going.
     pub to_act: Option<usize>,
     /// What the viewer may do, when it's their turn.
@@ -832,6 +835,7 @@ impl Table {
                 big_blind: self.rules.big_blind,
                 hole_cards: self.rules.variant.hole_cards(),
                 pot_limit: self.rules.structure == BettingStructure::PotLimit,
+                ante: self.rules.ante,
                 to_act: None,
                 legal: None,
                 seats: order
@@ -904,6 +908,7 @@ impl Table {
             big_blind: self.rules.big_blind,
             hole_cards: self.rules.variant.hole_cards(),
             pot_limit: self.rules.structure == BettingStructure::PotLimit,
+            ante: self.rules.ante,
             to_act: hand.to_act().map(seat_of),
             legal: hand
                 .legal_actions()
