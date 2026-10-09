@@ -196,7 +196,7 @@ pub enum Personality {
     ChrisMoneybags,
     /// Loose-passive hero caller: plays lots of hands, rarely raises, and
     /// never folds a pair, to keep you honest. (Uncle Gary until 2026-10.)
-    RobbiJaneLewd,
+    RobinJaneLewd,
     /// Fearless bluffer who bets his air and checks his monsters.
     GusBluffsen,
     /// Plays any suited hand and any ace, because they're pretty.
@@ -240,7 +240,7 @@ impl Personality {
         Self::Rampart,
         Self::DannySmallball,
         Self::ChrisMoneybags,
-        Self::RobbiJaneLewd,
+        Self::RobinJaneLewd,
         Self::GusBluffsen,
         Self::LadyLuckLinda,
         Self::MichaelMiserable,
@@ -264,7 +264,7 @@ impl Personality {
             Self::Rampart => "Rampart",
             Self::DannySmallball => "Danny Smallball",
             Self::ChrisMoneybags => "Chris Moneybags",
-            Self::RobbiJaneLewd => "Robbi Jane Lewd",
+            Self::RobinJaneLewd => "Robin Jane Lewd",
             Self::GusBluffsen => "Gus Bluffsen",
             Self::LadyLuckLinda => "Lady Luck Linda",
             Self::MichaelMiserable => "Michael Miserable",
@@ -289,7 +289,7 @@ impl Personality {
             Self::Rampart => "rampart",
             Self::DannySmallball => "danny_smallball",
             Self::ChrisMoneybags => "chris_moneybags",
-            Self::RobbiJaneLewd => "robbi_jane_lewd",
+            Self::RobinJaneLewd => "robin_jane_lewd",
             Self::GusBluffsen => "gus_bluffsen",
             Self::LadyLuckLinda => "lady_luck_linda",
             Self::MichaelMiserable => "michael_miserable",
@@ -320,7 +320,7 @@ impl Personality {
             }
             Self::DannySmallball => "Small ball: many hands, small pots, small bets, tricky calls.",
             Self::ChrisMoneybags => "Lucky amateur who gets braver with every pot he drags.",
-            Self::RobbiJaneLewd => {
+            Self::RobinJaneLewd => {
                 "Hero caller: plays lots of hands, calls with any pair to keep you honest."
             }
             Self::GusBluffsen => "Fearless bluffer: bets his air, checks his monsters.",
@@ -359,7 +359,7 @@ impl Personality {
             Self::Rampart => "I had to see it.",
             Self::DannySmallball => "I put you on exactly king-jack.",
             Self::ChrisMoneybags => "Wait, I won again?",
-            Self::RobbiJaneLewd => "Gotta keep you honest.",
+            Self::RobinJaneLewd => "Gotta keep you honest.",
             Self::GusBluffsen => "Every hand is a bluff. Except this one.",
             Self::LadyLuckLinda => "They're suited!",
             Self::MichaelMiserable => "Another day at the office. Ugh.",
@@ -380,8 +380,8 @@ impl Personality {
     /// renamed personality.
     pub fn from_name(name: &str) -> Option<Self> {
         const FORMER: [(&str, Personality); 2] = [
-            ("uncle_gary", Personality::RobbiJaneLewd),
-            ("Uncle Gary", Personality::RobbiJaneLewd),
+            ("uncle_gary", Personality::RobinJaneLewd),
+            ("Uncle Gary", Personality::RobinJaneLewd),
         ];
         if let Some(&(_, p)) = FORMER.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)) {
             return Some(p);
@@ -517,7 +517,7 @@ impl Personality {
                 recovery: 0.1,
                 ..base
             },
-            Self::RobbiJaneLewd => Style {
+            Self::RobinJaneLewd => Style {
                 vpip: 0.37,
                 pfr: 0.03,
                 three_bet: 0.007,
