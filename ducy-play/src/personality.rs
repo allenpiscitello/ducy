@@ -200,8 +200,9 @@ pub enum Personality {
     RobinJaneLewd,
     /// Fearless bluffer who bets his air and checks his monsters.
     GusBluffsen,
-    /// Plays any suited hand and any ace, because they're pretty.
-    LadyLuckLinda,
+    /// Plays any suited hand and any ace, because they're pretty. (Lady Luck
+    /// Linda until 2026-10.)
+    JenSilly,
     /// Disciplined, relentless grinder who never looks happy about it.
     MichaelMiserable,
     /// Sees lots of flops and gives up when he misses. Pocket jacks are
@@ -243,7 +244,7 @@ impl Personality {
         Self::ChrisMoneybags,
         Self::RobinJaneLewd,
         Self::GusBluffsen,
-        Self::LadyLuckLinda,
+        Self::JenSilly,
         Self::MichaelMiserable,
         Self::BradOwned,
         Self::NikAirbag,
@@ -267,7 +268,7 @@ impl Personality {
             Self::ChrisMoneybags => "Chris Moneybags",
             Self::RobinJaneLewd => "Robin Jane Lewd",
             Self::GusBluffsen => "Gus Bluffsen",
-            Self::LadyLuckLinda => "Lady Luck Linda",
+            Self::JenSilly => "Jen Silly",
             Self::MichaelMiserable => "Michael Miserable",
             Self::BradOwned => "Brad Owned",
             Self::NikAirbag => "Nik Airbag",
@@ -292,7 +293,7 @@ impl Personality {
             Self::ChrisMoneybags => "chris_moneybags",
             Self::RobinJaneLewd => "robin_jane_lewd",
             Self::GusBluffsen => "gus_bluffsen",
-            Self::LadyLuckLinda => "lady_luck_linda",
+            Self::JenSilly => "jen_silly",
             Self::MichaelMiserable => "michael_miserable",
             Self::BradOwned => "brad_owned",
             Self::NikAirbag => "nik_airbag",
@@ -325,7 +326,7 @@ impl Personality {
                 "Hero caller: plays lots of hands, calls with any pair to keep you honest."
             }
             Self::GusBluffsen => "Fearless bluffer: bets his air, checks his monsters.",
-            Self::LadyLuckLinda => "Plays any suited hand and any ace, because they're pretty.",
+            Self::JenSilly => "Plays any suited hand and any ace, because they're pretty.",
             Self::MichaelMiserable => {
                 "Disciplined, relentless grinder who never looks happy about it."
             }
@@ -362,7 +363,7 @@ impl Personality {
             Self::ChrisMoneybags => "Wait, I won again?",
             Self::RobinJaneLewd => "Gotta keep you honest.",
             Self::GusBluffsen => "Every hand is a bluff. Except this one.",
-            Self::LadyLuckLinda => "They're suited!",
+            Self::JenSilly => "They're suited!",
             Self::MichaelMiserable => "Another day at the office. Ugh.",
             Self::BradOwned => "Jacks again? Of course.",
             Self::NikAirbag => "Let's gamble.",
@@ -380,11 +381,13 @@ impl Personality {
     /// or by a former id or name, so saved tables and clubs still find a
     /// renamed personality.
     pub fn from_name(name: &str) -> Option<Self> {
-        const FORMER: [(&str, Personality); 4] = [
+        const FORMER: [(&str, Personality); 6] = [
             ("uncle_gary", Personality::RobinJaneLewd),
             ("Uncle Gary", Personality::RobinJaneLewd),
             ("old_man_coffee", Personality::JonnySlow),
             ("Old Man Coffee", Personality::JonnySlow),
+            ("lady_luck_linda", Personality::JenSilly),
+            ("Lady Luck Linda", Personality::JenSilly),
         ];
         if let Some(&(_, p)) = FORMER.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)) {
             return Some(p);
@@ -546,7 +549,7 @@ impl Personality {
                 bet_size: 0.75,
                 ..base
             },
-            Self::LadyLuckLinda => Style {
+            Self::JenSilly => Style {
                 vpip: 0.08,
                 pfr: 0.04,
                 any_suited: true,

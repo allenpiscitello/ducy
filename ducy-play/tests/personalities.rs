@@ -296,13 +296,22 @@ fn favorite_and_pretty_hands_get_played() {
     .unwrap();
     assert!(matches!(ten_deuce_fan.act(&omaha), Some(Action::Raise(_))));
 
-    let mut linda = with(Personality::LadyLuckLinda, |_| {});
+    let mut jen = with(Personality::JenSilly, |_| {});
     let suited_junk = nlhe(&["7s 2s", "8d 3h"], board).observation(0).unwrap();
-    assert_eq!(linda.act(&suited_junk), Some(Action::Call));
+    assert_eq!(jen.act(&suited_junk), Some(Action::Call));
     let weak_ace = nlhe(&["Ah 3d", "8d 4h"], board).observation(0).unwrap();
-    assert_eq!(linda.act(&weak_ace), Some(Action::Call));
+    assert_eq!(jen.act(&weak_ace), Some(Action::Call));
     let offsuit_junk = nlhe(&["7c 2d", "8d 3h"], board).observation(0).unwrap();
-    assert_eq!(linda.act(&offsuit_junk), Some(Action::Fold));
+    assert_eq!(jen.act(&offsuit_junk), Some(Action::Fold));
+
+    // Saved tables and clubs from before the rename still find her.
+    for old in ["lady_luck_linda", "Lady Luck Linda"] {
+        assert_eq!(Personality::from_name(old), Some(Personality::JenSilly));
+    }
+    assert_eq!(
+        Personality::from_name("jen_silly"),
+        Some(Personality::JenSilly)
+    );
 }
 
 #[test]

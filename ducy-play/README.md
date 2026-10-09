@@ -101,7 +101,7 @@ PFR = hands raised preflop). Their range traits are written for a full
 | **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 55% / 7% | 11% |
 | **Robin Jane Lewd** | Loose-passive hero caller, and never folds a pair. (Formerly Uncle Gary; the old id `uncle_gary` still works.) | 47% / 3% | 18% |
 | **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 33% / 23% | 22% |
-| **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 37% / 6% | 33% |
+| **Jen Silly** | Plays any suited hand and any ace, because they're pretty. (Formerly Lady Luck Linda; the old id `lady_luck_linda` still works.) | 37% / 6% | 33% |
 | **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 23% / 18% | 31% |
 | **Brad Owned** | Fit-or-fold recreational: sees lots of flops, bets what he hits, gives up when he misses. Always plays pocket jacks. | 33% / 5% | 67% |
 | **Nik Airbag** | Maniac: raises almost everything, 3-bets wide, bluffs huge. | 65% / 45% | 13% |
