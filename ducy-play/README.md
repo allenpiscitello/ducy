@@ -109,6 +109,7 @@ PFR = hands raised preflop). Their range traits are written for a full
 | **Tom Collins** | Table captain: raises nearly every pot nobody has raised and bets big whenever checked to, but careful against a raise before the flop and folds to one after it unless strong. | 42% / 33% | 58% |
 | **The Mathematician** | Theorist: tight, strongly positional starting hands, raise or fold when first in, calls by the pot odds alone, bluffs at a balanced ratio, never tilts. | 16% / 12% | 32% |
 | **Andrew Favorable** | Straightforward and reasonable in Hold'em; loves PLO, where he plays half again as many hands and plays them harder (`omaha` 0.5). | 24% / 16% | 53% |
+| **Tommy Sweeden** | Aggressive but careful: raises a fair range, bets his good hands, and loves a check-raise (about half the times he checks and someone bets). Bets scare him a little more than most. A lost pot puts him on tilt, and it takes a while to wear off. | 29% / 25% | 38% |
 
 ```rust
 use ducy_play::{Bot, MatchConfig, Personality, TableRules, run_match};
@@ -163,11 +164,13 @@ and `from_name()` make it easy to list them in an app.
 | `open_size` | Opening raise in big blinds. |
 | `value_margin`, `aggression` | How strong a hand must be to bet for value, and how often it then bets rather than checks or calls. |
 | `trap` | Chance it slow-plays a monster: checks to check-raise. |
+| `check_raise` | Chance it checks any value hand to check-raise when someone is still to act behind it; having checked, it raises its value hands when bet into, and heads-up bluff-raises more often. |
 | `backwards` | Bets weak hands and checks strong ones (calls still use real strength). |
 | `bluff`, `bluff_raise` | How often it bets or raises with a weak hand. |
 | `call_factor`, `caution`, `pair_call_factor` | How much equity it wants to call: a multiple of the pot odds, extra per pot-sized bet faced, and a multiplier when it holds any pair. |
 | `bet_size` | Bets as a fraction of the pot (above 1 overbets in no-limit). |
 | `tilt`, `heater`, `recovery` | How much big losses or wins loosen it up, and how fast that wears off. `mood()` shows the current level. |
+| `omaha` | How much looser and more aggressive it plays in Omaha than in Hold'em (0.5: half again as many hands). |
 | `exploit`, `exploit_after` | Whether it adapts to opponents, and after how many hands. |
 | `samples` | Monte Carlo deals per equity estimate. |
 
