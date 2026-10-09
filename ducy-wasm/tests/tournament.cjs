@@ -2,6 +2,8 @@
 // simulated players over 2 tables to a winner. Chips are conserved, no
 // player's view ever has another's unshown cards, a moved player gets a view
 // of their new table at once, and p11, who never joins, is blinded off.
+// The host restarts every so often (save, restore, everyone joins again),
+// and the tournament carries on where it was.
 // Run: wasm-pack build --target nodejs --out-dir pkg-node (in ducy-wasm), then
 // node ducy-wasm/tests/tournament.cjs
 const assert = require('node:assert/strict');
@@ -16,7 +18,7 @@ const config = {
   levels: [[10, 20, 0], [25, 50, 5], [50, 100, 10], [100, 200, 25], [200, 400, 50]].map(([sb, bb, ante]) => ({sb, bb, ante})),
 };
 const players = Array.from({length: 12}, (_, i) => ({id: `p${i}`, name: `P${i}`}));
-const t = new w.ClubTournament(config, players, 30000);
+let t = new w.ClubTournament(config, players, 30000);
 
 let now = 0;
 let r = t.state(now);
@@ -41,10 +43,27 @@ for (let i = 0; i < 11; i++) {
 
 const last = new Map(); // each player's latest state
 const busted = [];
-let hands = 0, moved = 0, winner = null;
+let hands = 0, moved = 0, winner = null, steps = 0, restarts = 0;
 while (!r.over) {
   now += 100;
   assert.ok(now < 50_000_000, 'the tournament ends');
+  if (++steps % 15 === 0) {
+    // The host restarts: the same tournament, and everyone still in who was
+    // here joins again and is sent their view.
+    const before = t.state(now);
+    t = w.ClubTournament.restore(t.save(now), now);
+    restarts++;
+    r = t.state(now);
+    assert.deepEqual(r.standings, before.standings, 'the same standings after a restart');
+    assert.equal(r.level, before.level);
+    last.clear();
+    for (const p of players.slice(0, 11)) {
+      if (!r.standings.some(s => s.id === p.id)) continue;
+      r = t.handle(p.id, {type: 'join', name: ''}, now);
+      for (const m of r.out) if (m.data.type === 'state') last.set(m.to, m.data);
+    }
+    continue;
+  }
   if (r.canDeal) {
     if (r.tables.every(x => !x.inHand)) {
       const chips = r.standings.reduce((a, s) => a + s.stack, 0);
@@ -85,9 +104,11 @@ assert.deepEqual(busted.map(b => b.place).sort((a, b) => a - b), Array.from({len
 assert.equal(winner.place, 1);
 assert.ok(busted.some(b => b.id === 'p11'), 'p11 was blinded off');
 assert.ok(moved > 0, 'players were moved');
+assert.ok(restarts > 5, `restarted ${restarts} times`);
+assert.throws(() => w.ClubTournament.restore('{"version": 999}', now), 'not a saved tournament');
 assert.equal(t.viewFor(busted[0].id), null, 'out: no view');
 // The host's view of a table hides everyone's cards until shown down.
 const [table] = r.tables;
 const hv = t.tableView(table.id);
 assert.equal(hv.legal, null);
-console.log(`tournament: ok (${hands} deals, ${moved} moves, won by ${winner.name})`);
+console.log(`tournament: ok (${hands} deals, ${moved} moves, ${restarts} restarts, won by ${winner.name})`);

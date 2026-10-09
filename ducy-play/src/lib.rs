@@ -93,7 +93,7 @@ pub use rules::{BettingStructure, TableRules, Variant};
 pub use showdown::{Award, Pot};
 pub use snapshot::{
     HandSnapshot, HostSnapshot, SNAPSHOT_VERSION, TOURNAMENT_SNAPSHOT_VERSION, TableSnapshot,
-    TournamentSnapshot,
+    TournamentHostSnapshot, TournamentSnapshot,
 };
 pub use table::{SeatState, Table, TableSeat, TableView};
 pub use tournament::{
