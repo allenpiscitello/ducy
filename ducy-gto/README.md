@@ -651,6 +651,48 @@ paired deals) fell steadily, then hit the measure's floor:
   modest abstraction; the gains against its snapshots are still shrinking,
   so more training would help.
 
+### Playing it: `PloGtoBot` (#131)
+
+`omaha::bot::PloGtoBot` plays the blueprint in ducy-play, the way `GtoBot`
+plays Hold'em's: it follows the hand on the tree (off-menu bets map to
+nearby sizes), buckets with `PloAbstraction`, samples the blueprint, and
+turns sizes into chips within pot-limit rules. ducy-wasm loads it with
+`loadGtoPlo(cards, blueprint, bigBlinds)` as the `gto-plo` bot.
+
+```sh
+cargo run --release -p ducy-gto --example gto_match -- --game plo --bb 100 \
+    --cards plo-cards.bin --blueprint plo-blueprint.bin --deals 5000
+```
+
+The 25 M blueprint at 100 BB, in duplicate matches of 5,000 deals (10,000
+hands). The four marked * were close at that size and were rerun at 20,000
+deals (40,000 hands). None of its decisions left the tree.
+
+| Opponent | bb/100 (± 95%) | Opponent | bb/100 (± 95%) |
+|---|---|---|---|
+| itself | −0.6 ± 29.4 | Robin Jane Lewd | +99.3 ± 25.4 |
+| EquityBot | +85.9 ± 35.3 | Gus Bluffsen | +92.6 ± 37.2 |
+| calling station | +177.7 ± 24.4 | Jen Silly | +63.2 ± 27.7 |
+| Doug Poker * | +28.5 ± 14.4 | Michael Miserable * | +30.8 ± 14.7 |
+| Jonny Slow | +34.9 ± 12.9 | Brad Owned | +37.1 ± 18.0 |
+| Mister Cheating | +68.3 ± 45.2 | Nik Airbag | +207.5 ± 67.0 |
+| Milk King | +106.0 ± 24.2 | Bungleman | +263.3 ± 54.9 |
+| Phil Bigmouth | +44.9 ± 30.6 | Tom Collins | +42.4 ± 31.9 |
+| Rampart | +267.6 ± 55.0 | The Mathematician * | +49.8 ± 16.7 |
+| Danny Smallball | +59.3 ± 26.7 | Andrew Favorable | +64.2 ± 35.9 |
+| Chris Moneybags | +159.0 ± 39.7 | Tommy Sweeden * | +47.4 ± 16.9 |
+
+It beats every personality bot. The personalities' Omaha play isn't tuned
+yet (ducy-play's README), so these say more about them than about how close
+the blueprint is to equilibrium. There's no exact best response at this
+size, and the sampled one doesn't work at 100 BB (above), so none is
+reported.
+
+**In the browser:** in Node, with WASM, the 38 KB abstraction and 1.8 MB
+blueprint load in 41 ms. Over 200 hands (746 decisions) a decision took
+0.1 ms on average and 1.2 ms at most (`ducy-wasm/tests/gto-plo.cjs` with
+`DUCY_PLO_*` pointing at the model).
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
