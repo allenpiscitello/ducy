@@ -443,6 +443,18 @@ pub trait Buckets {
     fn hand_bucket(&self, hole: &[Card], board: &[Card]) -> u16;
     /// How many buckets there are with `board_len` board cards.
     fn bucket_count(&self, board_len: usize) -> usize;
+    /// Both players' buckets on every street for one deal. By default each
+    /// is [`Buckets::hand_bucket`]; an abstraction whose work is mostly per
+    /// board (Omaha's) does that work once here.
+    fn deal_buckets(&self, hole: [&[Card]; 2], board: &[Card; 5]) -> [[u16; 4]; 2] {
+        let mut out = [[0u16; 4]; 2];
+        for (p, b) in out.iter_mut().enumerate() {
+            for (street, n) in [0usize, 3, 4, 5].into_iter().enumerate() {
+                b[street] = self.hand_bucket(hole[p], &board[..n]);
+            }
+        }
+        out
+    }
 }
 
 impl Buckets for CardAbstraction {
@@ -506,14 +518,10 @@ impl<'a, A: Buckets, const H: usize> Hunl<'a, A, H> {
 
     /// A hand with these cards dealt and the blinds posted.
     pub fn deal(&self, hole: [[Card; H]; 2], board: [Card; 5]) -> HunlState<H> {
-        let mut buckets = [[0u16; 4]; 2];
-        if let Some(cards) = self.cards {
-            for (p, b) in buckets.iter_mut().enumerate() {
-                for (street, n) in [0usize, 3, 4, 5].into_iter().enumerate() {
-                    b[street] = cards.hand_bucket(&hole[p], &board[..n]);
-                }
-            }
-        }
+        let buckets = match self.cards {
+            Some(cards) => cards.deal_buckets([&hole[0], &hole[1]], &board),
+            None => [[0u16; 4]; 2],
+        };
         let (mine, theirs) = if H == 2 {
             (
                 showdown_score(&hole[0], &board),
