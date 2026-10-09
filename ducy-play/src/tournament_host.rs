@@ -236,6 +236,8 @@ impl TournamentHost {
             Command::RequestChips { .. } => reject("chips can't be bought in a tournament"),
             // Running it twice is for cash tables.
             Command::RunTwice { .. } => reject("tournament hands are run once"),
+            // Time banks are for cash tables (TableHost) for now.
+            Command::TimeBank => reject("there's no time bank in a tournament"),
             Command::Act { seq, kind, amount } => {
                 if seq != self.seq {
                     return reject("that was for an earlier state");

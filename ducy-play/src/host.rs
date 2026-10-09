@@ -90,6 +90,10 @@ pub enum Command {
         /// Run it twice.
         yes: bool,
     },
+    /// Use your time bank: on your turn, its time is added to your clock.
+    /// What you don't use goes back into it when you act (see
+    /// [`TIME_BANK_MS`]).
+    TimeBank,
 }
 
 /// A message from the host to one player.
@@ -166,6 +170,12 @@ pub struct SeatStatus {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub run_twice: Option<bool>,
+    /// Time in your time bank (at a table with a turn clock).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub time_bank_ms: u64,
+    /// Your time bank is running: it was added to this turn's clock.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub time_bank_on: bool,
 }
 
 /// A request for chips, for the host to approve or deny.
@@ -262,6 +272,8 @@ struct Player {
     /// When they last went out (by choice, timing out or disconnecting),
     /// for the sit-out limit.
     out_since: Option<u64>,
+    /// Time left in their time bank.
+    time_bank_ms: u64,
 }
 
 /// A table's buy-in limits, in chips.
@@ -273,6 +285,14 @@ struct Bank {
 
 /// Hands a disconnected person can miss before they're removed.
 pub const DROP_AFTER_HANDS: u32 = 3;
+
+/// A full time bank: everyone starts with it. Asking for it
+/// ([`Command::TimeBank`]) adds all of it to that turn's clock, and what's
+/// left when they act goes back in.
+pub const TIME_BANK_MS: u64 = 60_000;
+
+/// Time added back to everyone's time bank each hand, up to [`TIME_BANK_MS`].
+pub const TIME_BANK_REFILL_MS: u64 = 5_000;
 
 /// How long players have to show at showdown in a hidden hand, at a table
 /// without a turn clock (otherwise they get a turn's time).
@@ -309,6 +329,8 @@ pub struct TableHost {
     sit_out_limit_ms: u64,
     /// Answers so far to running it twice: (seat, yes).
     run_answers: Vec<(usize, bool)>,
+    /// A time bank added to this turn's clock: whose (client id), and how much.
+    time_bank: Option<(String, u64)>,
 }
 
 /// Most characters kept from a player's name.
@@ -361,6 +383,7 @@ impl TableHost {
             departed: Vec::new(),
             refunds: Vec::new(),
             sit_out_limit_ms: 0,
+            time_bank: None,
             paused_at: None,
             run_answers: Vec::new(),
         }
@@ -595,6 +618,7 @@ impl TableHost {
                     approved: p.approved,
                     out_by_choice: p.out_by_choice,
                     out_ms: p.out_since.map(|t| now.saturating_sub(t)),
+                    time_bank_ms: p.time_bank_ms,
                 })
                 .collect(),
             seq: self.seq,
@@ -608,6 +632,7 @@ impl TableHost {
             departed: self.departed.clone(),
             refunds: self.refunds.clone(),
             sit_out_limit_ms: self.sit_out_limit_ms,
+            time_bank: self.time_bank.clone(),
         }
     }
 
@@ -650,6 +675,7 @@ impl TableHost {
                 approved: p.approved,
                 out_by_choice: p.out_by_choice,
                 out_since: p.out_ms.map(|ms| now.saturating_sub(ms)),
+                time_bank_ms: p.time_bank_ms.min(TIME_BANK_MS),
             })
             .collect();
         Ok(Self {
@@ -670,6 +696,7 @@ impl TableHost {
             paused_at: Some(now),
             // Answers to running it twice aren't saved: they're asked again.
             run_answers: Vec::new(),
+            time_bank: s.time_bank.clone(),
         })
     }
 
@@ -751,6 +778,7 @@ impl TableHost {
                     approved: 0,
                     out_by_choice: false,
                     out_since: None,
+                    time_bank_ms: TIME_BANK_MS,
                 });
                 if !pending {
                     self.take_seat(seat, name);
@@ -801,6 +829,25 @@ impl TableHost {
                     self.table.sit_in(seat, wait_for_big_blind);
                 }
                 self.changed(now)
+            }
+            (Command::TimeBank, Some(i)) => {
+                let p = &self.players[i];
+                let mine = self.table.to_act() == Some(p.seat) && !p.pending;
+                let Some(deadline) = self.deadline.filter(|_| mine) else {
+                    return reject("you can use your time bank on your turn");
+                };
+                if self.time_bank.is_some() {
+                    return reject("your time bank is already running");
+                }
+                if p.time_bank_ms == 0 {
+                    return reject("your time bank is empty");
+                }
+                let add = p.time_bank_ms;
+                self.players[i].time_bank_ms = 0;
+                self.deadline = Some(deadline + add);
+                self.time_bank = Some((client_id.to_string(), add));
+                // The same state, with more time: actions sent meanwhile still count.
+                self.updates(now)
             }
             (Command::Leave, Some(i)) => {
                 self.players[i].connected = false;
@@ -1118,6 +1165,8 @@ impl TableHost {
         }
         for p in &mut self.players {
             p.missed = if p.connected { 0 } else { p.missed + 1 };
+            // Each hand puts some time back into everyone's time bank.
+            p.time_bank_ms = (p.time_bank_ms + TIME_BANK_REFILL_MS).min(TIME_BANK_MS);
         }
         Ok(self.changed(now))
     }
@@ -1303,6 +1352,16 @@ impl TableHost {
             .filter(|h| !h.is_complete())
             .map(|h| (self.table.hand_number(), h.events().len()));
         if turn != self.turn {
+            // A time bank that was running: what's left on the clock goes back
+            // into it (up to what was added).
+            if let Some((who, added)) = self.time_bank.take() {
+                let left = self
+                    .deadline
+                    .map_or(0, |d| d.saturating_sub(self.clock(now)));
+                if let Some(p) = self.players.iter_mut().find(|p| p.client_id == who) {
+                    p.time_bank_ms = (p.time_bank_ms + left.min(added)).min(TIME_BANK_MS);
+                }
+            }
             self.turn = turn;
             let person = self.table.to_act().is_some() && !self.table.auto_to_act();
             let clock = self.clock(now);
@@ -1365,6 +1424,11 @@ impl TableHost {
                         .iter()
                         .find(|&&(s, _)| s == p.seat)
                         .map(|&(_, y)| y),
+                    time_bank_ms: p.time_bank_ms,
+                    time_bank_on: self
+                        .time_bank
+                        .as_ref()
+                        .is_some_and(|(who, _)| *who == p.client_id),
                 };
                 Outgoing {
                     to: p.client_id.clone(),
