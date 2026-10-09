@@ -22,6 +22,7 @@ use super::{
 };
 use crate::{
     game::{Game, Turn},
+    omaha::showdown::RiverBoard,
     rng::Rng,
 };
 
@@ -513,8 +514,16 @@ impl<'a, A: Buckets, const H: usize> Hunl<'a, A, H> {
                 }
             }
         }
-        let mine = showdown_score(&hole[0], &board);
-        let theirs = showdown_score(&hole[1], &board);
+        let (mine, theirs) = if H == 2 {
+            (
+                showdown_score(&hole[0], &board),
+                showdown_score(&hole[1], &board),
+            )
+        } else {
+            // Omaha: the board's triples once for both hands.
+            let river = RiverBoard::new(&board);
+            (river.score(&hole[0]), river.score(&hole[1]))
+        };
         HunlState {
             hole,
             board,
