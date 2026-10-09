@@ -91,6 +91,19 @@ impl BetMenu {
             ],
         }
     }
+
+    /// A lean pot-limit menu that one machine can train (#130): every
+    /// preflop raise is pot-sized; after the flop, bet half the pot or the
+    /// pot, and raise the pot. At 100 big blinds its tree has 9,128 nodes and
+    /// 2,842 river betting sequences, against 84,428 for
+    /// [`BetMenu::pot_limit`].
+    pub fn pot_limit_lean() -> Self {
+        use Size::*;
+        Self {
+            preflop: vec![vec![Pot(1.0)]],
+            postflop: vec![vec![Pot(0.5), Pot(1.0)], vec![Pot(1.0)]],
+        }
+    }
 }
 
 /// Blinds, stacks and bet sizes.
@@ -115,6 +128,17 @@ impl HunlConfig {
     pub fn pot_limit_omaha() -> Self {
         Self {
             menu: BetMenu::pot_limit(),
+            pot_limit: true,
+            ..Self::default()
+        }
+    }
+
+    /// The PLO game the blueprint trains on: blinds 1/2, `big_blinds` deep,
+    /// the [`BetMenu::pot_limit_lean`] menu.
+    pub fn pot_limit_omaha_lean(big_blinds: u64) -> Self {
+        Self {
+            stack: 2 * big_blinds,
+            menu: BetMenu::pot_limit_lean(),
             pot_limit: true,
             ..Self::default()
         }
@@ -443,6 +467,11 @@ pub trait Buckets {
     fn hand_bucket(&self, hole: &[Card], board: &[Card]) -> u16;
     /// How many buckets there are with `board_len` board cards.
     fn bucket_count(&self, board_len: usize) -> usize;
+    /// The settings that shape the buckets, for a blueprint's settings
+    /// hash: two abstractions with the same text must bucket alike.
+    fn settings(&self) -> String {
+        String::new()
+    }
     /// Both players' buckets on every street for one deal. By default each
     /// is [`Buckets::hand_bucket`]; an abstraction whose work is mostly per
     /// board (Omaha's) does that work once here.
@@ -464,6 +493,10 @@ impl Buckets for CardAbstraction {
 
     fn bucket_count(&self, board_len: usize) -> usize {
         self.num_buckets(board_len)
+    }
+
+    fn settings(&self) -> String {
+        format!("{:?}", self.config)
     }
 }
 

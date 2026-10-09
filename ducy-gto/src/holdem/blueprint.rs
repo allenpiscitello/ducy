@@ -6,10 +6,7 @@
 //! a hash of the game and abstraction settings, so a blueprint is never used
 //! with a betting tree or card abstraction it wasn't trained for.
 
-use super::{
-    abstraction::CardAbstraction,
-    hunl::{Hunl, HunlConfig},
-};
+use super::hunl::{Buckets, Hunl, HunlConfig};
 use crate::profile::Profile;
 
 /// Why a blueprint couldn't be loaded.
@@ -33,9 +30,20 @@ pub struct Blueprint {
     probs: Vec<u8>,
 }
 
-/// A hash of everything that shapes the abstract game.
-pub fn settings_hash(game: &Hunl, cards: &CardAbstraction) -> u64 {
-    let text = format!("{}|{:?}|v1", config_text(&game.config), cards.config);
+/// A hash of everything that shapes the abstract game: the betting, the
+/// abstraction's settings ([`Buckets::settings`]) and, for Omaha, the
+/// number of hole cards.
+pub fn settings_hash<A: Buckets, const H: usize>(game: &Hunl<A, H>, cards: &A) -> u64 {
+    let holes = if H == 2 {
+        String::new()
+    } else {
+        format!("|holes={H}")
+    };
+    let text = format!(
+        "{}|{}|v1{holes}",
+        config_text(&game.config),
+        cards.settings()
+    );
     // FNV-1a.
     text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
         (h ^ b as u64).wrapping_mul(0x0100_0000_01b3)
@@ -55,13 +63,16 @@ pub fn config_text(c: &HunlConfig) -> String {
     }
 }
 
-fn layout(game: &Hunl, cards: &CardAbstraction) -> (Vec<u32>, Vec<u16>, Vec<u8>, usize) {
+fn layout<A: Buckets, const H: usize>(
+    game: &Hunl<A, H>,
+    cards: &A,
+) -> (Vec<u32>, Vec<u16>, Vec<u8>, usize) {
     let mut offsets = Vec::with_capacity(game.tree.nodes.len());
     let mut buckets = Vec::with_capacity(game.tree.nodes.len());
     let mut actions = Vec::with_capacity(game.tree.nodes.len());
     let mut at = 0usize;
     for n in &game.tree.nodes {
-        let b = cards.num_buckets([0, 3, 4, 5][n.betting.street]) as u16;
+        let b = cards.bucket_count([0, 3, 4, 5][n.betting.street]) as u16;
         offsets.push(at as u32);
         buckets.push(b);
         actions.push(n.actions.len() as u8);
@@ -91,7 +102,21 @@ fn quantize(p: &[f64], out: &mut [u8]) {
 impl Blueprint {
     /// Stores `profile` (e.g. a solver's average strategy). Information sets
     /// the profile doesn't have play uniformly.
-    pub fn from_profile(game: &Hunl, cards: &CardAbstraction, profile: &Profile<u64>) -> Self {
+    pub fn from_profile<A: Buckets, const H: usize>(
+        game: &Hunl<A, H>,
+        cards: &A,
+        profile: &Profile<u64>,
+    ) -> Self {
+        Self::from_strategy(game, cards, |info, k| profile.probs(&info, k))
+    }
+
+    /// Stores the strategy `strategy(node << 16 | bucket, actions)` gives,
+    /// e.g. a solver's average read directly, without building a profile.
+    pub fn from_strategy<A: Buckets, const H: usize>(
+        game: &Hunl<A, H>,
+        cards: &A,
+        strategy: impl Fn(u64, usize) -> Vec<f64>,
+    ) -> Self {
         let (offsets, buckets, actions, len) = layout(game, cards);
         let mut probs = vec![0u8; len];
         for (node, n) in game.tree.nodes.iter().enumerate() {
@@ -100,7 +125,7 @@ impl Blueprint {
                 continue;
             }
             for b in 0..buckets[node] as usize {
-                let p = profile.probs(&((node as u64) << 16 | b as u64), k);
+                let p = strategy((node as u64) << 16 | b as u64, k);
                 let at = offsets[node] as usize + b * k;
                 quantize(&p, &mut probs[at..at + k]);
             }
@@ -145,10 +170,10 @@ impl Blueprint {
     }
 
     /// Loads a blueprint saved for exactly this game and abstraction.
-    pub fn load(
+    pub fn load<A: Buckets, const H: usize>(
         bytes: &[u8],
-        game: &Hunl,
-        cards: &CardAbstraction,
+        game: &Hunl<A, H>,
+        cards: &A,
     ) -> Result<Self, BlueprintError> {
         use crate::key::{read_u64, take};
         let mut input = bytes;

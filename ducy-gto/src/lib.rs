@@ -39,6 +39,7 @@ mod mccfr;
 pub mod omaha;
 mod profile;
 mod rng;
+pub mod sampled;
 
 pub use cfr::{Cfr, Variant};
 pub use game::{Game, Turn};
