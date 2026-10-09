@@ -738,6 +738,10 @@ impl Buckets for PloAbstraction {
         }
     }
 
+    fn settings(&self) -> String {
+        format!("{:?}|plo-features-v1", self.config)
+    }
+
     fn deal_buckets(&self, hole: [&[Card]; 2], board: &[Card; 5]) -> [[u16; 4]; 2] {
         let mut out = [[0u16; 4]; 2];
         for (p, h) in hole.iter().enumerate() {
