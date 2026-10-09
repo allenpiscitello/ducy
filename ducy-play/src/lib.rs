@@ -83,7 +83,7 @@ pub use hand::{
 };
 pub use host::{
     ChipRequest, ChipsView, Command, DROP_AFTER_HANDS, Departure, MAX_NAME, Outgoing, Refund,
-    SeatStatus, SeatedPlayer, TableHost, Update,
+    SeatStatus, SeatedPlayer, TIME_BANK_MS, TIME_BANK_REFILL_MS, TableHost, Update,
 };
 pub use matchup::{MatchConfig, MatchResult, run_match};
 pub use personality::{Personality, PersonalityBot, Style, position_strength, scale_for_table};

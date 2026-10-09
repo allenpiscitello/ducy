@@ -154,6 +154,14 @@ pub struct PlayerSnapshot {
     pub(crate) out_by_choice: bool,
     /// How long they had been sitting out, if they were.
     pub(crate) out_ms: Option<u64>,
+    /// Time left in their time bank (full for a table saved before there was one).
+    #[cfg_attr(feature = "serde", serde(default = "full_time_bank"))]
+    pub(crate) time_bank_ms: u64,
+}
+
+#[cfg(feature = "serde")]
+fn full_time_bank() -> u64 {
+    crate::host::TIME_BANK_MS
 }
 
 /// A whole [`crate::TableHost`]: see [`crate::TableHost::snapshot`].
@@ -180,4 +188,7 @@ pub struct HostSnapshot {
     #[cfg_attr(feature = "serde", serde(default))]
     pub(crate) refunds: Vec<crate::Refund>,
     pub(crate) sit_out_limit_ms: u64,
+    /// A time bank running on this turn: whose, and how much was added.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) time_bank: Option<(String, u64)>,
 }

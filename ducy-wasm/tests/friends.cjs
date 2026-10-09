@@ -75,4 +75,13 @@ const cards = id => r.out.filter(m => m.to === id && m.data.type === "state").po
 assert.equal(cards("ann").length, 2, "they get their cards back");
 r = back.resume(t());
 assert.ok(!back.isPaused());
+
+// The time bank: a minute more on the clock for whoever's turn it is.
+const toAct = ["ann", "bo"][r.state.to_act];
+const myStatus = res => res.out.filter(m => m.to === toAct && m.data.type === "state").pop().data.me;
+const left = r.turnMsLeft;
+r = back.handle(toAct, { type: "time_bank" }, t());
+assert.equal(myStatus(r).time_bank_on, true);
+assert.equal(myStatus(r).time_bank_ms, 0);
+assert.ok(r.turnMsLeft >= left + 60000 - 20, `the clock got the bank (${left} → ${r.turnMsLeft})`);
 console.log("ok");
