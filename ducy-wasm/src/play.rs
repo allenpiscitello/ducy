@@ -383,7 +383,10 @@ impl BotTable {
         if small_blind == 0 || big_blind < small_blind || buy_in < big_blind {
             return Err(JsError::new("invalid blinds or buy-in"));
         }
-        let table = Table::new(rules, seats_for(&bots, seed)?, buy_in, seed).map_err(err)?;
+        let mut table = Table::new(rules, seats_for(&bots, seed)?, buy_in, seed).map_err(err)?;
+        // All-in with cards to come, the person may run it twice; the bots
+        // go along with whatever they choose.
+        table.set_run_it_twice(true);
         Ok(BotTable {
             table,
             reviews: ReviewLog::default(),
@@ -408,6 +411,12 @@ impl BotTable {
         if self.table.hand().is_none() {
             return Err(JsError::new("no hand dealt"));
         }
+        // Only bots left all-in: they run it once.
+        if self.bots_choose_runs() {
+            self.table.choose_runs(1).map_err(err)?;
+            self.keep_for_review();
+            return self.state();
+        }
         self.table.advance().map_err(err)?;
         self.keep_for_review();
         self.state()
@@ -430,7 +439,22 @@ impl BotTable {
     /// Whether it's a bot's turn (the page calls `advance` while this is true).
     #[wasm_bindgen(js_name = botToAct)]
     pub fn bot_to_act(&self) -> bool {
-        self.table.auto_to_act()
+        self.table.auto_to_act() || self.bots_choose_runs()
+    }
+
+    /// The person's answer when the hand asks whether to run it twice (the
+    /// state's `run_choice`): the bots go along with it.
+    #[wasm_bindgen(js_name = runTwice)]
+    pub fn run_twice(&mut self, yes: bool) -> Result<JsValue, JsError> {
+        match self.table.awaiting() {
+            Some(ducy_play::Awaiting::RunChoice(seats)) if seats.contains(&0) => {}
+            _ => return Err(JsError::new("there's nothing to choose")),
+        }
+        self.table
+            .choose_runs(if yes { 2 } else { 1 })
+            .map_err(err)?;
+        self.keep_for_review();
+        self.state()
     }
 
     /// What the person may see right now.
@@ -527,6 +551,11 @@ impl BotTable {
 }
 
 impl BotTable {
+    /// The hand asks whether to run it twice and the person isn't in it.
+    fn bots_choose_runs(&self) -> bool {
+        matches!(self.table.awaiting(), Some(ducy_play::Awaiting::RunChoice(seats)) if !seats.contains(&0))
+    }
+
     /// Whether the person plays the GTO bot heads-up, where review works.
     fn against_gto(&self) -> bool {
         self.table.num_seats() == 2 && self.table.seat(1).id == GTO_ID
@@ -607,8 +636,16 @@ struct HostResult<'a> {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum AwaitingOut {
-    Board { cards: usize },
-    Reveals { seats: Vec<usize> },
+    Board {
+        cards: usize,
+    },
+    Reveals {
+        seats: Vec<usize>,
+    },
+    /// Everyone left is all-in: these seats choose whether to run it twice.
+    RunChoice {
+        seats: Vec<usize>,
+    },
 }
 
 #[derive(Serialize)]
@@ -659,9 +696,10 @@ impl MultiTable {
         if !name.is_empty() {
             seats[0].name = name;
         }
-        let table = Table::new(rules, seats, buy_in, seed)
+        let mut table = Table::new(rules, seats, buy_in, seed)
             .map_err(err)?
             .with_secure_deals();
+        table.set_run_it_twice(true);
         let open = std::iter::once(false)
             .chain(open.iter().map(|&o| o != 0))
             .collect();
@@ -706,9 +744,10 @@ impl MultiTable {
             "you",
         )];
         all.extend((1..seats).map(|_| TableSeat::empty()));
-        let table = Table::new(rules, all, host_chips, seed)
+        let mut table = Table::new(rules, all, host_chips, seed)
             .map_err(err)?
             .with_secure_deals();
+        table.set_run_it_twice(true);
         let open = (0..seats).map(|s| s > 0).collect();
         let host = TableHost::new(table, open, turn_ms)
             .and_then(|h| h.with_bank(min_buy_in, max_buy_in))
@@ -741,9 +780,10 @@ impl MultiTable {
             return Err(JsError::new("a table seats 2 to 10"));
         }
         let all = (0..seats).map(|_| TableSeat::empty()).collect();
-        let table = Table::new(rules, all, min_buy_in, seed)
+        let mut table = Table::new(rules, all, min_buy_in, seed)
             .map_err(err)?
             .with_secure_deals();
+        table.set_run_it_twice(true);
         let host = TableHost::without_host(table, turn_ms, min_buy_in, max_buy_in).map_err(err)?;
         Ok(MultiTable { host })
     }
@@ -793,6 +833,7 @@ impl MultiTable {
                     },
                 },
                 ducy_play::Awaiting::Reveals(seats) => AwaitingOut::Reveals { seats },
+                ducy_play::Awaiting::RunChoice(seats) => AwaitingOut::RunChoice { seats },
             }),
         })
     }
@@ -886,6 +927,14 @@ impl MultiTable {
     /// can't win.
     pub fn forfeit(&mut self, seat: usize, now: f64) -> Result<JsValue, JsError> {
         let out = self.host.forfeit(seat, now as u64).map_err(err)?;
+        self.result(&out, now as u64)
+    }
+
+    /// The host's answer to running it twice (players send
+    /// {type: 'run_twice', yes}). Twice only if every person still in says yes.
+    #[wasm_bindgen(js_name = hostRunTwice)]
+    pub fn host_run_twice(&mut self, yes: bool, now: f64) -> Result<JsValue, JsError> {
+        let out = self.host.host_run_twice(yes, now as u64).map_err(err)?;
         self.result(&out, now as u64)
     }
 

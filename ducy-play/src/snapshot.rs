@@ -40,6 +40,12 @@ pub struct HandSnapshot {
     /// its events (the board so far, and hands shown at showdown).
     #[cfg_attr(feature = "serde", serde(default))]
     pub(crate) hidden: bool,
+    /// Running it twice was offered (see `Hand::offer_run_twice`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) run_offer: bool,
+    /// The rest of the deck after the board, in order: a second board's cards.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) rest: Vec<Card>,
 }
 
 /// One seat of a [`TableSnapshot`]. A bot isn't saved: the seat records that
@@ -78,6 +84,9 @@ pub struct TableSnapshot {
     /// "wait_for_big_blind"; or "arriving" for a newcomer not dealt in yet.
     pub(crate) returning: Vec<String>,
     pub(crate) last_blinds: Option<(usize, usize)>,
+    /// Players all-in may run it twice.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) run_it_twice: bool,
 }
 
 /// The tournament snapshot format: one with any other version is refused.

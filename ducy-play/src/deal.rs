@@ -65,6 +65,9 @@ impl Dealer for HiddenDeal {
 pub struct Deal {
     hole_cards: Vec<Deck>,
     board: [Card; 5],
+    /// The cards left in the deck after the board, in order: where a second
+    /// board comes from when players run it twice ([`crate::Hand::choose_runs`]).
+    rest: Vec<Card>,
 }
 
 impl Deal {
@@ -90,7 +93,33 @@ impl Deal {
             }
             seen |= card;
         }
-        Ok(Self { hole_cards, board })
+        // The rest of the deck in a fixed order.
+        let rest = Deck::all_cards()
+            .iter(false)
+            .filter(|c| !seen.has_card(c))
+            .collect();
+        Ok(Self {
+            hole_cards,
+            board,
+            rest,
+        })
+    }
+
+    /// Like [`Deal::new`], with the cards a second board comes from, in
+    /// order (as a saved hand recorded them). They must not be dealt already.
+    pub fn with_rest(mut self, rest: Vec<Card>) -> Result<Self, PlayError> {
+        let mut seen = Deck::empty();
+        for h in &self.hole_cards {
+            seen |= *h;
+        }
+        for &c in self.board.iter().chain(&rest) {
+            if seen.has_card(&c) {
+                return Err(PlayError::InvalidDeal);
+            }
+            seen |= c;
+        }
+        self.rest = rest;
+        Ok(self)
     }
 
     /// A shuffled deal for `players` players. Passing a `seed` makes it
@@ -135,9 +164,13 @@ impl Deal {
                 hand
             })
             .collect();
-        let board: Vec<Card> = next.take(5).collect();
+        let board: Vec<Card> = next.by_ref().take(5).collect();
         let board = board.try_into().map_err(|_| PlayError::NotEnoughCards)?;
-        Ok(Self { hole_cards, board })
+        Ok(Self {
+            hole_cards,
+            board,
+            rest: next.collect(),
+        })
     }
 
     /// Hole cards for each seat.
@@ -148,5 +181,10 @@ impl Deal {
     /// The full five-card board.
     pub fn board(&self) -> &[Card; 5] {
         &self.board
+    }
+
+    /// The cards left after the board, in order (see [`Deal::with_rest`]).
+    pub fn rest(&self) -> &[Card] {
+        &self.rest
     }
 }

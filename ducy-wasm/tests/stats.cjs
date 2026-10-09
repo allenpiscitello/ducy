@@ -47,6 +47,7 @@ for (let h = 0; h < 60; h++) {
   let s = table.newHand();
   for (let i = 0; i < 200 && !s.complete; i++) {
     if (table.botToAct()) s = table.advance();
+    else if (s.run_choice) s = table.runTwice(false);
     else {
       try { s = table.act("check", 0n); } catch { s = table.act("call", 0n); }
     }

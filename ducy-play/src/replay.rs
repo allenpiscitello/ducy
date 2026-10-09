@@ -169,6 +169,17 @@ pub fn replay_frames(events: &[Event], stacks: &[u64], names: &[String]) -> Vec<
                 format!("{} shows {}", name(seat), cards.join(" "))
             }
             Event::Forfeit { seat } => format!("{} doesn't show, and can't win", name(seat)),
+            Event::Runs { count } => {
+                if count == 2 {
+                    "They run it twice".to_string()
+                } else {
+                    "They run it once".to_string()
+                }
+            }
+            Event::SecondBoard { ref cards } => {
+                let cards: Vec<String> = cards.iter().map(|c| c.to_string()).collect();
+                format!("Second run: {}", cards.join(" "))
+            }
             Event::Board {
                 street: next,
                 ref cards,
