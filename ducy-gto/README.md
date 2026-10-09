@@ -588,6 +588,69 @@ The pot-limit tree with `BetMenu::pot_limit` is large: 263,364 nodes and
 take four or five rounds to get 100 BB in, where no-limit ends in an all-in.
 Training (#130) needs a leaner menu.
 
+### Training the blueprint (#130)
+
+```sh
+cargo run --release -p ducy-gto --example plo_abstraction -- --out plo-cards.bin
+cargo run --release -p ducy-gto --example train_plo -- \
+    --cards plo-cards.bin --bb 100 --iters 25000000 --every 5000000 \
+    --checkpoint plo.ckpt --snapshots snapshots/ --out plo-blueprint.bin
+```
+
+- **The game:** `HunlConfig::pot_limit_omaha_lean`, with the
+  `BetMenu::pot_limit_lean` menu:
+  - every preflop raise is pot-sized;
+  - after the flop, bet half the pot or the pot, and raise the pot.
+
+  At 100 BB it has 9,128 nodes; with the default abstraction, about 728,000
+  information sets and 15 MB of regrets.
+- **The blueprint:** stored in the Hold'em format (`Blueprint`, now generic
+  over the abstraction). Its settings hash includes the abstraction's
+  settings and the number of hole cards, so a PLO blueprint never loads as
+  a Hold'em one or for another depth.
+- **Measuring progress:** exact exploitability is out of reach, so
+  `ducy_gto::sampled` gives a sampled stand-in.
+  - **How it works:** a best response, restricted to the same buckets, is
+    fitted on sampled deals and measured on fresh ones.
+    `sampled_exploitability` measures both seats on the same deals, so the
+    luck of the cards largely cancels.
+  - **Checked:** it matches exact best responses on Kuhn and Leduc.
+  - **A lower bound:** the fitted response is only near-best, and it can
+    come out slightly negative once the strategy is better than it can
+    detect.
+
+**The 20 BB test game:** the small abstraction (100/50/50/50 buckets),
+56,400 information sets, about 7,800 iterations a second on 12 cores, and
+10 million iterations in 25 minutes. Its sampled exploitability (50,000
+paired deals) fell steadily, then hit the measure's floor:
+
+| Iterations | 250 k | 500 k | 2 M | 4 M | 6 M | 8 M | 10 M |
+|---|---|---|---|---|---|---|---|
+| mbb/hand (± 20) | 449 | 271 | 73 | 27 | 2 | −23 | −24 |
+
+**The 100 BB blueprint:**
+- **Size:** the default abstraction, 25 million iterations, about 90 minutes
+  at 4,200–5,000 iterations a second on 12 cores. The blueprint is 1.8 MB.
+- **Sampled exploitability doesn't work at this depth.** With 20,000 deals it
+  read −593 ± 123 mbb/hand: the deals are too noisy at 100 BB, and too few to
+  fit a best response over 728,000 information sets. So progress is
+  measured head to head instead: the final blueprint against its own
+  snapshots, 40,000–80,000 duplicate hands each.
+
+  | Final (25 M) vs | bb/100 (± 95%) |
+  |---|---|
+  | 10 M | +22.3 ± 14.0 |
+  | 15 M | +13.2 ± 7.4 |
+  | 20 M | +1.9 ± 8.2 |
+
+- **Preflop:** the button folds 8%, limps 36% and raises 55%. The big blind,
+  facing a pot-sized open, folds 37%, calls 46% and 3-bets 16%.
+- **A full-size run:** the Hold'em blueprint took 300 million iterations at
+  28,000 a second. The same count at this game's 5,000 a second would be
+  about 17 hours on 12 cores. The 100 BB blueprint here is a short run on a
+  modest abstraction; the gains against its snapshots are still shrinking,
+  so more training would help.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
