@@ -411,6 +411,68 @@ fn uncle_gary_will_not_fold_a_pair() {
 }
 
 #[test]
+fn a_bot_priced_into_a_pot_calls_instead_of_folding() {
+    // Seat 0 has put 800 of its 1,000 chips in; seat 1 shoves. Calling 200
+    // to win 2,000 needs 10% equity, and even 72o has more than that against
+    // the best hands: the tightest bot calls rather than fold.
+    let mut hand = nlhe(&["7c 2d", "As Ah"], "2c 7d 9h Jc 3s");
+    hand.act(Action::Raise(6)).unwrap(); // seat 0 opens
+    hand.act(Action::Raise(18)).unwrap(); // seat 1 re-raises
+    hand.act(Action::Raise(800)).unwrap(); // seat 0 puts most of its stack in
+    hand.act(Action::AllIn).unwrap(); // seat 1 shoves
+    let committed = hand.observation(0).unwrap();
+    for p in [
+        Personality::OldManCoffee,
+        Personality::BradOwned,
+        Personality::DougPoker,
+    ] {
+        let mut bot = with(p, |_| {});
+        assert_eq!(bot.act(&committed), Some(Action::Call), "{}", p.name());
+    }
+
+    // At a poor price the same hand still folds: a 6-chip open facing a
+    // shove for 1,000 needs about half the pot.
+    let mut hand = nlhe(&["7c 2d", "As Ah"], "2c 7d 9h Jc 3s");
+    hand.act(Action::Raise(6)).unwrap();
+    hand.act(Action::AllIn).unwrap();
+    let mut coffee = with(Personality::OldManCoffee, |_| {});
+    assert_eq!(
+        coffee.act(&hand.observation(0).unwrap()),
+        Some(Action::Fold)
+    );
+}
+
+/// Seat 0 with `hole` after a 100-chip raise and call, checked to the river,
+/// where seat 1 bets `bet` into the 200 pot.
+fn river_bet(hole: &str, bet: u64) -> ducy_play::Observation {
+    let mut hand = nlhe(&[hole, "As Ah"], "2c 7d 9h Jc 3s");
+    hand.act(Action::Raise(100)).unwrap();
+    hand.act(Action::Call).unwrap();
+    for _ in 0..2 {
+        hand.act(Action::Check).unwrap();
+        hand.act(Action::Check).unwrap();
+    }
+    hand.act(Action::Bet(bet)).unwrap();
+    hand.observation(0).unwrap()
+}
+
+#[test]
+fn some_prices_are_too_good_to_fold() {
+    // Tom Collins is the most cautious caller (call factor 1.3, caution
+    // 0.45). 8-high has about 7% on this river, Q-high about 18%.
+    let mut tom = with(Personality::TomCollins, |_| {});
+
+    // 20 into 200 (8% pot odds): every bot calls, even with air.
+    assert_eq!(tom.act(&river_bet("8h 6d", 20)), Some(Action::Call));
+    // 40 into 200 (14%): priced in, so caution can't ask for more than the
+    // odds; Q-high's 18% calls (before, it wanted 28%).
+    assert_eq!(tom.act(&river_bet("Qh 8d", 40)), Some(Action::Call));
+    // A pot-sized bet (33%): it still folds.
+    assert_eq!(tom.act(&river_bet("Qh 8d", 200)), Some(Action::Fold));
+    assert_eq!(tom.act(&river_bet("8h 6d", 200)), Some(Action::Fold));
+}
+
+#[test]
 fn tiny_four_bet_range_folds_to_four_bets() {
     let spot = |holes: &[&str]| {
         let mut hand = nlhe(holes, "2c 7d 9h Jc 3s");

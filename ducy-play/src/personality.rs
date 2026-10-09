@@ -727,6 +727,26 @@ pub const BASELINE_PLAYERS: usize = 9;
 /// The widest a preflop range gets, however short the table.
 const MAX_RANGE: f64 = 0.95;
 
+/// A starting hand's equity against the strongest hands, as a share of its
+/// equity against random ones, for a call that's priced in
+/// (`fold_unless_priced_in`). In Hold'em it's about 0.4 across the board:
+/// 72o has 34% against a random hand and 12–15% against the best, T9s 54%
+/// and about 22%, 22 50% and about 19%. Omaha hands run much closer.
+const STRONG_HOLDEM_SHARE: f64 = 0.4;
+const STRONG_OMAHA_SHARE: f64 = 0.6;
+
+/// Pot odds (the call's share of the pot after calling) at or below which
+/// every bot calls, on any street: a call of at most a ninth of the pot.
+const ALWAYS_CALL_ODDS: f64 = 0.1;
+
+/// Share of its stack at the start of the hand a bot has put in before
+/// preflop it calls whenever it's priced in against the strongest hands.
+const COMMITTED_SHARE: f64 = 0.25;
+
+/// Pot odds at or below which a bot after the flop wants no more equity than
+/// the bare odds, however cautious its style.
+const PRICED_IN_ODDS: f64 = 0.2;
+
 /// Widens a range share written for [`BASELINE_PLAYERS`] to a table of
 /// `players`: `1 - (1 - share)^(9 / players)`, at most 0.95.
 ///
@@ -984,7 +1004,7 @@ impl PersonalityBot {
             return if shove {
                 all_in(obs)
             } else {
-                check_or_fold(legal)
+                self.fold_unless_priced_in(obs, style)
             };
         }
 
@@ -1026,7 +1046,49 @@ impl PersonalityBot {
                 }
             }
         }
-        check_or_fold(legal)
+        self.fold_unless_priced_in(obs, style)
+    }
+
+    /// Folds, unless the price makes folding a mistake: always at
+    /// [`ALWAYS_CALL_ODDS`], and once it has [`COMMITTED_SHARE`] of its stack
+    /// in, whenever the share of the pot it must put in to call is below this
+    /// hand's equity against even the strongest hands. So a bot that has put
+    /// most of its stack in and faces a shove for the rest calls, instead of
+    /// folding a pot it's priced into.
+    fn fold_unless_priced_in(&mut self, obs: &Observation, style: &Style) -> Action {
+        let legal = &obs.legal;
+        if legal.can_check {
+            return Action::Check;
+        }
+        let Some(call) = legal.call else {
+            return Action::Fold;
+        };
+        let need = call as f64 / (obs.pot + call) as f64;
+        if need <= ALWAYS_CALL_ODDS {
+            return Action::Call;
+        }
+        // Cheap early spots (completing the small blind, a min-raise) are
+        // left to the style's ranges: there the price says nothing about
+        // being committed. And no hand is a favourite against the strongest
+        // hands by enough to call at worse than even money.
+        let me = &obs.seats[obs.seat];
+        let committed =
+            me.contributed as f64 >= COMMITTED_SHARE * (me.contributed + me.stack) as f64;
+        if !committed || need >= 0.5 {
+            return Action::Fold;
+        }
+        // Equity against random hands, scaled down to what it has against
+        // the strongest hands (starting hands run closer in Omaha).
+        let share = match obs.rules.variant {
+            Variant::Holdem => STRONG_HOLDEM_SHARE,
+            Variant::Omaha { .. } => STRONG_OMAHA_SHARE,
+        };
+        let equity = observation_equity(obs, style.samples.max(100), &mut self.rng);
+        if equity * share >= need {
+            Action::Call
+        } else {
+            Action::Fold
+        }
     }
 
     fn postflop(&mut self, obs: &Observation, style: &Style) -> Action {
@@ -1103,9 +1165,16 @@ impl PersonalityBot {
                 let pot_odds = call as f64 / (pot + call as f64);
                 // The bet as a fraction of the pot before it was made.
                 let bet_fraction = call as f64 / (pot - call as f64).max(1.0);
+                if pot_odds <= ALWAYS_CALL_ODDS {
+                    return Action::Call;
+                }
                 let mut needed = pot_odds * style.call_factor + style.caution * bet_fraction;
                 if has_pair(obs) {
                     needed *= style.pair_call_factor;
+                }
+                // Priced in: caution can't ask for more than the bare odds.
+                if pot_odds <= PRICED_IN_ODDS {
+                    needed = needed.min(pot_odds);
                 }
                 if equity >= needed {
                     Action::Call
@@ -1172,14 +1241,6 @@ fn passive(legal: &LegalActions) -> Action {
         Action::Check
     } else {
         Action::Call
-    }
-}
-
-fn check_or_fold(legal: &LegalActions) -> Action {
-    if legal.can_check {
-        Action::Check
-    } else {
-        Action::Fold
     }
 }
 

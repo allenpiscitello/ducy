@@ -128,7 +128,17 @@ and `from_name()` make it easy to list them in an app.
 **How they decide.**
 - *Preflop:* each bot ranks its hand among all starting hands of the game
   (`strength::preflop_percentile`, by heads-up equity against a random hand)
-  and plays, raises or re-raises the top shares its style allows.
+  and plays, raises or re-raises the top shares its style allows. A hand
+  outside them still calls rather than fold when it's priced in (below).
+- *Prices too good to fold:* on any street, every bot calls when the call is
+  at most 10% of the pot after calling (a ninth of the pot before it).
+  Preflop, a bot with a quarter or more of its stack in also calls whenever
+  the call is a smaller share of the pot than the hand's equity against even
+  the strongest hands (about 0.4 of its equity against random hands in
+  Hold'em, 0.6 in Omaha), so a bot that has put most of its stack in calls a
+  shove for the rest. After the flop, when the call is at most 20% of the
+  pot, caution and the call factor can't ask for more equity than the bare
+  odds.
 - *Table size and position:* the style's range shares are baselines for a
   full 9-handed table. Shorter tables widen them with
   `scale_for_table(share, players) = 1 - (1 - share)^(9 / players)`, so a 20%
