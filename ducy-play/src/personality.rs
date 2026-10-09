@@ -197,11 +197,16 @@ pub enum Personality {
     /// Wild and unpredictable: plays any suited hand, traps one hand and
     /// fires huge bluffs the next.
     Bungleman,
+    /// The table captain: raises nearly every pot nobody has raised, limped
+    /// ones included, and bets big whenever he's checked to. Pushes back, and
+    /// he gets out of the way: careful against a raise before the flop, and
+    /// folds to one after it unless he's strong.
+    TomCollins,
 }
 
 impl Personality {
     /// Every personality.
-    pub const ALL: [Personality; 15] = [
+    pub const ALL: [Personality; 16] = [
         Self::DougPoker,
         Self::OldManCoffee,
         Self::MisterCheating,
@@ -217,6 +222,7 @@ impl Personality {
         Self::BradOwned,
         Self::NikAirbag,
         Self::Bungleman,
+        Self::TomCollins,
     ];
 
     /// Display name, e.g. "Doug Poker".
@@ -237,6 +243,7 @@ impl Personality {
             Self::BradOwned => "Brad Owned",
             Self::NikAirbag => "Nik Airbag",
             Self::Bungleman => "Bungleman",
+            Self::TomCollins => "Tom Collins",
         }
     }
 
@@ -258,6 +265,7 @@ impl Personality {
             Self::BradOwned => "brad_owned",
             Self::NikAirbag => "nik_airbag",
             Self::Bungleman => "bungleman",
+            Self::TomCollins => "tom_collins",
         }
     }
 
@@ -289,6 +297,9 @@ impl Personality {
             }
             Self::NikAirbag => "Maniac: raises almost everything and bluffs huge.",
             Self::Bungleman => "Wild card: any suited hand, traps and huge bluffs.",
+            Self::TomCollins => {
+                "Table captain: takes charge of every pot, until someone pushes back."
+            }
         }
     }
 
@@ -310,6 +321,7 @@ impl Personality {
             Self::BradOwned => "Jacks again? Of course.",
             Self::NikAirbag => "Let's gamble.",
             Self::Bungleman => "I'm feeling it.",
+            Self::TomCollins => "I'll take that.",
         }
     }
 
@@ -544,6 +556,32 @@ impl Personality {
                 bet_size: 1.0,
                 heater: 0.2,
                 tilt: 0.2,
+                ..base
+            },
+            Self::TomCollins => Style {
+                // Raises nearly every unopened or limped pot: these widen to
+                // about 70% six-handed or on the button.
+                vpip: 0.57,
+                pfr: 0.55,
+                // Facing a raise he's careful: re-raises only his best hands
+                // and calls with few more.
+                three_bet: 0.05,
+                four_bet: 0.02,
+                defend: 0.3,
+                position_bonus: 0.25,
+                open_size: 3.0,
+                // Checked to, he bets: value hands always, and most of his
+                // air too, big.
+                value_margin: 0.05,
+                aggression: 1.0,
+                bluff: 0.65,
+                bet_size: 1.1,
+                // Raised after the flop, he gets out of the way unless he's
+                // strong: never bluff-raises, scared of bets, no sticky pairs.
+                bluff_raise: 0.0,
+                call_factor: 1.3,
+                pair_call_factor: 1.1,
+                caution: 0.45,
                 ..base
             },
         }

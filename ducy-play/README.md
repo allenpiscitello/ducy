@@ -103,9 +103,10 @@ PFR = hands raised preflop). Their range traits are written for a full
 | **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 33% / 23% | 22% |
 | **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 37% / 6% | 33% |
 | **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 23% / 18% | 31% |
-| **Brad Owned** | Fit-or-fold recreational: sees lots of flops, bets what he hits, gives up when he misses. Always plays pocket jacks. | 33% / 5% | 70% |
-| **Nik Airbag** | Maniac: raises almost everything, 3-bets wide, bluffs huge. | 65% / 46% | 12% |
-| **Bungleman** | Wild card: plays any suited hand, traps one hand and fires huge bluffs the next. | 55% / 29% | 16% |
+| **Brad Owned** | Fit-or-fold recreational: sees lots of flops, bets what he hits, gives up when he misses. Always plays pocket jacks. | 33% / 4% | 72% |
+| **Nik Airbag** | Maniac: raises almost everything, 3-bets wide, bluffs huge. | 67% / 48% | 14% |
+| **Bungleman** | Wild card: plays any suited hand, traps one hand and fires huge bluffs the next. | 56% / 31% | 15% |
+| **Tom Collins** | Table captain: raises nearly every pot nobody has raised and bets big whenever checked to, but careful against a raise before the flop and folds to one after it unless strong. | 43% / 34% | 62% |
 
 ```rust
 use ducy_play::{Bot, MatchConfig, Personality, TableRules, run_match};

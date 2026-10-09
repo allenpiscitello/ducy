@@ -463,6 +463,53 @@ fn lodge_regulars_play_their_styles() {
 }
 
 #[test]
+fn tom_collins_pushes_hard_and_gets_out_of_the_way() {
+    // The table captain against the maniac and two calling stations: he
+    // raises a lot and bets far more than he calls, but folds to bets far
+    // more often than the maniac does.
+    let rules = TableRules::no_limit_holdem(1, 2);
+    let lineup = [
+        Personality::TomCollins,
+        Personality::NikAirbag,
+        Personality::MilkKing,
+        Personality::UncleGary,
+    ];
+    let mut bots: Vec<PersonalityBot> = lineup
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| quick(p, 40 + i as u64))
+        .collect();
+    let n = bots.len();
+    let mut model = OpponentModel::new();
+    for h in 0..400 {
+        let deal = Deal::random(rules.variant, n, Some(900 + h)).unwrap();
+        let mut hand = Hand::new(rules, &vec![200; n], h as usize % n, deal).unwrap();
+        let mut seated: Vec<&mut dyn Bot> = bots.iter_mut().map(|b| b as &mut dyn Bot).collect();
+        play_hand(&mut hand, &mut seated).unwrap();
+        model.record(hand.events(), n);
+    }
+    let rate = |count: u32, total: u32| count as f64 / total.max(1) as f64;
+    let [tom, nik] = [0, 1].map(|s| model.seat(s));
+    let pfr = rate(tom.pfr_hands, tom.hands);
+    assert!(pfr > 0.25, "tom pfr {pfr}");
+    // Aggressive: bets and raises far more than he calls.
+    assert!(rate(tom.aggressive, tom.calls) > 3.0, "{tom:?}");
+    // Avoids trouble: folds to bets far more than the maniac.
+    let (tom_folds, nik_folds) = (
+        rate(tom.folds_to_bets, tom.faced_bets),
+        rate(nik.folds_to_bets, nik.faced_bets),
+    );
+    assert!(
+        tom_folds > nik_folds + 0.2,
+        "tom folds {tom_folds}, nik {nik_folds}"
+    );
+    assert_eq!(
+        Personality::from_name("tom_collins"),
+        Some(Personality::TomCollins)
+    );
+}
+
+#[test]
 fn brad_always_plays_jacks() {
     let jacks = nlhe(&["Jc Jd", "8s 3h"], "2c 7d 9h Qc 3s")
         .observation(0)
