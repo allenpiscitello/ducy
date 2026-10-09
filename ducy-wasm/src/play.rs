@@ -19,13 +19,16 @@ use std::{
     sync::Arc,
 };
 
-use ducy_gto::holdem::{
-    abstraction::CardAbstraction,
-    blueprint::Blueprint,
-    bot::{GtoBot, RiverSolving, TurnSolving},
-    hunl::{BettingTree, Hunl, HunlConfig},
-    range::BucketCache,
-    review::{HandRecord, HandReview, ReviewConfig, ReviewLog, Reviewer, SessionReview},
+use ducy_gto::{
+    holdem::{
+        abstraction::CardAbstraction,
+        blueprint::Blueprint,
+        bot::{GtoBot, RiverSolving, TurnSolving},
+        hunl::{BettingTree, HuPlo, Hunl, HunlConfig},
+        range::BucketCache,
+        review::{HandRecord, HandReview, ReviewConfig, ReviewLog, Reviewer, SessionReview},
+    },
+    omaha::{abstraction::PloAbstraction, bot::PloGtoBot},
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -222,8 +225,17 @@ const PAGE_RIVER_ITERATIONS: usize = 200;
 const PAGE_TURN_RIVER_SAMPLES: usize = 4;
 const PAGE_TURN_BIASES: bool = true;
 
+/// The PLO GTO bot's data, once the page has loaded it with `loadGtoPlo`.
+struct GtoPlo {
+    config: HunlConfig,
+    cards: Arc<PloAbstraction>,
+    blueprint: Arc<Blueprint>,
+    tree: Arc<BettingTree>,
+}
+
 thread_local! {
     static GTO: RefCell<Option<Gto>> = const { RefCell::new(None) };
+    static GTO_PLO: RefCell<Option<GtoPlo>> = const { RefCell::new(None) };
     static SOLVING: Cell<(usize, usize)> =
         const { Cell::new((PAGE_TURN_ITERATIONS, PAGE_RIVER_ITERATIONS)) };
     static TURN_OPTIONS: Cell<(usize, bool)> =
@@ -279,6 +291,57 @@ pub fn gto_loaded() -> bool {
     GTO.with(|g| g.borrow().is_some())
 }
 
+/// The id that seats the PLO GTO bot.
+const GTO_PLO_ID: &str = "gto-plo";
+
+/// Loads the PLO GTO bot: a heads-up pot-limit Omaha blueprint, the PLO
+/// card abstraction it was trained with, and the depth it was trained for
+/// in big blinds. After this, "gto-plo" can be used as a bot id at a "plo4"
+/// table. It plays the blueprint heads-up; at bigger tables, or with five or
+/// six hole cards, it falls back to a simple pot-odds rule.
+#[wasm_bindgen(js_name = loadGtoPlo)]
+pub fn load_gto_plo(cards: &[u8], blueprint: &[u8], big_blinds: u64) -> Result<(), JsError> {
+    let cards =
+        PloAbstraction::load(cards).ok_or_else(|| JsError::new("not a PLO card abstraction"))?;
+    let config = HunlConfig::pot_limit_omaha_lean(big_blinds);
+    let game = HuPlo::with_cards(config.clone(), Some(&cards));
+    let blueprint = Blueprint::load(blueprint, &game, &cards)
+        .map_err(|e| JsError::new(&format!("blueprint doesn't match: {e:?}")))?;
+    let tree = Arc::new(game.tree);
+    GTO_PLO.with(|g| {
+        *g.borrow_mut() = Some(GtoPlo {
+            config,
+            cards: Arc::new(cards),
+            blueprint: Arc::new(blueprint),
+            tree,
+        })
+    });
+    Ok(())
+}
+
+/// Whether `loadGtoPlo` has been called.
+#[wasm_bindgen(js_name = gtoPloLoaded)]
+pub fn gto_plo_loaded() -> bool {
+    GTO_PLO.with(|g| g.borrow().is_some())
+}
+
+fn gto_plo_seat(seed: u64) -> Result<TableSeat, JsError> {
+    GTO_PLO.with(|g| {
+        let g = g.borrow();
+        let g = g
+            .as_ref()
+            .ok_or_else(|| JsError::new("call loadGtoPlo first"))?;
+        let bot = PloGtoBot::from_parts(
+            g.config.clone(),
+            g.cards.clone(),
+            g.blueprint.clone(),
+            g.tree.clone(),
+            seed,
+        );
+        Ok(TableSeat::with_bot("GTO", GTO_PLO_ID, Box::new(bot)))
+    })
+}
+
 fn gto_seat(seed: u64) -> Result<TableSeat, JsError> {
     GTO.with(|g| {
         let g = g.borrow();
@@ -310,6 +373,10 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
             seats.push(gto_seat(seed.wrapping_add(i as u64 + 1))?);
             continue;
         }
+        if id == GTO_PLO_ID {
+            seats.push(gto_plo_seat(seed.wrapping_add(i as u64 + 1))?);
+            continue;
+        }
         let p =
             Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
         seats.push(TableSeat::bot(
@@ -325,6 +392,11 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
 fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
     if id == GTO_ID {
         return gto_seat(seed)?.bot.ok_or_else(|| JsError::new("no bot"));
+    }
+    if id == GTO_PLO_ID {
+        return gto_plo_seat(seed)?
+            .bot
+            .ok_or_else(|| JsError::new("no bot"));
     }
     let p = Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
     Ok(Box::new(p.bot(Some(seed))))

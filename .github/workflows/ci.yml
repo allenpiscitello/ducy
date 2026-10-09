@@ -50,3 +50,4 @@ jobs:
       - run: node ducy-wasm/tests/partial-board.cjs
       - run: cargo run -p ducy-gto --example tiny_model -- target/tiny-model
       - run: node ducy-wasm/tests/review.cjs
+      - run: node ducy-wasm/tests/gto-plo.cjs
