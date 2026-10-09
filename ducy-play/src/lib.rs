@@ -73,6 +73,7 @@ pub mod strength;
 pub mod structure;
 mod table;
 mod tournament;
+mod tournament_host;
 
 pub use bot::{Bot, HandOutcome, HandSummary, Observation, SeatView, fallback_action, play_hand};
 pub use deal::{Deal, Dealer, HiddenDeal};
@@ -98,3 +99,4 @@ pub use table::{SeatState, Table, TableSeat, TableView};
 pub use tournament::{
     Entrant, Finish, HandReport, Level, Move, SeatRef, Standing, Tournament, TournamentConfig,
 };
+pub use tournament_host::{TournamentEvents, TournamentHost};

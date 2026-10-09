@@ -1272,7 +1272,7 @@ impl TableHost {
     }
 }
 
-fn parse_action(kind: &str, amount: u64) -> Option<Action> {
+pub(crate) fn parse_action(kind: &str, amount: u64) -> Option<Action> {
     Some(match kind {
         "fold" => Action::Fold,
         "check" => Action::Check,
