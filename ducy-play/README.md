@@ -99,7 +99,7 @@ PFR = hands raised preflop). Their range traits are written for a full
 | **Rampart** | Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero calls, bolder on a heater. | 44% / 34% | 9% |
 | **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 36% / 22% | 27% |
 | **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 55% / 7% | 11% |
-| **Uncle Gary** | Loose-passive, and never folds a pair. | 47% / 3% | 18% |
+| **Robbi Jane Lewd** | Loose-passive hero caller, and never folds a pair. (Formerly Uncle Gary; the old id `uncle_gary` still works.) | 47% / 3% | 18% |
 | **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 33% / 23% | 22% |
 | **Lady Luck Linda** | Plays any suited hand and any ace, because they're pretty. | 37% / 6% | 33% |
 | **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 23% / 18% | 31% |

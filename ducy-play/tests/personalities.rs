@@ -385,7 +385,7 @@ fn gus_bluffsen_bets_air_and_checks_monsters() {
 }
 
 #[test]
-fn uncle_gary_will_not_fold_a_pair() {
+fn robbi_jane_lewd_will_not_fold_a_pair() {
     // River: seat 1 holds bottom pair and faces a 5x pot overbet.
     let mut hand = nlhe(&["Ac Ad", "3c 2d"], "Kd Qd Jc 9h 3s");
     to_flop(&mut hand);
@@ -400,14 +400,26 @@ fn uncle_gary_will_not_fold_a_pair() {
     hand.act(Action::Bet(20)).unwrap();
     let obs = hand.observation(1).unwrap();
 
-    let mut gary = with(Personality::UncleGary, |s| s.caution = 0.0);
-    assert_eq!(gary.act(&obs), Some(Action::Call));
-    let mut not_gary = with(Personality::UncleGary, |s| {
+    let mut robbi = with(Personality::RobbiJaneLewd, |s| s.caution = 0.0);
+    assert_eq!(robbi.act(&obs), Some(Action::Call));
+    let mut not_robbi = with(Personality::RobbiJaneLewd, |s| {
         s.caution = 0.0;
         s.pair_call_factor = 1.0;
         s.call_factor = 1.0;
     });
-    assert_eq!(not_gary.act(&obs), Some(Action::Fold));
+    assert_eq!(not_robbi.act(&obs), Some(Action::Fold));
+
+    // Saved tables and clubs from before the rename still find her.
+    for old in ["uncle_gary", "Uncle Gary"] {
+        assert_eq!(
+            Personality::from_name(old),
+            Some(Personality::RobbiJaneLewd)
+        );
+    }
+    assert_eq!(
+        Personality::from_name("robbi_jane_lewd"),
+        Some(Personality::RobbiJaneLewd)
+    );
 }
 
 #[test]
@@ -661,7 +673,7 @@ fn the_mathematician_plays_tight_raises_what_he_plays_and_never_tilts() {
         Personality::TheMathematician,
         Personality::MilkKing,
         Personality::NikAirbag,
-        Personality::UncleGary,
+        Personality::RobbiJaneLewd,
     ];
     let mut bots: Vec<PersonalityBot> = lineup
         .iter()
@@ -704,7 +716,7 @@ fn tom_collins_pushes_hard_and_gets_out_of_the_way() {
         Personality::TomCollins,
         Personality::NikAirbag,
         Personality::MilkKing,
-        Personality::UncleGary,
+        Personality::RobbiJaneLewd,
     ];
     let mut bots: Vec<PersonalityBot> = lineup
         .iter()
