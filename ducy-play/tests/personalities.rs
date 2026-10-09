@@ -3,7 +3,7 @@ use ducy_play::bots::CallingStation;
 use ducy_play::stats::OpponentModel;
 use ducy_play::strength::preflop_percentile;
 use ducy_play::{
-    Action, Bot, Deal, Hand, MatchConfig, Observation, Personality, PersonalityBot, Street,
+    Action, Bot, Deal, Event, Hand, MatchConfig, Observation, Personality, PersonalityBot, Street,
     TableRules, Variant, play_hand, run_match,
 };
 use rand::{SeedableRng, rngs::StdRng};
@@ -513,6 +513,81 @@ fn andrew_favorable_opens_up_in_omaha() {
         "Andrew opens up ({andrew}), Doug doesn't ({doug})"
     );
     assert_eq!(Personality::AndrewFavorable.catchphrase(), "Favorable.");
+}
+
+#[test]
+fn tommy_sweeden_check_raises_and_steams_after_losing() {
+    // Against two players who bet when checked to: Tommy check-raises far
+    // more often than Doug Poker, sitting at the same table.
+    let rules = TableRules::no_limit_holdem(1, 2);
+    let lineup = [
+        Personality::TommySweeden,
+        Personality::DougPoker,
+        Personality::TomCollins,
+        Personality::MisterCheating,
+    ];
+    let mut bots: Vec<PersonalityBot> = lineup
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| quick(p, 90 + i as u64))
+        .collect();
+    let n = bots.len();
+    let mut check_raises = vec![0; n];
+    // Times it checked and someone then bet: its chances to check-raise.
+    let mut chances = vec![0; n];
+    for h in 0..600 {
+        let deal = Deal::random(rules.variant, n, Some(1900 + h)).unwrap();
+        let mut hand = Hand::new(rules, &vec![200; n], h as usize % n, deal).unwrap();
+        let mut seated: Vec<&mut dyn Bot> = bots.iter_mut().map(|b| b as &mut dyn Bot).collect();
+        play_hand(&mut hand, &mut seated).unwrap();
+        // Checked, then raised on the same street after the flop.
+        let mut checked = vec![false; n];
+        let mut postflop = false;
+        for e in hand.events() {
+            match *e {
+                Event::Board { .. } => {
+                    postflop = true;
+                    checked = vec![false; n];
+                }
+                Event::Check { seat } if postflop => checked[seat] = true,
+                Event::Bet { seat: bettor, .. } => {
+                    for s in 0..n {
+                        if checked[s] && s != bettor {
+                            chances[s] += 1;
+                        }
+                    }
+                }
+                Event::Raise { seat, .. } if checked[seat] => {
+                    check_raises[seat] += 1;
+                    checked[seat] = false;
+                }
+                _ => {}
+            }
+        }
+    }
+    let rate = |s: usize| check_raises[s] as f64 / f64::from(chances[s].max(1));
+    let (tommy, doug) = (rate(0), rate(1));
+    println!("check-raises {check_raises:?} of chances {chances:?}");
+    assert!(
+        check_raises[0] >= 10 && tommy > 3.0 * doug,
+        "check-raise rate: Tommy {tommy:.2}, Doug {doug:.2}"
+    );
+
+    // A lost pot puts him on tilt: looser and lighter calls for a while.
+    let obs = nlhe(&["7c 2d", "8s 3h"], "2c 7d 9h Jc 3s")
+        .observation(0)
+        .unwrap();
+    let mut tommy = Personality::TommySweeden.bot(Some(1));
+    let calm = tommy.style_for(&obs);
+    tommy.hand_over(&summary_with_net(0, -100));
+    assert!(tommy.mood() > 0.4, "{}", tommy.mood());
+    let steaming = tommy.style_for(&obs);
+    assert!(steaming.vpip > calm.vpip && steaming.call_factor < calm.call_factor);
+    assert_eq!(
+        Personality::from_name("tommy_sweeden"),
+        Some(Personality::TommySweeden)
+    );
+    assert_eq!(Personality::TommySweeden.catchphrase(), "Go ahead, bet.");
 }
 
 #[test]

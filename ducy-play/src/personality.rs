@@ -77,6 +77,11 @@ pub struct Style {
     /// Chance it slow-plays a monster: checks it (before the river) to
     /// check-raise later, and raises when bet into.
     pub trap: f64,
+    /// Chance it checks a value hand (not only a monster) to check-raise,
+    /// when someone is still to act behind it. Having checked, when bet into
+    /// it raises its value hands (as often as it would have bet them), and
+    /// heads-up sometimes a weak one as a bluff.
+    pub check_raise: f64,
     /// Bets weak hands and checks strong ones: the bet-or-check decision is
     /// made as if its hand strength were flipped. Calling still uses its
     /// real strength.
@@ -145,6 +150,7 @@ impl Default for Style {
             value_margin: 0.12,
             aggression: 0.75,
             trap: 0.0,
+            check_raise: 0.0,
             backwards: false,
             bluff: 0.25,
             bluff_raise: 0.05,
@@ -216,11 +222,15 @@ pub enum Personality {
     /// Straightforward and reasonable, and happiest at the Omaha table: in
     /// pot-limit Omaha he plays more hands, and plays them harder.
     AndrewFavorable,
+    /// Aggressive, but a bit more careful than the loose-aggressive crowd:
+    /// raises a fair range, bets his good hands, and above all loves to
+    /// check-raise. Losing a pot gets to him, and he steams for a while.
+    TommySweeden,
 }
 
 impl Personality {
     /// Every personality.
-    pub const ALL: [Personality; 18] = [
+    pub const ALL: [Personality; 19] = [
         Self::DougPoker,
         Self::OldManCoffee,
         Self::MisterCheating,
@@ -239,6 +249,7 @@ impl Personality {
         Self::TomCollins,
         Self::TheMathematician,
         Self::AndrewFavorable,
+        Self::TommySweeden,
     ];
 
     /// Display name, e.g. "Doug Poker".
@@ -262,6 +273,7 @@ impl Personality {
             Self::TomCollins => "Tom Collins",
             Self::TheMathematician => "The Mathematician",
             Self::AndrewFavorable => "Andrew Favorable",
+            Self::TommySweeden => "Tommy Sweeden",
         }
     }
 
@@ -286,6 +298,7 @@ impl Personality {
             Self::TomCollins => "tom_collins",
             Self::TheMathematician => "the_mathematician",
             Self::AndrewFavorable => "andrew_favorable",
+            Self::TommySweeden => "tommy_sweeden",
         }
     }
 
@@ -326,6 +339,9 @@ impl Personality {
             Self::AndrewFavorable => {
                 "Straightforward and reasonable; loves PLO, where he plays more hands and plays them harder."
             }
+            Self::TommySweeden => {
+                "Aggressive but careful; loves a check-raise, and steams after a lost pot."
+            }
         }
     }
 
@@ -352,6 +368,7 @@ impl Personality {
                 "Every time you play differently from how you would if you could see my cards, I gain."
             }
             Self::AndrewFavorable => "Favorable.",
+            Self::TommySweeden => "Go ahead, bet.",
         }
     }
 
@@ -665,6 +682,35 @@ impl Personality {
                 omaha: 0.5,
                 ..base
             },
+            Self::TommySweeden => Style {
+                // Aggressive, but picks his spots: a fair range, raised
+                // more often than called.
+                vpip: 0.19,
+                pfr: 0.16,
+                three_bet: 0.06,
+                four_bet: 0.03,
+                defend: 0.5,
+                position_bonus: 0.4,
+                open_size: 3.0,
+                value_margin: 0.1,
+                aggression: 0.85,
+                // His move: checks a good hand to raise when bet into, and
+                // sometimes a bad one heads-up.
+                check_raise: 0.6,
+                trap: 0.15,
+                bluff: 0.25,
+                bluff_raise: 0.06,
+                bet_size: 0.75,
+                // More careful than most aggressive players: bets scare him
+                // a little, and he doesn't pay off with weak pairs.
+                call_factor: 1.15,
+                pair_call_factor: 1.1,
+                caution: 0.35,
+                // A lost pot gets to him, and it takes a while to wear off.
+                tilt: 0.45,
+                recovery: 0.12,
+                ..base
+            },
         }
     }
 
@@ -770,6 +816,9 @@ pub struct PersonalityBot {
     model: OpponentModel,
     mood: f64,
     favorites: Option<(Variant, Favorites)>,
+    /// The street it last checked on this hand, while it hasn't raised
+    /// since: bet into then, it's in a spot to check-raise.
+    checked: Option<Street>,
 }
 
 impl PersonalityBot {
@@ -782,6 +831,7 @@ impl PersonalityBot {
             model: OpponentModel::new(),
             mood: 0.0,
             favorites: None,
+            checked: None,
         }
     }
 
@@ -996,6 +1046,14 @@ impl PersonalityBot {
                     // Slow-play: check now, raise if bet into.
                     return Action::Check;
                 }
+                if style.check_raise > 0.0
+                    && bet_edge >= style.value_margin
+                    && acts_after(obs)
+                    && self.chance(style.check_raise)
+                {
+                    // Check, to raise when someone behind bets.
+                    return Action::Check;
+                }
                 if bet_edge >= style.value_margin && self.chance(style.aggression) {
                     if let Some(action) = bet(legal, size) {
                         return action;
@@ -1022,7 +1080,22 @@ impl PersonalityBot {
                         return action;
                     }
                 }
-                if bet_edge < 0.0 && players <= 2 && self.chance(style.bluff_raise) {
+                // Checked this street and now bet into: the check-raise.
+                let check_raising = style.check_raise > 0.0 && self.checked == Some(obs.street);
+                if check_raising
+                    && bet_edge >= style.value_margin
+                    && self.chance(style.aggression.max(style.check_raise))
+                {
+                    if let Some(action) = raise_to(legal, raise_size) {
+                        return action;
+                    }
+                }
+                let bluff_raise = if check_raising {
+                    style.bluff_raise + 0.3 * style.check_raise
+                } else {
+                    style.bluff_raise
+                };
+                if bet_edge < 0.0 && players <= 2 && self.chance(bluff_raise) {
                     if let Some(action) = raise_to(legal, raise_size) {
                         return action;
                     }
@@ -1047,14 +1120,24 @@ impl PersonalityBot {
 impl Bot for PersonalityBot {
     fn act(&mut self, obs: &Observation) -> Option<Action> {
         let style = self.style_for(obs);
-        Some(if obs.street == Street::Preflop {
+        if obs.street == Street::Preflop {
+            self.checked = None;
+        }
+        let action = if obs.street == Street::Preflop {
             self.preflop(obs, &style)
         } else {
             self.postflop(obs, &style)
-        })
+        };
+        match action {
+            Action::Check => self.checked = Some(obs.street),
+            Action::Bet(_) | Action::Raise(_) => self.checked = None,
+            _ => {}
+        }
+        Some(action)
     }
 
     fn hand_over(&mut self, summary: &HandSummary) {
+        self.checked = None;
         if self.style.exploit {
             self.model
                 .record(&summary.history, summary.result.final_stacks.len());
@@ -1070,6 +1153,18 @@ impl Bot for PersonalityBot {
         };
         self.mood = self.mood.clamp(0.0, 1.0);
     }
+}
+
+/// Whether anyone still able to bet acts after `obs.seat` on this street
+/// (after the flop, action starts left of the button).
+fn acts_after(obs: &Observation) -> bool {
+    let n = obs.seats.len();
+    let order = |s: usize| (s + n - obs.button - 1) % n;
+    let me = order(obs.seat);
+    obs.seats
+        .iter()
+        .enumerate()
+        .any(|(s, v)| s != obs.seat && !v.folded && !v.all_in && order(s) > me)
 }
 
 fn passive(legal: &LegalActions) -> Action {
