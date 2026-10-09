@@ -30,6 +30,8 @@
 //! a PLO blueprint or `train_plo` checkpoint, and `--bb N` the depth it was
 //! trained for (default 100). The bot is `omaha::bot::PloGtoBot`, against
 //! itself, `EquityBot`, a calling station and every personality bot.
+//! `--river-solve N` makes it solve the river in real time (#132); `--only
+//! self` is then river solving against the blueprint.
 
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Instant};
 
@@ -42,7 +44,7 @@ use ducy_gto::{
         hunl::{BettingTree, HuPlo, Hunl, HunlConfig},
         lbr::{LbrResult, lbr_hands_solving},
     },
-    omaha::{abstraction::PloAbstraction, bot::PloGtoBot},
+    omaha::{abstraction::PloAbstraction, bot::PloGtoBot, river::PloRiverSolving},
 };
 use ducy_play::{
     Bot, MatchConfig, TableRules,
@@ -90,6 +92,7 @@ fn main() {
             deals,
             seed,
             only.as_deref(),
+            river,
         );
         return;
     }
@@ -222,7 +225,9 @@ fn main() {
     }
 }
 
-/// Duplicate matches between the PLO blueprint and every PLO opponent.
+/// Duplicate matches between the PLO blueprint and every PLO opponent;
+/// with `river` iterations, the measured bot solves the river in real time
+/// (the opponents, `self` included, keep playing the blueprint).
 fn plo_match(
     cards_path: &str,
     blueprint_path: &str,
@@ -230,6 +235,7 @@ fn plo_match(
     deals: usize,
     seed: u64,
     only: Option<&str>,
+    river: usize,
 ) {
     let cards = Arc::new(
         PloAbstraction::load(&std::fs::read(cards_path).expect("read --cards"))
@@ -302,7 +308,10 @@ fn plo_match(
         let mut rates = Vec::with_capacity(BLOCKS);
         let mut hands = 0;
         let off_tree = Rc::new(Cell::new(0));
-        let me = Watched(gto(1000), off_tree.clone());
+        let me = Watched(
+            gto(1000).with_river_solving(PloRiverSolving::new(river)),
+            off_tree.clone(),
+        );
         let mut bots: Vec<Box<dyn Bot>> = vec![Box::new(me), make(2000)];
         for b in 0..BLOCKS {
             let m = MatchConfig::new(rules, per_block, 7919 * b as u64 + 1)
