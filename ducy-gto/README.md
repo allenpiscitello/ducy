@@ -369,6 +369,49 @@ the review time per decision on each street. `GtoBot` should be charged
 about nothing, and the bots it beats most (`gto_match`) should be charged
 the most.
 
+#### Results
+
+With the `gto-hunl-300m` model, 200 hands per opponent (`--hands 200`).
+"Charged" is what the review says each opponent's decisions cost, in big
+blinds. "GtoBot's match result" is what GtoBot actually won against the same
+bot over 10,000 duplicate deals with `gto_match`, on the same model, ± its
+95% interval:
+
+| Opponent | Decisions | Charged (bb/100) | Charged (bb/decision) | Graded fine | Mistakes + blunders | GtoBot's match result (bb/100) |
+|---|---:|---:|---:|---:|---:|---:|
+| GtoBot itself | 558 | 15.4 | 0.055 | 99% | 3 | 2.5 ± 18.2 |
+| calling station | 901 | 275.9 | 0.612 | 82% | 67 | 258.8 ± 49.2 |
+| milk_king | 832 | 250.3 | 0.602 | 84% | 63 | 202.8 ± 44.0 |
+| chris_moneybags | 700 | 195.3 | 0.558 | 86% | 41 | 162.8 ± 36.5 |
+| nik_airbag | 382 | 191.6 | 1.003 | 71% | 46 | 116.0 ± 60.0 |
+| mister_cheating | 461 | 179.7 | 0.780 | 83% | 35 | 92.9 ± 35.8 |
+| rampart | 419 | 168.7 | 0.805 | 77% | 40 | 190.0 ± 51.6 |
+| danny_smallball | 573 | 138.9 | 0.485 | 88% | 27 | 51.3 ± 27.2 |
+| uncle_gary | 793 | 114.4 | 0.289 | 88% | 33 | 79.6 ± 34.1 |
+| bungleman | 471 | 110.0 | 0.467 | 81% | 38 | 170.6 ± 41.5 |
+| michael_miserable | 459 | 98.5 | 0.429 | 85% | 17 | 62.6 ± 26.2 |
+| doug_poker | 454 | 79.4 | 0.350 | 85% | 21 | 64.0 ± 26.2 |
+| EquityBot | 812 | 68.3 | 0.168 | 86% | 37 | 86.1 ± 33.7 |
+| gus_bluffsen | 491 | 67.0 | 0.273 | 86% | 27 | 70.2 ± 27.3 |
+| phil_bigmouth | 435 | 59.9 | 0.275 | 82% | 18 | 61.6 ± 23.3 |
+| brad_owned | 598 | 51.1 | 0.171 | 89% | 27 | 38.6 ± 21.6 |
+| lady_luck_linda | 474 | 25.2 | 0.106 | 84% | 9 | 83.5 ± 26.8 |
+| old_man_coffee | 419 | 17.4 | 0.083 | 77% | 6 | 28.5 ± 11.2 |
+
+What it shows:
+- **GtoBot reviewing itself** is charged 0.055 bb per decision, with 99% of its decisions graded fine. Every bot is charged more per decision: from 1.5 times as much (old_man_coffee) to 18 times (nik_airbag).
+  - Much of its 15.4 bb/100 comes from 3 blunders in 558 decisions, each at least 4 bb. Most likely these are rare branches of its mixed strategy that the review scores lower, because it values the rest of the hand by the blueprint. Those hands weren't inspected (`--only self --show N` prints them).
+  - The cautious old_man_coffee is charged about as little per hand (17.4 bb/100), because it makes fewer decisions, but 1.5 times as much per decision (0.083).
+- **The ranking matches the matches.** Across the 17 bots, the charge and GtoBot's match result agree with a rank correlation of 0.76 (Spearman) and a linear correlation of 0.82 (Pearson):
+  - the bots charged most (the calling station, then milk_king) are the two GtoBot beats by the most;
+  - the bot charged least, old_man_coffee, is the one it beats by the least.
+- **Where they disagree,** the review charges more than the match shows (mister_cheating, danny_smallball, nik_airbag) or less (bungleman, lady_luck_linda). The causes:
+  - 200 hands is a small sample;
+  - the review charges each decision against GtoBot's continuation, not against what each bot goes on to do;
+  - a bot can play badly in ways GtoBot doesn't fully exploit.
+- **Luck stays out of it.** What the opponents actually won over these 200 hands ranged from −257 to +141 bb/100, unrelated to their play. That's why the review charges decisions, not results.
+- **Speed:** on one core, a flop decision takes about 0.7 s to review, a turn decision about 0.09 s and a river decision under a millisecond.
+
 ## Solving the turn, depth-limited
 
 Solving the turn exactly would mean solving all 48 rivers behind it as well.
