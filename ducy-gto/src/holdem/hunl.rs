@@ -18,7 +18,7 @@
 
 use super::{
     abstraction::CardAbstraction,
-    cards::{Card, NUM_CARDS, bit, mask, score},
+    cards::{Card, NUM_CARDS, bit, showdown_score},
 };
 use crate::{
     game::{Game, Turn},
@@ -69,6 +69,29 @@ impl Default for BetMenu {
     }
 }
 
+impl BetMenu {
+    /// For pot-limit Omaha. Preflop: open to 2.5 big blinds or the pot (3
+    /// heads-up), 3-bet the pot or ⅔ of it, 4-bet the pot, then the pot again.
+    /// After the flop: bet a third, half, two thirds or the pot, raise ⅔ or the
+    /// pot, then the pot. `Pot(1.0)` and `AllIn` both mean the largest legal
+    /// bet, so all-in is only on offer once the pot covers the stack.
+    pub fn pot_limit() -> Self {
+        use Size::*;
+        Self {
+            preflop: vec![
+                vec![Bb(2.5), Pot(1.0)],
+                vec![Pot(0.67), Pot(1.0)],
+                vec![Pot(1.0)],
+            ],
+            postflop: vec![
+                vec![Pot(0.33), Pot(0.5), Pot(0.67), Pot(1.0)],
+                vec![Pot(0.67), Pot(1.0)],
+                vec![Pot(1.0)],
+            ],
+        }
+    }
+}
+
 /// Blinds, stacks and bet sizes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HunlConfig {
@@ -77,16 +100,35 @@ pub struct HunlConfig {
     /// Each player's stack at the start of a hand, blinds included.
     pub stack: u64,
     pub menu: BetMenu,
+    /// Pot-limit: no bet or raise bigger than the pot after calling, as in
+    /// ducy-play's [`BettingStructure::PotLimit`]. All-in is then only legal
+    /// when it fits under that. Otherwise no-limit.
+    ///
+    /// [`BettingStructure::PotLimit`]: ducy_play::BettingStructure::PotLimit
+    pub pot_limit: bool,
+}
+
+impl HunlConfig {
+    /// Heads-up pot-limit Omaha: blinds 1/2, 100 big blind stacks, the
+    /// [`BetMenu::pot_limit`] menu.
+    pub fn pot_limit_omaha() -> Self {
+        Self {
+            menu: BetMenu::pot_limit(),
+            pot_limit: true,
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for HunlConfig {
-    /// Blinds 1/2, 100 big blind stacks, the default menu.
+    /// No-limit, blinds 1/2, 100 big blind stacks, the default menu.
     fn default() -> Self {
         Self {
             small_blind: 1,
             big_blind: 2,
             stack: 200,
             menu: BetMenu::default(),
+            pot_limit: false,
         }
     }
 }
@@ -189,6 +231,17 @@ impl Betting {
         self.street_bet[self.to_act] + self.stack[self.to_act]
     }
 
+    /// The largest legal bet or raise: all-in, or under pot-limit the pot
+    /// after calling if that's less.
+    pub fn max_to(&self, pot_limit: bool) -> u64 {
+        let all_in = self.all_in_to();
+        if pot_limit {
+            all_in.min(self.current_bet + self.pot() + self.to_call())
+        } else {
+            all_in
+        }
+    }
+
     /// The smallest legal bet or raise (all-in if that's less).
     pub fn min_to(&self) -> u64 {
         (self.current_bet + self.last_raise).min(self.all_in_to())
@@ -215,8 +268,9 @@ impl Betting {
         if !self.can_raise() {
             return out;
         }
-        let all_in = self.all_in_to();
-        let min_to = self.min_to();
+        // Under pot-limit the cap is the pot, and all-in means the cap.
+        let all_in = self.max_to(c.pot_limit);
+        let min_to = self.min_to().min(all_in);
         let menu = if self.street == 0 {
             &c.menu.preflop
         } else {
@@ -381,12 +435,32 @@ impl BettingTree {
     }
 }
 
+/// How the abstract game sees the cards: a bucket for a hand on a board.
+/// Hold'em's [`CardAbstraction`] is one; Omaha brings its own.
+pub trait Buckets {
+    /// The bucket of `hole` on `board` (0, 3, 4 or 5 cards).
+    fn hand_bucket(&self, hole: &[Card], board: &[Card]) -> u16;
+    /// How many buckets there are with `board_len` board cards.
+    fn bucket_count(&self, board_len: usize) -> usize;
+}
+
+impl Buckets for CardAbstraction {
+    fn hand_bucket(&self, hole: &[Card], board: &[Card]) -> u16 {
+        self.bucket([hole[0], hole[1]], board)
+    }
+
+    fn bucket_count(&self, board_len: usize) -> usize {
+        self.num_buckets(board_len)
+    }
+}
+
 /// A hand in the abstract game: the deal, each player's buckets, and where
-/// the betting is.
+/// the betting is. `H` is the number of hole cards: 2 for Hold'em (the
+/// default), 4 to 6 for Omaha.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HunlState {
+pub struct HunlState<const H: usize = 2> {
     /// Hole cards for player 0 and 1, and the whole board, dealt at the root.
-    pub hole: [[Card; 2]; 2],
+    pub hole: [[Card; H]; 2],
     pub board: [Card; 5],
     /// Each player's bucket on each street.
     pub buckets: [[u16; 4]; 2],
@@ -397,17 +471,30 @@ pub struct HunlState {
     dealt: bool,
 }
 
-/// Heads-up no-limit Hold'em, abstracted.
-pub struct Hunl<'a> {
+/// Heads-up no-limit Hold'em, abstracted; or, with `H` hole cards and an
+/// Omaha abstraction `A`, heads-up Omaha (see [`Hunl::with_cards`]).
+pub struct Hunl<'a, A = CardAbstraction, const H: usize = 2> {
     pub config: HunlConfig,
     /// `None` puts every hand in bucket 0: just the betting tree, for tests
     /// and tree statistics.
-    pub cards: Option<&'a CardAbstraction>,
+    pub cards: Option<&'a A>,
     pub tree: BettingTree,
 }
 
+/// Heads-up Omaha with four hole cards, abstracted by `A`.
+pub type HuPlo<'a, A> = Hunl<'a, A, 4>;
+
 impl<'a> Hunl<'a> {
+    /// Hold'em with Hold'em's card abstraction.
     pub fn new(config: HunlConfig, cards: Option<&'a CardAbstraction>) -> Self {
+        Self::with_cards(config, cards)
+    }
+}
+
+impl<'a, A: Buckets, const H: usize> Hunl<'a, A, H> {
+    /// The game for any hole-card count and abstraction, e.g.
+    /// `HuPlo::with_cards(config, Some(&omaha_buckets))`.
+    pub fn with_cards(config: HunlConfig, cards: Option<&'a A>) -> Self {
         let tree = BettingTree::build(&config);
         Self {
             config,
@@ -417,18 +504,17 @@ impl<'a> Hunl<'a> {
     }
 
     /// A hand with these cards dealt and the blinds posted.
-    pub fn deal(&self, hole: [[Card; 2]; 2], board: [Card; 5]) -> HunlState {
+    pub fn deal(&self, hole: [[Card; H]; 2], board: [Card; 5]) -> HunlState<H> {
         let mut buckets = [[0u16; 4]; 2];
         if let Some(cards) = self.cards {
             for (p, b) in buckets.iter_mut().enumerate() {
                 for (street, n) in [0usize, 3, 4, 5].into_iter().enumerate() {
-                    b[street] = cards.bucket(hole[p], &board[..n]);
+                    b[street] = cards.hand_bucket(&hole[p], &board[..n]);
                 }
             }
         }
-        let bm = mask(&board);
-        let mine = score(bm | bit(hole[0][0]) | bit(hole[0][1]));
-        let theirs = score(bm | bit(hole[1][0]) | bit(hole[1][1]));
+        let mine = showdown_score(&hole[0], &board);
+        let theirs = showdown_score(&hole[1], &board);
         HunlState {
             hole,
             board,
@@ -439,17 +525,17 @@ impl<'a> Hunl<'a> {
         }
     }
 
-    pub fn node(&self, s: &HunlState) -> &Node {
+    pub fn node(&self, s: &HunlState<H>) -> &Node {
         &self.tree.nodes[s.node as usize]
     }
 
     /// The betting at `s`.
-    pub fn betting(&self, s: &HunlState) -> &Betting {
+    pub fn betting(&self, s: &HunlState<H>) -> &Betting {
         &self.node(s).betting
     }
 
     /// The actions open at `s`, in action-index order.
-    pub fn actions(&self, s: &HunlState) -> &[HunlAction] {
+    pub fn actions(&self, s: &HunlState<H>) -> &[HunlAction] {
         &self.node(s).actions
     }
 
@@ -459,16 +545,19 @@ impl<'a> Hunl<'a> {
     }
 }
 
-impl Game for Hunl<'_> {
-    type State = HunlState;
+impl<A: Buckets, const H: usize> Game for Hunl<'_, A, H> {
+    type State = HunlState<H>;
     /// `node << 16 | bucket`: the betting so far and the player's bucket on
     /// this street.
     type Info = u64;
 
-    fn root(&self) -> HunlState {
+    fn root(&self) -> HunlState<H> {
         HunlState {
-            hole: [[0, 1], [2, 3]],
-            board: [4, 5, 6, 7, 8],
+            hole: [
+                std::array::from_fn(|i| i as Card),
+                std::array::from_fn(|i| (H + i) as Card),
+            ],
+            board: std::array::from_fn(|i| (2 * H + i) as Card),
             buckets: [[0; 4]; 2],
             node: 0,
             showdown: 0,
@@ -476,7 +565,7 @@ impl Game for Hunl<'_> {
         }
     }
 
-    fn turn(&self, s: &HunlState) -> Turn {
+    fn turn(&self, s: &HunlState<H>) -> Turn {
         if !s.dealt {
             return Turn::Chance;
         }
@@ -488,7 +577,7 @@ impl Game for Hunl<'_> {
         }
     }
 
-    fn utility(&self, s: &HunlState) -> f64 {
+    fn utility(&self, s: &HunlState<H>) -> f64 {
         let b = self.betting(s);
         if let Some(p) = b.folded {
             return if p == 0 {
@@ -501,40 +590,37 @@ impl Game for Hunl<'_> {
     }
 
     /// Too many deals to list; see [`Game::sample_chance`].
-    fn chance_outcomes(&self, _: &HunlState) -> Vec<(HunlState, f64)> {
+    fn chance_outcomes(&self, _: &HunlState<H>) -> Vec<(HunlState<H>, f64)> {
         Vec::new()
     }
 
-    fn sample_chance(&self, _: &HunlState, rng: &mut Rng) -> HunlState {
-        let mut cards = [0u8; 9];
+    /// Both hands, then the board: the same draws as before for Hold'em, so
+    /// seeded training is unchanged.
+    fn sample_chance(&self, _: &HunlState<H>, rng: &mut Rng) -> HunlState<H> {
         let mut used = 0u64;
-        for c in cards.iter_mut() {
-            loop {
-                let x = (rng.next_u64() % NUM_CARDS as u64) as Card;
-                if used & bit(x) == 0 {
-                    used |= bit(x);
-                    *c = x;
-                    break;
-                }
+        let mut draw = || loop {
+            let x = (rng.next_u64() % NUM_CARDS as u64) as Card;
+            if used & bit(x) == 0 {
+                used |= bit(x);
+                return x;
             }
-        }
-        self.deal(
-            [[cards[0], cards[1]], [cards[2], cards[3]]],
-            [cards[4], cards[5], cards[6], cards[7], cards[8]],
-        )
+        };
+        let hole: [[Card; H]; 2] = std::array::from_fn(|_| std::array::from_fn(|_| draw()));
+        let board: [Card; 5] = std::array::from_fn(|_| draw());
+        self.deal(hole, board)
     }
 
-    fn num_actions(&self, s: &HunlState) -> usize {
+    fn num_actions(&self, s: &HunlState<H>) -> usize {
         self.node(s).actions.len()
     }
 
-    fn apply(&self, s: &HunlState, action: usize) -> HunlState {
+    fn apply(&self, s: &HunlState<H>, action: usize) -> HunlState<H> {
         let mut n = s.clone();
         n.node = self.node(s).children[action];
         n
     }
 
-    fn info(&self, s: &HunlState) -> u64 {
+    fn info(&self, s: &HunlState<H>) -> u64 {
         let b = self.betting(s);
         let bucket = s.buckets[b.to_act][b.street];
         (s.node as u64) << 16 | bucket as u64
@@ -551,20 +637,20 @@ pub struct TreeStats {
 
 impl TreeStats {
     /// Information sets per street: betting sequences times buckets.
-    pub fn infosets(&self, cards: &CardAbstraction) -> [u64; 4] {
+    pub fn infosets(&self, cards: &impl Buckets) -> [u64; 4] {
         let mut out = [0; 4];
         for (street, n) in [0usize, 3, 4, 5].into_iter().enumerate() {
-            out[street] = self.sequences[street] * cards.num_buckets(n) as u64;
+            out[street] = self.sequences[street] * cards.bucket_count(n) as u64;
         }
         out
     }
 
     /// Bytes for a regret and a strategy sum (f32 each) per action of every
     /// information set.
-    pub fn table_bytes(&self, cards: &CardAbstraction) -> u64 {
+    pub fn table_bytes(&self, cards: &impl Buckets) -> u64 {
         let mut total = 0;
         for (street, n) in [0usize, 3, 4, 5].into_iter().enumerate() {
-            total += self.actions[street] * cards.num_buckets(n) as u64 * 8;
+            total += self.actions[street] * cards.bucket_count(n) as u64 * 8;
         }
         total
     }
