@@ -2,7 +2,7 @@ use ducy_gto::{
     Config, Discount, Mccfr, Profile,
     holdem::{
         abstraction::CardAbstraction,
-        blueprint::{Blueprint, BlueprintError},
+        blueprint::{Blueprint, BlueprintError, settings_hash},
         chart::{PreflopReport, class_name, class_of, combos},
         hunl::{BetMenu, Hunl, HunlConfig, Size},
     },
@@ -70,6 +70,26 @@ fn blueprint_round_trip_and_settings_check() {
         Blueprint::load(&bytes, &game9, &other),
         Err(BlueprintError::WrongSettings)
     );
+}
+
+#[test]
+fn published_blueprints_keep_their_settings_hash() {
+    // The hash a blueprint records for the default game, as it was before
+    // pot-limit betting was added (#188 changed it by accident, so blueprints
+    // trained earlier stopped loading). It must never change for an
+    // existing no-limit game.
+    let cards = CardAbstraction::quick(8);
+    let game = Hunl::new(HunlConfig::default(), Some(&cards));
+    assert_eq!(settings_hash(&game, &cards), 0xea93_5854_3de6_a8a4);
+    // A pot-limit game hashes differently, so neither loads as the other.
+    let plo = Hunl::new(
+        HunlConfig {
+            pot_limit: true,
+            ..HunlConfig::default()
+        },
+        Some(&cards),
+    );
+    assert_ne!(settings_hash(&plo, &cards), settings_hash(&game, &cards));
 }
 
 /// Shove, limp or fold with 10 big blinds: small enough to train in

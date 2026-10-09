@@ -6,7 +6,10 @@
 //! a hash of the game and abstraction settings, so a blueprint is never used
 //! with a betting tree or card abstraction it wasn't trained for.
 
-use super::{abstraction::CardAbstraction, hunl::Hunl};
+use super::{
+    abstraction::CardAbstraction,
+    hunl::{Hunl, HunlConfig},
+};
 use crate::profile::Profile;
 
 /// Why a blueprint couldn't be loaded.
@@ -32,11 +35,24 @@ pub struct Blueprint {
 
 /// A hash of everything that shapes the abstract game.
 pub fn settings_hash(game: &Hunl, cards: &CardAbstraction) -> u64 {
-    let text = format!("{:?}|{:?}|v1", game.config, cards.config);
+    let text = format!("{}|{:?}|v1", config_text(&game.config), cards.config);
     // FNV-1a.
     text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
         (h ^ b as u64).wrapping_mul(0x0100_0000_01b3)
     })
+}
+
+/// The game settings as hashed. A no-limit game hashes as it did before
+/// `pot_limit` existed, so blueprints trained then still load.
+pub fn config_text(c: &HunlConfig) -> String {
+    if c.pot_limit {
+        format!("{c:?}")
+    } else {
+        format!(
+            "HunlConfig {{ small_blind: {:?}, big_blind: {:?}, stack: {:?}, menu: {:?} }}",
+            c.small_blind, c.big_blind, c.stack, c.menu
+        )
+    }
 }
 
 fn layout(game: &Hunl, cards: &CardAbstraction) -> (Vec<u32>, Vec<u16>, Vec<u8>, usize) {
