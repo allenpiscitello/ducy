@@ -92,7 +92,7 @@ fn personalities_play_their_styles() {
     // under test in seats 0-3, Michael Miserable filling the rest.
     let mut bots: Vec<PersonalityBot> = [
         Personality::DougPoker,
-        Personality::OldManCoffee,
+        Personality::JonnySlow,
         Personality::MisterCheating,
         Personality::MilkKing,
     ]
@@ -281,7 +281,7 @@ fn favorite_and_pretty_hands_get_played() {
         ten_deuce_fan.act(&ten_deuce),
         Some(Action::Raise(_))
     ));
-    let mut coffee = with(Personality::OldManCoffee, |_| {});
+    let mut coffee = with(Personality::JonnySlow, |_| {});
     assert_eq!(coffee.act(&ten_deuce), Some(Action::Fold));
 
     // In Omaha the same "T2" means any hand holding a ten and a deuce.
@@ -410,6 +410,9 @@ fn robin_jane_lewd_will_not_fold_a_pair() {
     assert_eq!(not_robin.act(&obs), Some(Action::Fold));
 
     // Saved tables and clubs from before the rename still find her.
+    for old in ["old_man_coffee", "Old Man Coffee"] {
+        assert_eq!(Personality::from_name(old), Some(Personality::JonnySlow));
+    }
     for old in ["uncle_gary", "Uncle Gary"] {
         assert_eq!(
             Personality::from_name(old),
@@ -434,7 +437,7 @@ fn a_bot_priced_into_a_pot_calls_instead_of_folding() {
     hand.act(Action::AllIn).unwrap(); // seat 1 shoves
     let committed = hand.observation(0).unwrap();
     for p in [
-        Personality::OldManCoffee,
+        Personality::JonnySlow,
         Personality::BradOwned,
         Personality::DougPoker,
     ] {
@@ -447,7 +450,7 @@ fn a_bot_priced_into_a_pot_calls_instead_of_folding() {
     let mut hand = nlhe(&["7c 2d", "As Ah"], "2c 7d 9h Jc 3s");
     hand.act(Action::Raise(6)).unwrap();
     hand.act(Action::AllIn).unwrap();
-    let mut coffee = with(Personality::OldManCoffee, |_| {});
+    let mut coffee = with(Personality::JonnySlow, |_| {});
     assert_eq!(
         coffee.act(&hand.observation(0).unwrap()),
         Some(Action::Fold)

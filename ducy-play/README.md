@@ -92,7 +92,7 @@ PFR = hands raised preflop). Their range traits are written for a full
 | Personality | Plays | VPIP / PFR | Folds to bets |
 |---|---|---|---|
 | **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, pot-odds defense. An approximation, not a solver. | 23% / 16% | 28% |
-| **Old Man Coffee** | A rock: few hands, limps and check-calls rather than raising, folds to pressure, never bluffs. | 11% / 3% | 58% |
+| **Jonny Slow** | A rock: few hands, limps and check-calls rather than raising, folds to pressure, never bluffs. (Formerly Old Man Coffee; the old id `old_man_coffee` still works.) | 11% / 3% | 58% |
 | **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, bold plays, adapts to each opponent's leaks. | 44% / 33% | 21% |
 | **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | 60% / 3% | 5% |
 | **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 17% / 12% | 35% |
@@ -122,7 +122,7 @@ let mut bots: Vec<Box<dyn Bot>> = vec![
 let result = run_match(&config, &mut bots).unwrap();
 ```
 
-`Personality::ALL`, `name()`, `id()` (e.g. `"old_man_coffee"`), `description()`, `catchphrase()`
+`Personality::ALL`, `name()`, `id()` (e.g. `"jonny_slow"`), `description()`, `catchphrase()`
 and `from_name()` make it easy to list them in an app.
 
 **How they decide.**
