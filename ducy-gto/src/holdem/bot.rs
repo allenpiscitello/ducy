@@ -35,7 +35,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use ducy_play::{Action, Bot, HandSummary, LegalActions, Observation, Street};
+use ducy_play::{Action, BettingStructure, Bot, HandSummary, LegalActions, Observation, Street};
 use rand::{SeedableRng, rngs::StdRng};
 
 use super::{
@@ -502,7 +502,10 @@ impl GtoBot {
                     return check_or_call;
                 };
                 let b = &self.tree.nodes[node as usize].betting;
-                if to >= b.all_in_to() {
+                // The tree's largest size (all-in, or the pot under
+                // pot-limit) is the real table's largest.
+                let pot_limit = obs.rules.structure == BettingStructure::PotLimit;
+                if to >= b.max_to(pot_limit) {
                     return if legal.bet.is_some() {
                         Action::Bet(range.max_to)
                     } else {

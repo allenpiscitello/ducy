@@ -87,6 +87,7 @@ fn push_fold_training_learns_sensible_ranges() {
             preflop: vec![vec![Size::AllIn]],
             postflop: vec![vec![Size::AllIn]],
         },
+        pot_limit: false,
     };
     let game = Hunl::new(config, Some(&cards));
     let mut m = Mccfr::new(
