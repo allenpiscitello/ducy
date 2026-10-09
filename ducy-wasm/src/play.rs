@@ -204,17 +204,30 @@ struct Gto {
     tree: Arc<BettingTree>,
 }
 
-/// Turn and river iterations per solve for the GTO bot in the page. Fewer
-/// turn iterations than natively (`TurnSolving::default`, 50): WebAssembly
-/// runs on one core, where 50 take about 6.5 s a turn decision and 20 about
-/// 3 s (Node, the `gto-hunl-300m` model). A river solve takes about 0.4 s.
-const PAGE_TURN_ITERATIONS: usize = 20;
+/// Turn and river iterations per solve for the GTO bot in the page. Far
+/// less turn work than natively (`TurnSolving::default`: 50 iterations of 8
+/// rivers each): WebAssembly runs on one core, and a turn decision there
+/// took about 3.7 s at 20 iterations of 8 rivers, too slow to play against.
+/// 10 iterations of 4 rivers (below) take about a third of that, keeping
+/// the opponent's river styles (Node, the `test-30m` model, CPU time, the
+/// settings interleaved: 4.8 s against 1.6 s on a busy machine). A river
+/// solve takes about 0.4 s.
+const PAGE_TURN_ITERATIONS: usize = 10;
 const PAGE_RIVER_ITERATIONS: usize = 200;
+
+/// Turn solving's other settings in the page: river cards dealt per
+/// iteration (`TurnSolving::new` deals 8), and whether the opponent picks
+/// among river styles at each leaf (`TurnSolving::biases`, kept: the solve
+/// is harder to exploit, and dropping them saved little at these settings).
+const PAGE_TURN_RIVER_SAMPLES: usize = 4;
+const PAGE_TURN_BIASES: bool = true;
 
 thread_local! {
     static GTO: RefCell<Option<Gto>> = const { RefCell::new(None) };
     static SOLVING: Cell<(usize, usize)> =
         const { Cell::new((PAGE_TURN_ITERATIONS, PAGE_RIVER_ITERATIONS)) };
+    static TURN_OPTIONS: Cell<(usize, bool)> =
+        const { Cell::new((PAGE_TURN_RIVER_SAMPLES, PAGE_TURN_BIASES)) };
 }
 
 /// How hard GTO bots seated from now on solve the turn and river in real
@@ -222,6 +235,16 @@ thread_local! {
 #[wasm_bindgen(js_name = setGtoSolving)]
 pub fn set_gto_solving(turn: usize, river: usize) {
     SOLVING.with(|s| s.set((turn, river)));
+}
+
+/// How GTO bots seated from now on solve the turn, besides the iterations:
+/// `riverSamples` river cards dealt per iteration when valuing leaves (0
+/// for all 48), and `biases` whether the opponent picks among river styles
+/// at each leaf (sturdier, but several times the work at every leaf and in
+/// the setup's best response) or both play the blueprint's river.
+#[wasm_bindgen(js_name = setGtoTurnOptions)]
+pub fn set_gto_turn_options(river_samples: usize, biases: bool) {
+    TURN_OPTIONS.with(|s| s.set((river_samples, biases)));
 }
 
 /// The id that seats the GTO bot.
@@ -263,8 +286,14 @@ fn gto_seat(seed: u64) -> Result<TableSeat, JsError> {
             .as_ref()
             .ok_or_else(|| JsError::new("call loadGto first"))?;
         let (turn, river) = SOLVING.with(Cell::get);
+        let (river_samples, biases) = TURN_OPTIONS.with(Cell::get);
+        let mut turn = TurnSolving::new(turn);
+        turn.river_samples = river_samples;
+        if !biases {
+            turn.biases.clear();
+        }
         let bot = GtoBot::from_parts(g.cards.clone(), g.blueprint.clone(), g.tree.clone(), seed)
-            .with_turn_solving(TurnSolving::new(turn))
+            .with_turn_solving(turn)
             .with_river_solving(RiverSolving::new(river));
         Ok(TableSeat::with_bot("GTO", GTO_ID, Box::new(bot)))
     })
