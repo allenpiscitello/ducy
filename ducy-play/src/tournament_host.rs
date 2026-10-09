@@ -160,6 +160,8 @@ impl TournamentHost {
                 self.changed(now)
             }
             Command::RequestChips { .. } => reject("chips can't be bought in a tournament"),
+            // Running it twice is for cash tables.
+            Command::RunTwice { .. } => reject("tournament hands are run once"),
             Command::Act { seq, kind, amount } => {
                 if seq != self.seq {
                     return reject("that was for an earlier state");
