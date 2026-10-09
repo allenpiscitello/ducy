@@ -8,4 +8,5 @@
 
 pub mod abstraction;
 pub mod bot;
+pub mod river;
 pub mod showdown;

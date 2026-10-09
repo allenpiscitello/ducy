@@ -16,20 +16,27 @@
 //! - **Anything it can't follow:** more than two players, or a hand off the
 //!   tree, gets a pot-odds fallback that never acts illegally (counted in
 //!   `off_tree`).
+//!
+//! With [`PloGtoBot::with_river_solving`], river decisions come from a
+//! real-time solve over sampled ranges instead ([`river`](super::river)),
+//! solved again when the opponent bets a size the solution doesn't have.
 
 use std::sync::Arc;
 
-use ducy_play::{Action, Bot, HandSummary, Observation};
+use ducy_play::{Action, Bot, HandSummary, Observation, Street};
 use rand::{SeedableRng, rngs::StdRng};
 
-use super::abstraction::PloAbstraction;
+use super::{
+    abstraction::PloAbstraction,
+    river::{PloRiverSolver, PloRiverSolving, sample_range},
+};
 use crate::{
     holdem::{
         blueprint::{Blueprint, BlueprintError},
-        bot::{fallback, realize, same_kind, shove},
-        cards::{Card, from_ducy},
+        bot::{fallback, real_action, realize, replays_to_me, same_kind, shove, street_root},
+        cards::{Card, from_ducy, mask},
         follow::{Follower, street_index},
-        hunl::{BettingTree, Buckets, HuPlo, HunlAction, HunlConfig},
+        hunl::{Betting, BettingTree, Buckets, HuPlo, HunlAction, HunlConfig},
     },
     rng::Rng,
 };
@@ -44,6 +51,8 @@ pub(crate) struct Track {
     /// Our side: 0 is the button.
     pub(crate) me: usize,
     pub(crate) follow: Follower,
+    /// The river solution for this hand.
+    pub(crate) solved: Option<Box<PloRiverSolver>>,
 }
 
 /// A bot that plays a heads-up PLO blueprint.
@@ -56,7 +65,10 @@ pub struct PloGtoBot {
     pub(crate) track: Track,
     /// Decisions where it had to use the fallback rule.
     pub off_tree: u32,
+    /// River solves run (re-solves included).
+    pub river_solves: u32,
     fallback_rng: StdRng,
+    river: Option<PloRiverSolving>,
 }
 
 impl PloGtoBot {
@@ -97,8 +109,101 @@ impl PloGtoBot {
             rng: Rng::new(seed),
             track: Track::default(),
             off_tree: 0,
+            river_solves: 0,
             fallback_rng: StdRng::seed_from_u64(seed ^ 0x5eed),
+            river: None,
         }
+    }
+
+    /// Solves the river in real time instead of playing the blueprint there
+    /// (with zero iterations, it keeps playing the blueprint).
+    pub fn with_river_solving(mut self, solving: PloRiverSolving) -> Self {
+        self.river = (solving.iterations > 0).then_some(solving);
+        self
+    }
+
+    /// A river decision from the solved subgame: solved now if there's no
+    /// solution yet or the real river left its tree. `None` to play the
+    /// blueprint instead.
+    fn river_action(&mut self, obs: &Observation) -> Option<Action> {
+        if obs.seats.len() != 2 || obs.hole_cards.num_cards() != 4 {
+            return None;
+        }
+        self.follow(obs);
+        let root = street_root(obs, 3)?;
+        let path = self.track.follow.river_path.clone();
+        if !replays_to_me(&root, &path, self.track.me) {
+            return None;
+        }
+        let on_tree = |s: &PloRiverSolver| s.tree.follow(&path).is_some();
+        if !self.track.solved.as_deref().is_some_and(on_tree) {
+            let solver = self.solve_river(obs, &root, &path)?;
+            self.track.solved = Some(Box::new(solver));
+            self.river_solves += 1;
+        }
+        let solver = self.track.solved.as_deref()?;
+        let node = solver.tree.follow(&path)?;
+        // Our own hand is hand 0 of our sampled range.
+        let probs = solver.probs(node, 0);
+        let a = solver.tree.nodes[node as usize].actions[self.rng.sample(&probs)];
+        self.track.follow.pending = None;
+        Some(real_action(a, obs))
+    }
+
+    /// Solves the river from `root` with the real actions `path` forced into
+    /// the tree, over both players' sampled ranges, with the gadget against
+    /// what the opponent's hands get from the blueprint's river.
+    fn solve_river(
+        &mut self,
+        obs: &Observation,
+        root: &Betting,
+        path: &[HunlAction],
+    ) -> Option<PloRiverSolver> {
+        let settings = self.river.clone()?;
+        let bp_root = self.track.follow.river_root?;
+        let bp_node = &self.tree.nodes[bp_root as usize];
+        if bp_node.actions.is_empty() || bp_node.betting.street != 3 {
+            return None;
+        }
+        let board: Vec<Card> = obs.board.iter().copied().map(from_ducy).collect();
+        let board: [Card; 5] = board.try_into().ok()?;
+        let hole: Vec<Card> = obs.hole_cards.iter(false).map(from_ducy).collect();
+        let hole: [Card; 4] = hole.try_into().ok()?;
+        let me = self.track.me;
+        let steps = self.track.follow.steps_before_river(&self.tree);
+        let mut rng = Rng::new(self.rng.next_u64());
+        let mut range = |player: usize, blocked: u64, first: Option<[Card; 4]>| {
+            sample_range(
+                &self.cards,
+                &self.blueprint,
+                &self.tree,
+                &steps,
+                player,
+                &board,
+                blocked,
+                settings.hands,
+                first,
+                &mut rng,
+            )
+        };
+        // Ours is public (only the board is known to the opponent), with our
+        // real hand first; theirs can't hold our cards.
+        let mine = range(me, 0, Some(hole));
+        let theirs = range(1 - me, mask(&hole), None);
+        let ranges = if me == 0 {
+            [mine, theirs]
+        } else {
+            [theirs, mine]
+        };
+        let mut config = self.config.clone();
+        config.big_blind = obs.rules.big_blind;
+        let mut solver = PloRiverSolver::new(&board, root, &config, path, ranges);
+        let reference =
+            solver.blueprint_strategy(&self.cards, &board, &self.blueprint, &self.tree, bp_root);
+        let target = solver.best_response(1 - me, &reference);
+        solver.set_gadget(1 - me, target);
+        solver.run(settings.iterations, settings.time);
+        Some(solver)
     }
 
     /// The game the blueprint was trained for.
@@ -166,6 +271,12 @@ impl Bot for PloGtoBot {
     fn act(&mut self, obs: &Observation) -> Option<Action> {
         if self.committed(obs) {
             return Some(shove(obs));
+        }
+        if self.river.is_some()
+            && obs.street == Street::River
+            && let Some(action) = self.river_action(obs)
+        {
+            return Some(action);
         }
         match self.strategy(obs) {
             Some((actions, probs)) => {
