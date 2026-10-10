@@ -1,10 +1,13 @@
 //! Heads-up pot-limit Omaha: the parts of the GTO pipeline that differ from
 //! Hold'em. The abstract game itself is [`crate::holdem::hunl::Hunl`] with
-//! four hole cards ([`crate::holdem::hunl::HuPlo`]) and a pot-limit menu.
+//! four hole cards ([`crate::holdem::hunl::HuPlo`]), or six for PLO6, and a
+//! pot-limit menu.
 //!
 //! - [`showdown`]: fast Omaha showdowns and sampled equity.
-//! - [`abstraction`]: the feature-based card abstraction.
+//! - [`abstraction`]: the feature-based card abstraction, for four to six
+//!   hole cards.
 //! - [`bot`]: `PloGtoBot`, which plays a trained blueprint.
+//! - [`river`]: real-time river solving (four hole cards).
 
 pub mod abstraction;
 pub mod bot;

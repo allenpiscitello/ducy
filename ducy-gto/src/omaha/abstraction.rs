@@ -5,10 +5,14 @@
 //! training is far too slow (see `plo_bench`), so buckets come from cheap,
 //! exact features of the hand on the board:
 //!
-//! - **Preflop:** hands are grouped by suit isomorphism (16,432 classes for
-//!   four cards). Each class's equity against a random hand and ducy's
+//! - **Preflop:** four-card hands are grouped by suit isomorphism (16,432
+//!   classes). Each class's equity against a random hand and ducy's
 //!   playability percentile (`omaha_analysis`) are clustered with k-means;
-//!   `preflop: 0` keeps every class as its own bucket instead.
+//!   `preflop: 0` keeps every class as its own bucket instead. Five and six
+//!   cards have far too many hands to list (20 million six-card hands), so
+//!   there a linear model predicts equity from features of the hand (its
+//!   playability, pairs, suits, ranks and connectedness), and k-means over
+//!   (predicted equity, playability) forms the buckets, as on the flop.
 //! - **Flop and turn:** made-hand strength (where the hand's best two-plus-
 //!   three ranks among every two-card holding on this board), nut and
 //!   non-nut flush draws, straight outs, and the board's texture. A linear
@@ -20,7 +24,8 @@
 //!
 //! Most of the work is per board (scoring every pair on it), so
 //! [`Buckets::deal_buckets`] does it once for both players. The model is a
-//! few kilobytes plus a 33 KB preflop table: small enough to ship.
+//! few kilobytes, plus a 33 KB preflop table for four cards: small enough to
+//! ship.
 
 use super::showdown::{draw, equity_vs_random};
 use crate::{
@@ -35,9 +40,10 @@ use crate::{
 /// Settings for building a [`PloAbstraction`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct PloAbstractionConfig {
-    /// Hole cards (4 for PLO).
+    /// Hole cards: 4 for PLO, 5 or 6 for the bigger games.
     pub hole_cards: usize,
-    /// Preflop buckets, or 0 for one per suit-isomorphism class.
+    /// Preflop buckets, or 0 for one per suit-isomorphism class (four cards
+    /// only).
     pub preflop: usize,
     pub flop: usize,
     pub turn: usize,
@@ -89,8 +95,20 @@ pub struct BoardView {
 }
 
 /// Opponent hands sampled per river board for equity: ±2.2% (one standard
-/// error) for a hand near 50%.
+/// error) for a hand near 50%, with four hole cards.
 pub const RIVER_OPPONENTS: usize = 512;
+
+/// River opponents sampled for `k` hole cards. Bigger hands share a card
+/// with more of them (about 58% of six-card opponents hold one of a six-card
+/// hand's cards, against 31% for four), so five and six cards sample twice
+/// as many.
+pub fn river_opponents(k: usize) -> usize {
+    if k > 4 {
+        2 * RIVER_OPPONENTS
+    } else {
+        RIVER_OPPONENTS
+    }
+}
 
 /// Rank bits for straights: bit `r + 1` for rank `r`, and bit 0 for an ace.
 fn rank_bits(cards: &[Card]) -> u16 {
@@ -116,8 +134,14 @@ fn has_straight(hand: u16, board: u16) -> bool {
 }
 
 impl BoardView {
-    /// The view of a 3-, 4- or 5-card board.
+    /// The view of a 3-, 4- or 5-card board, for four-card hands.
     pub fn new(board: &[Card]) -> Self {
+        Self::for_hands(board, 4)
+    }
+
+    /// The view of a 3-, 4- or 5-card board for `k`-card hands (the size of
+    /// the river's sampled opponents).
+    pub fn for_hands(board: &[Card], k: usize) -> Self {
         let n = board.len();
         let mut triples = Vec::with_capacity(10);
         for a in 0..n {
@@ -164,14 +188,15 @@ impl BoardView {
         };
         if n == 5 {
             let mut rng = Rng::new(used.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
-            let mut hand = [0 as Card; 4];
-            view.opponents = (0..RIVER_OPPONENTS)
+            let mut hand = [0 as Card; 6];
+            let hand = &mut hand[..k];
+            view.opponents = (0..river_opponents(k))
                 .map(|_| {
                     let mut taken = used;
                     for c in hand.iter_mut() {
                         *c = draw(&mut taken, &mut rng);
                     }
-                    (view.best(&hand), mask(&hand))
+                    (view.best(hand), mask(hand))
                 })
                 .collect();
         }
@@ -360,6 +385,81 @@ impl PreflopClasses {
     }
 }
 
+/// A starting hand's features for the preflop model (five and six cards):
+/// a constant, ducy's playability and its powers, pairs and trips, how many
+/// suits it holds two or more of, a suited ace, a suit held four or more
+/// times, its ranks (mean, top, distinct) and the most of its ranks in one
+/// five-rank window. Index 1, playability, is what the buckets cluster on
+/// besides predicted equity.
+pub fn preflop_features(hole: &[Card]) -> [f64; NUM_FEATURES] {
+    let k = hole.len() as f64;
+    let p = playability(hole);
+    let mut counts = [0u8; 13];
+    let mut suits = [0u8; 4];
+    for &c in hole {
+        counts[rank(c) as usize] += 1;
+        suits[suit(c) as usize] += 1;
+    }
+    let pairs = counts.iter().filter(|&&n| n >= 2).count() as f64;
+    let trips = if counts.iter().any(|&n| n >= 3) {
+        1.0
+    } else {
+        0.0
+    };
+    let suited = suits.iter().filter(|&&n| n >= 2).count() as f64;
+    let suited_ace = if hole
+        .iter()
+        .any(|&c| rank(c) == 12 && suits[suit(c) as usize] >= 2)
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let heavy_suit = if suits.iter().any(|&n| n >= 4) {
+        1.0
+    } else {
+        0.0
+    };
+    let mean_rank = hole.iter().map(|&c| rank(c) as f64).sum::<f64>() / (12.0 * k);
+    let top = hole.iter().map(|&c| rank(c)).max().unwrap_or(0) as f64 / 12.0;
+    let distinct = counts.iter().filter(|&&n| n > 0).count() as f64 / k;
+    let ranks = rank_bits(hole);
+    let window = (0..10)
+        .map(|w| (ranks & 0b11111 << w).count_ones())
+        .max()
+        .unwrap_or(0) as f64
+        / 5.0;
+    [
+        1.0,
+        p,
+        p * p,
+        p.powi(4),
+        pairs / 3.0,
+        trips,
+        suited / 3.0,
+        suited_ace,
+        heavy_suit,
+        mean_rank,
+        top,
+        distinct,
+        window,
+        p * suited / 3.0,
+    ]
+}
+
+/// How preflop hands are bucketed.
+#[derive(Clone, Debug)]
+enum Preflop {
+    /// Four cards: the bucket of each suit-isomorphism class.
+    Classes {
+        classes: PreflopClasses,
+        buckets: Vec<u16>,
+    },
+    /// Five or six cards: a model like the flop's, over
+    /// [`preflop_features`].
+    Model(StreetModel),
+}
+
 /// A flop or turn model: equity weights and the cluster centres over
 /// (predicted equity, `STRENGTH_WEIGHT` × made strength).
 #[derive(Clone, Debug, PartialEq)]
@@ -393,9 +493,7 @@ impl StreetModel {
 #[derive(Clone, Debug)]
 pub struct PloAbstraction {
     pub config: PloAbstractionConfig,
-    classes: PreflopClasses,
-    /// Bucket of each preflop class.
-    preflop: Vec<u16>,
+    preflop: Preflop,
     flop: StreetModel,
     turn: StreetModel,
     /// River-equity cut-offs between river buckets (`river - 1` of them).
@@ -474,29 +572,13 @@ impl PloAbstraction {
     /// fitted model for each street. `progress` hears about each stage.
     pub fn build(config: PloAbstractionConfig, mut progress: impl FnMut(&str)) -> Self {
         let k = config.hole_cards;
-        let classes = PreflopClasses::new(k);
-        progress(&format!("{} preflop classes", classes.len()));
-
-        // Preflop: equity and ducy's playability percentile per class.
+        assert!((4..=6).contains(&k), "4 to 6 hole cards");
+        assert!(
+            k == 4 || config.preflop > 0,
+            "one preflop bucket per class needs four hole cards"
+        );
         let samples = config.equity_samples;
         let seed = config.seed;
-        let preflop: Vec<u16> = if config.preflop == 0 {
-            (0..classes.len() as u16).collect()
-        } else {
-            let points: Vec<[f32; 2]> = map_parallel((0..classes.len()).collect(), |i| {
-                let hand = classes.representative(i);
-                let mut rng = Rng::new(seed ^ (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
-                let e = equity_vs_random(hand, &[], samples, &mut rng).mean;
-                [e as f32, (STRENGTH_WEIGHT * playability(hand)) as f32]
-            });
-            let flat: Vec<f32> = points.iter().flatten().copied().collect();
-            let centres = kmeans(&flat, 2, config.preflop, 50, seed, Distance::L2);
-            points
-                .iter()
-                .map(|p| nearest(p, &centres, 2, Distance::L2) as u16)
-                .collect()
-        };
-        progress("preflop buckets done");
 
         // Sampled hands with their features and equity, and a fitted model.
         let sample = |board_len: usize| -> (Vec<[f64; NUM_FEATURES]>, Vec<f64>, Vec<f64>) {
@@ -506,9 +588,13 @@ impl PloAbstraction {
                         ^ (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15),
                 );
                 let (hole, board) = random_spot(k, board_len, &mut rng);
-                let view = BoardView::new(&board);
+                let x = if board_len == 0 {
+                    preflop_features(&hole)
+                } else {
+                    BoardView::for_hands(&board, k).features(&hole)
+                };
                 FitHand {
-                    x: view.features(&hole),
+                    x,
                     equity: equity_vs_random(&hole, &board, samples, &mut rng).mean,
                 }
             });
@@ -527,6 +613,33 @@ impl PloAbstraction {
             model.centres = kmeans(&flat, 2, buckets, 50, seed + board_len as u64, Distance::L2);
             model
         };
+
+        let preflop = if k == 4 {
+            // Equity and ducy's playability percentile per class.
+            let classes = PreflopClasses::new(k);
+            progress(&format!("{} preflop classes", classes.len()));
+            let buckets: Vec<u16> = if config.preflop == 0 {
+                (0..classes.len() as u16).collect()
+            } else {
+                let points: Vec<[f32; 2]> = map_parallel((0..classes.len()).collect(), |i| {
+                    let hand = classes.representative(i);
+                    let mut rng = Rng::new(seed ^ (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+                    let e = equity_vs_random(hand, &[], samples, &mut rng).mean;
+                    [e as f32, (STRENGTH_WEIGHT * playability(hand)) as f32]
+                });
+                let flat: Vec<f32> = points.iter().flatten().copied().collect();
+                let centres = kmeans(&flat, 2, config.preflop, 50, seed, Distance::L2);
+                points
+                    .iter()
+                    .map(|p| nearest(p, &centres, 2, Distance::L2) as u16)
+                    .collect()
+            };
+            Preflop::Classes { classes, buckets }
+        } else {
+            Preflop::Model(fit(0, config.preflop))
+        };
+        progress("preflop buckets done");
+
         let flop = fit(3, config.flop);
         progress("flop model done");
         let turn = fit(4, config.turn);
@@ -539,7 +652,7 @@ impl PloAbstraction {
                 seed.wrapping_add(5_000_015) ^ (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15),
             );
             let (hole, board) = random_spot(k, 5, &mut rng);
-            BoardView::new(&board).river_equity(&hole)
+            BoardView::for_hands(&board, k).river_equity(&hole)
         });
         equities.sort_by(f64::total_cmp);
         let river_cuts: Vec<f64> = (1..config.river)
@@ -549,7 +662,6 @@ impl PloAbstraction {
 
         Self {
             config,
-            classes,
             preflop,
             flop,
             turn,
@@ -559,7 +671,16 @@ impl PloAbstraction {
 
     /// The preflop bucket of `hole`.
     pub fn preflop_bucket(&self, hole: &[Card]) -> u16 {
-        self.preflop[self.classes.class(hole)]
+        match &self.preflop {
+            Preflop::Classes { classes, buckets } => buckets[classes.class(hole)],
+            Preflop::Model(m) => m.bucket(&preflop_features(hole)),
+        }
+    }
+
+    /// The view of `board` that [`PloAbstraction::bucket_on`] needs: river
+    /// opponents with this abstraction's number of hole cards.
+    pub fn view(&self, board: &[Card]) -> BoardView {
+        BoardView::for_hands(board, self.config.hole_cards)
     }
 
     /// The bucket of `hole` on a board that `view` describes.
@@ -586,15 +707,26 @@ impl PloAbstraction {
 
     pub fn street_model(&self, board_len: usize) -> Option<&StreetModel> {
         match board_len {
+            0 => match &self.preflop {
+                Preflop::Model(m) => Some(m),
+                Preflop::Classes { .. } => None,
+            },
             3 => Some(&self.flop),
             4 => Some(&self.turn),
             _ => None,
         }
     }
 
+    /// The saved form: version 1 (four cards) has the preflop table after
+    /// the settings, version 2 (five or six cards) a third model before the
+    /// flop's.
     pub fn save(&self) -> Vec<u8> {
         let c = &self.config;
-        let mut out = MAGIC.to_vec();
+        let mut out = match self.preflop {
+            Preflop::Classes { .. } => MAGIC,
+            Preflop::Model(_) => MAGIC_MODEL,
+        }
+        .to_vec();
         for v in [
             c.hole_cards,
             c.preflop,
@@ -604,14 +736,20 @@ impl PloAbstraction {
             c.fit_hands,
             c.equity_samples,
             c.seed as usize,
-            self.preflop.len(),
         ] {
             out.extend((v as u64).to_le_bytes());
         }
-        for &b in &self.preflop {
-            out.extend(b.to_le_bytes());
+        let mut models = vec![&self.flop, &self.turn];
+        match &self.preflop {
+            Preflop::Classes { buckets, .. } => {
+                out.extend((buckets.len() as u64).to_le_bytes());
+                for &b in buckets {
+                    out.extend(b.to_le_bytes());
+                }
+            }
+            Preflop::Model(m) => models.insert(0, m),
         }
-        for m in [&self.flop, &self.turn] {
+        for m in models {
             out.extend((m.weights.len() as u64).to_le_bytes());
             for w in &m.weights {
                 out.extend(w.to_le_bytes());
@@ -632,9 +770,14 @@ impl PloAbstraction {
         use crate::key::{read_u64, take};
         let mut input = bytes;
         let input = &mut input;
-        if take(input, MAGIC.len())? != MAGIC {
+        let magic = take(input, MAGIC.len())?;
+        let with_table = if magic == MAGIC {
+            true
+        } else if magic == MAGIC_MODEL {
+            false
+        } else {
             return None;
-        }
+        };
         let mut num = || read_u64(input).map(|v| v as usize);
         let config = PloAbstractionConfig {
             hole_cards: num()?,
@@ -646,9 +789,8 @@ impl PloAbstraction {
             equity_samples: num()?,
             seed: num()? as u64,
         };
-        let n = num()?;
-        let classes = PreflopClasses::new(config.hole_cards);
-        if n != classes.len() {
+        // Four cards have the table; five and six, the model.
+        if with_table != (config.hole_cards == 4) || !(4..=6).contains(&config.hole_cards) {
             return None;
         }
         let f64s = |input: &mut &[u8], n: usize| -> Option<Vec<f64>> {
@@ -659,13 +801,23 @@ impl PloAbstraction {
                     .collect(),
             )
         };
-        let b = take(input, n * 2)?;
-        let preflop = b
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
+        let table = if with_table {
+            let n = read_u64(input)? as usize;
+            let classes = PreflopClasses::new(config.hole_cards);
+            if n != classes.len() {
+                return None;
+            }
+            let b = take(input, n * 2)?;
+            let buckets = b
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            Some(Preflop::Classes { classes, buckets })
+        } else {
+            None
+        };
         let mut models = Vec::new();
-        for _ in 0..2 {
+        for _ in 0..if with_table { 2 } else { 3 } {
             let w = read_u64(input)? as usize;
             let weights = f64s(input, w)?;
             let c = read_u64(input)? as usize;
@@ -683,9 +835,12 @@ impl PloAbstraction {
         }
         let turn = models.pop()?;
         let flop = models.pop()?;
+        let preflop = match table {
+            Some(t) => t,
+            None => Preflop::Model(models.pop()?),
+        };
         Some(Self {
             config,
-            classes,
             preflop,
             flop,
             turn,
@@ -695,6 +850,7 @@ impl PloAbstraction {
 }
 
 const MAGIC: &[u8] = b"DUCYPLOA\x01";
+const MAGIC_MODEL: &[u8] = b"DUCYPLOA\x02";
 
 /// A saved flop or turn model with the wrong number of weights, or no
 /// centres (a file from a different feature set).
@@ -719,19 +875,17 @@ impl Buckets for PloAbstraction {
         if board.is_empty() {
             self.preflop_bucket(hole)
         } else {
-            self.bucket_on(hole, &BoardView::new(board))
+            self.bucket_on(hole, &self.view(board))
         }
     }
 
     fn bucket_count(&self, board_len: usize) -> usize {
         match board_len {
-            0 => {
-                if self.config.preflop == 0 {
-                    self.classes.len()
-                } else {
-                    self.config.preflop
-                }
-            }
+            0 => match &self.preflop {
+                Preflop::Classes { classes, .. } if self.config.preflop == 0 => classes.len(),
+                Preflop::Classes { .. } => self.config.preflop,
+                Preflop::Model(m) => m.centres.len() / 2,
+            },
             3 => self.flop.centres.len() / 2,
             4 => self.turn.centres.len() / 2,
             _ => self.river_cuts.len() + 1,
@@ -748,7 +902,7 @@ impl Buckets for PloAbstraction {
             out[p][0] = self.preflop_bucket(h);
         }
         for (street, n) in [(1, 3), (2, 4), (3, 5)] {
-            let view = BoardView::new(&board[..n]);
+            let view = self.view(&board[..n]);
             for (p, h) in hole.iter().enumerate() {
                 out[p][street] = self.bucket_on(h, &view);
             }

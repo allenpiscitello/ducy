@@ -176,3 +176,61 @@ fn river_equity_ignores_opponents_holding_our_cards() {
         again.river_equity(&p("Ts 8s 4d 5d"))
     );
 }
+
+#[test]
+fn six_cards_bucket_preflop_with_a_model() {
+    let cards = PloAbstraction::build(
+        PloAbstractionConfig {
+            hole_cards: 6,
+            preflop: 30,
+            flop: 20,
+            turn: 20,
+            river: 20,
+            fit_hands: 1500,
+            equity_samples: 150,
+            ..PloAbstractionConfig::default()
+        },
+        |_| {},
+    );
+    // Training's per-deal buckets equal play's per-hand ones, on every street.
+    let mut rng = Rng::new(12);
+    for _ in 0..30 {
+        let (h, b) = random_spot(12, 5, &mut rng);
+        let board = [b[0], b[1], b[2], b[3], b[4]];
+        let deal = cards.deal_buckets([&h[..6], &h[6..]], &board);
+        for (player, hole) in [&h[..6], &h[6..]].into_iter().enumerate() {
+            for (street, n) in [0usize, 3, 4, 5].into_iter().enumerate() {
+                let b = cards.hand_bucket(hole, &board[..n]);
+                assert_eq!(deal[player][street], b);
+                assert!((b as usize) < cards.bucket_count(n));
+            }
+        }
+    }
+    assert_eq!(cards.bucket_count(0), 30);
+    // Save and load give the same abstraction; a truncated file doesn't load.
+    let bytes = cards.save();
+    let loaded = PloAbstraction::load(&bytes).expect("loads");
+    assert_eq!(loaded.save(), bytes);
+    assert_eq!(loaded.config.hole_cards, 6);
+    assert!(PloAbstraction::load(&bytes[..bytes.len() - 1]).is_none());
+    // Suit isomorphism holds without a class table: the features see ranks
+    // and suit counts only.
+    assert_eq!(
+        cards.preflop_bucket(&p("As Ad Ks Kd Qs Jd")),
+        cards.preflop_bucket(&p("Ah Ac Kh Kc Qh Jc"))
+    );
+    // A double-suited rundown predicts more equity than a rainbow pile of
+    // low cards with trips.
+    let model = cards.street_model(0).expect("a preflop model");
+    let e = |h: &str| model.predict(&ducy_gto::omaha::abstraction::preflop_features(&p(h)));
+    assert!(
+        e("As Ks Qd Jd Th 9h") > e("7c 7d 7h 2s 3c 4d") + 0.03,
+        "{} {}",
+        e("As Ks Qd Jd Th 9h"),
+        e("7c 7d 7h 2s 3c 4d")
+    );
+    // River equity samples six-card opponents: on an unpaired board with no
+    // straight flush, the ace-high flush is never beaten.
+    let view = cards.view(&p("Kh 8h 3h Qc 2d"));
+    assert_eq!(view.river_equity(&p("Ah 5h 4s 4c 9s 6c")), 1.0);
+}

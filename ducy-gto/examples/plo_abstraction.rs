@@ -2,9 +2,10 @@
 //!
 //!     cargo run --release -p ducy-gto --example plo_abstraction -- --out plo-cards.bin
 //!
-//! Options: `--out FILE`, `--preflop N` (0 for one bucket per class),
-//! `--flop N`, `--turn N`, `--river N`, `--fit N` (sampled hands per street),
-//! `--check N` (hands per street for the quality check).
+//! Options: `--out FILE`, `--hole-cards N` (4, the default, or 6 for PLO6),
+//! `--preflop N` (0 for one bucket per class, four cards only), `--flop N`,
+//! `--turn N`, `--river N`, `--fit N` (sampled hands per street), `--check
+//! N` (hands per street for the quality check).
 //!
 //! For each street it reports the within-bucket spread of equity (measured
 //! with 2,000 samples per hand, ±1.1%) for:
@@ -24,13 +25,33 @@ use ducy_gto::{
     Config, Discount, Mccfr, Rng,
     holdem::{
         cards::Card,
-        hunl::{Buckets, HuPlo, HunlConfig},
+        hunl::{Buckets, Hunl, HunlConfig},
     },
     omaha::{
-        abstraction::{BoardView, PloAbstraction, PloAbstractionConfig, random_spot},
+        abstraction::{PloAbstraction, PloAbstractionConfig, random_spot},
         showdown::{PairTable, equity_vs_random},
     },
 };
+
+/// MCCFR iterations a second with these buckets at PLO 100 BB, `H` hole
+/// cards.
+fn mccfr_rate<const H: usize>(cards: &PloAbstraction) -> f64 {
+    let game = Hunl::<_, H>::with_cards(HunlConfig::pot_limit_omaha(), Some(cards));
+    let mut m = Mccfr::new(
+        &game,
+        Config {
+            seed: 1,
+            batch: 4096,
+            discount: Discount::DCFR,
+            prune: None,
+        },
+    );
+    m.run(20_000);
+    let t = Instant::now();
+    let iters = 100_000;
+    m.run(iters);
+    iters as f64 / t.elapsed().as_secs_f64()
+}
 
 fn arg(name: &str) -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
@@ -82,7 +103,9 @@ fn par_map<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync + Send) ->
 }
 
 fn main() {
+    let k = num("--hole-cards", 4);
     let config = PloAbstractionConfig {
+        hole_cards: k,
         preflop: num("--preflop", 500),
         flop: num("--flop", 200),
         turn: num("--turn", 200),
@@ -102,9 +125,14 @@ fn main() {
     let t = Instant::now();
     let loaded = PloAbstraction::load(&bytes).expect("loads");
     println!(
-        "file: {:.1} KB; native load {:.0} ms (enumerating the preflop classes)",
+        "file: {:.1} KB; native load {:.0} ms{}",
         bytes.len() as f64 / 1e3,
-        t.elapsed().as_secs_f64() * 1e3
+        t.elapsed().as_secs_f64() * 1e3,
+        if k == 4 {
+            " (enumerating the preflop classes)"
+        } else {
+            ""
+        }
     );
     assert_eq!(loaded.save(), bytes, "load and save round-trip");
 
@@ -118,7 +146,7 @@ fn main() {
     for (name, board_len) in [("Flop", 3), ("Turn", 4), ("River", 5)] {
         let spots: Vec<(Vec<Card>, Vec<Card>, f64)> = par_map((0..check).collect(), |i| {
             let mut rng = Rng::new(99 + board_len as u64 * 7919 + i as u64 * 104_729);
-            let (hole, board) = random_spot(4, board_len, &mut rng);
+            let (hole, board) = random_spot(k, board_len, &mut rng);
             let e = equity_vs_random(&hole, &board, 2000, &mut rng).mean;
             (hole, board, e)
         });
@@ -127,13 +155,13 @@ fn main() {
         let t = Instant::now();
         let ours: Vec<u16> = spots
             .iter()
-            .map(|(h, b, _)| cards.bucket_on(h, &BoardView::new(b)))
+            .map(|(h, b, _)| cards.bucket_on(h, &cards.view(b)))
             .collect();
         let per_hand_us = t.elapsed().as_secs_f64() * 1e6 / check as f64;
         let view_cost = {
             let t = Instant::now();
             for (_, b, _) in spots.iter().take(500) {
-                std::hint::black_box(BoardView::new(b));
+                std::hint::black_box(cards.view(b));
             }
             t.elapsed().as_secs_f64() * 1e6 / 500.0
         };
@@ -173,7 +201,7 @@ fn main() {
     let mut rng = Rng::new(5);
     let pre: Vec<(u16, f64)> = (0..check)
         .map(|_| {
-            let (h, _) = random_spot(4, 0, &mut rng);
+            let (h, _) = random_spot(k, 0, &mut rng);
             (
                 cards.preflop_bucket(&h),
                 equity_vs_random(&h, &[], 2000, &mut rng).mean,
@@ -181,44 +209,41 @@ fn main() {
         })
         .collect();
     let (b, e): (Vec<u16>, Vec<f64>) = pre.into_iter().unzip();
+    let t = Instant::now();
+    let mut rng = Rng::new(7);
+    for _ in 0..2000 {
+        let (h, _) = random_spot(k, 0, &mut rng);
+        std::hint::black_box(cards.preflop_bucket(&h));
+    }
     println!(
-        "| Preflop | {} | {:.3} | | | lookup |",
+        "| Preflop | {} | {:.3} | | | {:.1} µs |",
         cards.bucket_count(0),
         spread(&b, &e),
+        t.elapsed().as_secs_f64() * 1e6 / 2000.0
     );
 
     // A whole deal's buckets, and their share of training time.
     let mut rng = Rng::new(6);
-    let deals: Vec<([Card; 4], [Card; 4], [Card; 5])> = (0..2000)
+    let deals: Vec<(Vec<Card>, Vec<Card>, [Card; 5])> = (0..2000)
         .map(|_| {
-            let (h, b) = random_spot(8, 5, &mut rng);
+            let (h, b) = random_spot(2 * k, 5, &mut rng);
             (
-                [h[0], h[1], h[2], h[3]],
-                [h[4], h[5], h[6], h[7]],
+                h[..k].to_vec(),
+                h[k..].to_vec(),
                 [b[0], b[1], b[2], b[3], b[4]],
             )
         })
         .collect();
     let t = Instant::now();
     for (a, b, board) in &deals {
-        std::hint::black_box(cards.deal_buckets([a, b], board));
+        std::hint::black_box(cards.deal_buckets([a.as_slice(), b.as_slice()], board));
     }
     let per_deal = t.elapsed().as_secs_f64() / deals.len() as f64;
-    let game = HuPlo::with_cards(HunlConfig::pot_limit_omaha(), Some(&cards));
-    let mut m = Mccfr::new(
-        &game,
-        Config {
-            seed: 1,
-            batch: 4096,
-            discount: Discount::DCFR,
-            prune: None,
-        },
-    );
-    m.run(20_000);
-    let t = Instant::now();
-    let iters = 100_000;
-    m.run(iters);
-    let rate = iters as f64 / t.elapsed().as_secs_f64();
+    let rate = match k {
+        4 => mccfr_rate::<4>(&cards),
+        5 => mccfr_rate::<5>(&cards),
+        _ => mccfr_rate::<6>(&cards),
+    };
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get()) as f64;
     println!(
         "\nBuckets for a whole deal (both players, every street): {:.0} µs.\n\

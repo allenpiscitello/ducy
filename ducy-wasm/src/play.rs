@@ -24,11 +24,14 @@ use ducy_gto::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
         bot::{GtoBot, RiverSolving, TurnSolving},
-        hunl::{BettingTree, HuPlo, Hunl, HunlConfig},
+        hunl::{BettingTree, Hunl, HunlConfig},
         range::BucketCache,
         review::{HandRecord, HandReview, ReviewConfig, ReviewLog, Reviewer, SessionReview},
     },
-    omaha::{abstraction::PloAbstraction, bot::PloGtoBot},
+    omaha::{
+        abstraction::PloAbstraction,
+        bot::{PloGtoBot, load_blueprint},
+    },
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -236,6 +239,7 @@ struct GtoPlo {
 thread_local! {
     static GTO: RefCell<Option<Gto>> = const { RefCell::new(None) };
     static GTO_PLO: RefCell<Option<GtoPlo>> = const { RefCell::new(None) };
+    static GTO_PLO6: RefCell<Option<GtoPlo>> = const { RefCell::new(None) };
     static SOLVING: Cell<(usize, usize)> =
         const { Cell::new((PAGE_TURN_ITERATIONS, PAGE_RIVER_ITERATIONS)) };
     static TURN_OPTIONS: Cell<(usize, bool)> =
@@ -293,44 +297,65 @@ pub fn gto_loaded() -> bool {
 
 /// The id that seats the PLO GTO bot.
 const GTO_PLO_ID: &str = "gto-plo";
+/// The id that seats the PLO6 GTO bot.
+const GTO_PLO6_ID: &str = "gto-plo6";
 
-/// Loads the PLO GTO bot: a heads-up pot-limit Omaha blueprint, the PLO
-/// card abstraction it was trained with, and the depth it was trained for
-/// in big blinds. After this, "gto-plo" can be used as a bot id at a "plo4"
-/// table. It plays the blueprint heads-up; at bigger tables, or with five or
-/// six hole cards, it falls back to a simple pot-odds rule.
+/// The loaded model for a PLO GTO bot id.
+fn plo_slot(id: &str) -> &'static std::thread::LocalKey<RefCell<Option<GtoPlo>>> {
+    if id == GTO_PLO6_ID {
+        &GTO_PLO6
+    } else {
+        &GTO_PLO
+    }
+}
+
+/// Loads a PLO GTO bot: a heads-up pot-limit Omaha blueprint, the PLO card
+/// abstraction it was trained with, and the depth it was trained for in big
+/// blinds. A four-card model seats as "gto-plo" at a "plo4" table, a
+/// six-card one as "gto-plo6" at a "plo6" table; one of each can be loaded.
+/// It plays the blueprint heads-up; at bigger tables, or with another number
+/// of hole cards, it falls back to a simple pot-odds rule.
 #[wasm_bindgen(js_name = loadGtoPlo)]
 pub fn load_gto_plo(cards: &[u8], blueprint: &[u8], big_blinds: u64) -> Result<(), JsError> {
     let cards =
         PloAbstraction::load(cards).ok_or_else(|| JsError::new("not a PLO card abstraction"))?;
+    let id = match cards.config.hole_cards {
+        4 => GTO_PLO_ID,
+        6 => GTO_PLO6_ID,
+        n => return Err(JsError::new(&format!("no GTO bot for {n} hole cards"))),
+    };
     let config = HunlConfig::pot_limit_omaha_lean(big_blinds);
-    let game = HuPlo::with_cards(config.clone(), Some(&cards));
-    let blueprint = Blueprint::load(blueprint, &game, &cards)
+    let (blueprint, tree) = load_blueprint(&config, &cards, blueprint)
         .map_err(|e| JsError::new(&format!("blueprint doesn't match: {e:?}")))?;
-    let tree = Arc::new(game.tree);
-    GTO_PLO.with(|g| {
+    plo_slot(id).with(|g| {
         *g.borrow_mut() = Some(GtoPlo {
             config,
             cards: Arc::new(cards),
             blueprint: Arc::new(blueprint),
-            tree,
+            tree: Arc::new(tree),
         })
     });
     Ok(())
 }
 
-/// Whether `loadGtoPlo` has been called.
+/// Whether a four-card model has been loaded with `loadGtoPlo`.
 #[wasm_bindgen(js_name = gtoPloLoaded)]
 pub fn gto_plo_loaded() -> bool {
     GTO_PLO.with(|g| g.borrow().is_some())
 }
 
-fn gto_plo_seat(seed: u64) -> Result<TableSeat, JsError> {
-    GTO_PLO.with(|g| {
+/// Whether a six-card model has been loaded with `loadGtoPlo`.
+#[wasm_bindgen(js_name = gtoPlo6Loaded)]
+pub fn gto_plo6_loaded() -> bool {
+    GTO_PLO6.with(|g| g.borrow().is_some())
+}
+
+fn gto_plo_seat(id: &'static str, seed: u64) -> Result<TableSeat, JsError> {
+    plo_slot(id).with(|g| {
         let g = g.borrow();
         let g = g
             .as_ref()
-            .ok_or_else(|| JsError::new("call loadGtoPlo first"))?;
+            .ok_or_else(|| JsError::new(&format!("call loadGtoPlo with a model for {id} first")))?;
         let bot = PloGtoBot::from_parts(
             g.config.clone(),
             g.cards.clone(),
@@ -338,8 +363,13 @@ fn gto_plo_seat(seed: u64) -> Result<TableSeat, JsError> {
             g.tree.clone(),
             seed,
         );
-        Ok(TableSeat::with_bot("GTO", GTO_PLO_ID, Box::new(bot)))
+        Ok(TableSeat::with_bot("GTO", id, Box::new(bot)))
     })
+}
+
+/// The PLO GTO bot id `id` names, if any.
+fn plo_id(id: &str) -> Option<&'static str> {
+    [GTO_PLO_ID, GTO_PLO6_ID].into_iter().find(|&i| i == id)
 }
 
 fn gto_seat(seed: u64) -> Result<TableSeat, JsError> {
@@ -373,8 +403,8 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
             seats.push(gto_seat(seed.wrapping_add(i as u64 + 1))?);
             continue;
         }
-        if id == GTO_PLO_ID {
-            seats.push(gto_plo_seat(seed.wrapping_add(i as u64 + 1))?);
+        if let Some(plo) = plo_id(id) {
+            seats.push(gto_plo_seat(plo, seed.wrapping_add(i as u64 + 1))?);
             continue;
         }
         let p =
@@ -393,8 +423,8 @@ fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
     if id == GTO_ID {
         return gto_seat(seed)?.bot.ok_or_else(|| JsError::new("no bot"));
     }
-    if id == GTO_PLO_ID {
-        return gto_plo_seat(seed)?
+    if let Some(plo) = plo_id(id) {
+        return gto_plo_seat(plo, seed)?
             .bot
             .ok_or_else(|| JsError::new("no bot"));
     }
