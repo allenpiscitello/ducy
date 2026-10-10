@@ -735,6 +735,92 @@ the bot (600 solves of 200 iterations, 256 hands per range, an exploiter of
   show up at that size; a match against the blueprint (which doesn't try to
   exploit it) is a weak test of exploitability. That match took 19 minutes.
 
+### Heads-up PLO6 (#200)
+
+The same pipeline with six hole cards. The game is `Hunl` with `H = 6`;
+`PloAbstraction`, `PloGtoBot`, `train_plo` and `gto_match` take their hole
+count from the abstraction.
+
+- **Preflop:** PLO4's table of suit-isomorphism classes can't be built for
+  six cards (20 million hands). Instead a linear model predicts each hand's
+  equity against a random hand from cheap features (`preflop_features`:
+  ducy's PLO6 playability and its powers, pairs, trips, suits held twice or
+  more, a suited ace, a suit held four or more times, mean and top rank,
+  distinct ranks, the most ranks in one five-rank window), and k-means over
+  (predicted equity, playability) forms 500 buckets, as on the flop. Suit
+  isomorphism holds, since the features see only ranks and suit counts.
+  These abstractions save as version 2 (`DUCYPLOA\x02`); four-card files
+  are unchanged, and the published `gto-plo-25m` model still loads.
+- **River:** equity against 1,024 sampled six-card opponents (about 58% of
+  them share a card with a six-card hand and are skipped, against 31% for
+  four cards, so twice PLO4's 512).
+- **River solving** stays four-card only; the PLO6 bot plays the blueprint's
+  river.
+- **In the browser:** `loadGtoPlo` takes a six-card model too and seats it
+  as `gto-plo6` at a `plo6` table (`gtoPlo6Loaded()`); a four-card and a
+  six-card model can be loaded side by side.
+
+```sh
+cargo run --release -p ducy-gto --example plo_abstraction -- --hole-cards 6 --out plo6-cards.bin
+cargo run --release -p ducy-gto --example train_plo -- \
+    --cards plo6-cards.bin --bb 100 --iters 20000000 --every 5000000 \
+    --checkpoint plo6.ckpt --snapshots snapshots/ --out plo6-blueprint.bin
+cargo run --release -p ducy-gto --example gto_match -- --game plo6 --bb 100 \
+    --cards plo6-cards.bin --blueprint plo6-blueprint.bin --deals 5000
+```
+
+The abstraction builds in 131 s on 12 cores into a 9.3 KB file. Within-
+bucket spread of equity, measured as for PLO4 (4,000 hands per street,
+2,000 samples each):
+
+| Street | Buckets | These buckets | Equity buckets, same cost | Equity buckets, 2,000 samples | Cost per hand |
+|---|---|---|---|---|---|
+| Preflop | 500 | 0.015 | | | 3.1 µs |
+| Flop | 200 | 0.060 | 0.113 (8 samples) | 0.014 | 19 µs |
+| Turn | 200 | 0.062 | 0.070 (32 samples) | 0.013 | 80 µs |
+| River | 200 | 0.019 | 0.018 (410 samples) | 0.011 | 187 µs |
+
+The "same cost" baseline is priced at PLO4's cost per equity sample;
+six-card samples cost more (15 two-card pairs per hand instead of 6), so
+the baseline gets more samples than it could really afford, most of all on
+the river. A whole deal's buckets
+take 627 µs, and MCCFR with them runs 2,220 iterations a second at PLO6
+100 BB with the full menu (PLO4: 4,400), bucketing about 12% of it.
+
+**The 100 BB blueprint:** the lean menu (9,128 nodes, about 719,000
+information sets, the same tree as PLO4's), 20 million iterations in 56
+minutes at about 6,000 a second on 12 cores; 1.8 MB. The preflop settled
+over training:
+
+| Iterations | 5 M | 10 M | 15 M | 20 M |
+|---|---|---|---|---|
+| Button fold / limp / raise | 21 / 37 / 41% | 17 / 38 / 45% | 14 / 39 / 47% | 13 / 39 / 48% |
+| Big blind vs a pot-sized open: fold / call / 3-bet | 43 / 36 / 21% | 43 / 36 / 20% | 43 / 37 / 19% | 43 / 37 / 19% |
+
+Against itself and every bot, in duplicate matches of 5,000 deals (10,000
+hands); the seven marked * were close at that size and were rerun at
+20,000 deals (40,000 hands). None of its decisions left the tree.
+
+| Opponent | bb/100 (± 95%) | Opponent | bb/100 (± 95%) |
+|---|---|---|---|
+| itself | −0.9 ± 27.2 | Robin Jane Lewd | +110.3 ± 29.8 |
+| EquityBot | +92.4 ± 28.5 | Gus Bluffsen | +100.5 ± 33.7 |
+| calling station | +171.8 ± 19.8 | Jen Silly * | +49.6 ± 12.4 |
+| Doug Poker * | +30.8 ± 12.4 | Michael Miserable | +39.2 ± 29.7 |
+| Jonny Slow | +48.6 ± 9.2 | Brad Owned | +40.9 ± 13.8 |
+| Mister Cheating | +67.8 ± 48.4 | Nik Airbag | +173.7 ± 77.1 |
+| Milk King | +74.7 ± 23.1 | Bungleman | +184.6 ± 47.3 |
+| Phil Bigmouth * | +37.4 ± 15.6 | Tom Collins | +43.6 ± 29.1 |
+| Rampart | +184.3 ± 67.5 | The Mathematician * | +24.1 ± 15.2 |
+| Danny Smallball * | +37.6 ± 14.9 | Andrew Favorable * | +29.8 ± 16.2 |
+| Chris Moneybags | +132.9 ± 39.0 | Tommy Sweeden * | +29.6 ± 18.2 |
+
+It beats every personality bot, as the PLO4 blueprint does; the same
+caveat applies (their Omaha play isn't tuned). In Node, with WASM, the
+9 KB abstraction and 1.8 MB blueprint load in 2 ms (there's no class table
+to enumerate), and over 200 hands (704 decisions) a decision took 0.1 ms
+on average and 0.9 ms at most.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
