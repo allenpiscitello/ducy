@@ -16,6 +16,7 @@ use crate::{
     bot::{Bot, HandSummary, Observation},
     bots::rng,
     hand::{Action, Event, LegalActions, Street},
+    ranges::range_equity,
     rules::Variant,
     stats::OpponentModel,
     strength::{observation_equity, preflop_percentile},
@@ -129,7 +130,15 @@ pub struct Style {
 
     /// Monte Carlo deals per equity estimate. More is steadier but slower.
     pub samples: usize,
+    /// Judges its hand after the flop against what each opponent probably
+    /// holds, from their actions this hand ([`crate::ranges`]), instead of
+    /// against random hands. Then `caution` counts for less
+    /// ([`RANGE_CAUTION`]): a bet already narrows the range.
+    pub ranges: bool,
 }
+
+/// How much of `caution` still applies when judging against ranges.
+pub const RANGE_CAUTION: f64 = 0.35;
 
 impl Default for Style {
     /// A solid, balanced regular: about a quarter of hands, positional,
@@ -165,6 +174,7 @@ impl Default for Style {
             exploit: false,
             exploit_after: 10,
             samples: 150,
+            ranges: true,
         }
     }
 }
@@ -602,6 +612,9 @@ impl Personality {
                 caution: 0.02,
                 bet_size: 1.5,
                 open_size: 3.5,
+                // The maniac never believes a bet: he judges his hand
+                // against random hands, whatever you did.
+                ranges: false,
                 ..base
             },
             Self::Bungleman => Style {
@@ -837,8 +850,9 @@ impl Favorites {
 ///   raises, re-raises or 4-bets the top shares given by the style (wider in
 ///   late position), plus any `any_suited` / `any_ace` / `always_play`
 ///   hands. In push/fold mode it shoves or folds.
-/// - **After the flop** it estimates its equity against random hands for
-///   the opponents still in, then bets for value, slow-plays, bluffs, calls
+/// - **After the flop** it estimates its equity against what the opponents
+///   still in probably hold, from their actions this hand (or against random
+///   hands with `ranges` off), then bets for value, slow-plays, bluffs, calls
 ///   or folds by the style's thresholds and frequencies.
 /// - **Mood:** big losses (`tilt`) and wins (`heater`) make it looser and
 ///   bolder for a while; it calms down by `recovery` each hand.
@@ -1112,10 +1126,32 @@ impl PersonalityBot {
     fn postflop(&mut self, obs: &Observation, style: &Style) -> Action {
         let legal = &obs.legal;
         let players = obs.seats.iter().filter(|s| !s.folded).count().max(1);
-        let equity = observation_equity(obs, style.samples, &mut self.rng);
+        let (equity, caution) = if style.ranges {
+            (
+                range_equity(obs, &self.model, style.samples, &mut self.rng),
+                style.caution * RANGE_CAUTION,
+            )
+        } else {
+            (
+                observation_equity(obs, style.samples, &mut self.rng),
+                style.caution,
+            )
+        };
         let edge = equity - 1.0 / players as f64;
         // What the bet-or-check decision sees: flipped for backwards players.
-        let bet_edge = if style.backwards { -edge } else { edge };
+        // Their flip was made for equity against random hands, which runs
+        // higher than against a range: judged by the range, far more hands
+        // look weak, and they'd bet nearly everything. So they keep it.
+        let bet_edge = if style.backwards {
+            let base = if style.ranges {
+                observation_equity(obs, style.samples, &mut self.rng)
+            } else {
+                equity
+            };
+            1.0 / players as f64 - base
+        } else {
+            edge
+        };
         let monster = !style.backwards && edge >= style.value_margin + 0.2;
         let pot = obs.pot as f64;
 
@@ -1186,7 +1222,7 @@ impl PersonalityBot {
                 if pot_odds <= ALWAYS_CALL_ODDS {
                     return Action::Call;
                 }
-                let mut needed = pot_odds * style.call_factor + style.caution * bet_fraction;
+                let mut needed = pot_odds * style.call_factor + caution * bet_fraction;
                 if has_pair(obs) {
                     needed *= style.pair_call_factor;
                 }
@@ -1225,7 +1261,8 @@ impl Bot for PersonalityBot {
 
     fn hand_over(&mut self, summary: &HandSummary) {
         self.checked = None;
-        if self.style.exploit {
+        // Ranges read the seats' VPIP and PFR; adjusting to them is `exploit`.
+        if self.style.exploit || self.style.ranges {
             self.model
                 .record(&summary.history, summary.result.final_stacks.len());
         }
