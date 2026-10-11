@@ -483,8 +483,10 @@ fn river_bet(hole: &str, bet: u64) -> ducy_play::Observation {
 #[test]
 fn some_prices_are_too_good_to_fold() {
     // Tom Collins is the most cautious caller (call factor 1.3, caution
-    // 0.45). 8-high has about 7% on this river, Q-high about 18%.
-    let mut tom = with(Personality::TomCollins, |_| {});
+    // 0.45). 8-high has about 7% on this river against random hands, Q-high
+    // about 18%; this checks the price rules, so against random hands (a
+    // preflop raiser's river bet leaves Q-high far less).
+    let mut tom = with(Personality::TomCollins, |s| s.ranges = false);
 
     // 20 into 200 (8% pot odds): every bot calls, even with air.
     assert_eq!(tom.act(&river_bet("8h 6d", 20)), Some(Action::Call));
@@ -621,7 +623,7 @@ fn tommy_sweeden_check_raises_and_steams_after_losing() {
     let mut check_raises = vec![0; n];
     // Times it checked and someone then bet: its chances to check-raise.
     let mut chances = vec![0; n];
-    for h in 0..600 {
+    for h in 0..1200 {
         let deal = Deal::random(rules.variant, n, Some(1900 + h)).unwrap();
         let mut hand = Hand::new(rules, &vec![200; n], h as usize % n, deal).unwrap();
         let mut seated: Vec<&mut dyn Bot> = bots.iter_mut().map(|b| b as &mut dyn Bot).collect();
@@ -863,7 +865,7 @@ fn bots_loosen_at_short_tables() {
 #[test]
 fn bots_play_wider_in_position() {
     // Raise-first-in rate by position, 6-handed: [SB, BB, UTG, HJ, CO, BTN].
-    let (_, rfi) = doug_table(6, 600);
+    let (_, rfi) = doug_table(6, 1200);
     let (small_blind, early, cutoff, button) = (rfi[0], rfi[2], rfi[4], rfi[5]);
     assert!(button > early * 1.2, "{rfi:?}");
     assert!(cutoff > early, "{rfi:?}");

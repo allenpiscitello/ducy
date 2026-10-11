@@ -147,11 +147,17 @@ and `from_name()` make it easy to list them in an app.
   blind (first to act after the flop), with the big blind treated as middle
   position. Even the recreational personalities have a little positional
   awareness (`position_bonus` 0.15).
-- *After the flop:* it estimates its equity against random hands for the
-  opponents still in (`strength::equity_vs_random`), bets for value above a
-  margin, bluffs weak hands at its bluff rate, and calls when its equity
-  beats the pot odds times its call factor plus some caution about the bet's
-  size.
+- *After the flop:* it estimates its equity against what the opponents still
+  in probably hold (`ranges::range_equity`, #205): a preflop raise reads as
+  the top of the raiser's PFR, a call as its VPIP, and each bet, raise or
+  call after the flop keeps the hands strongest on that street's board, with
+  some draws and bluffs kept too; players who bet far more than they call
+  get wider betting ranges. Then it bets for value above a margin, bluffs
+  weak hands at its bluff rate, and calls when its equity beats the pot odds
+  times its call factor plus some caution about the bet's size (a third of
+  it with ranges on, since a bet already narrows the range). With `ranges`
+  off it judges against random hands (`strength::equity_vs_random`), as
+  Nik Airbag does: the maniac never believes a bet.
 - *Exploiting:* with `exploit` on (Mister Cheating), it tracks every seat's
   VPIP, PFR, fold-to-bet and aggression from hand histories
   (`stats::OpponentModel`). After 10 hands it bluffs more into players who
@@ -183,6 +189,7 @@ and `from_name()` make it easy to list them in an app.
 | `omaha` | How much looser and more aggressive it plays in Omaha than in Hold'em (0.5: half again as many hands). |
 | `exploit`, `exploit_after` | Whether it adapts to opponents, and after how many hands. |
 | `samples` | Monte Carlo deals per equity estimate. |
+| `ranges` | Judges its hand after the flop against opponents' likely ranges (on by default) instead of random hands. |
 
 Start from a preset or the default and change what you like:
 
