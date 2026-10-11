@@ -145,6 +145,73 @@ fn thirty_entrants_on_three_tables_play_to_one_winner() {
     }
 }
 
+/// Hands that end together at several tables (as when absent players act at
+/// every table at once, or turn clocks run out together) and are then taken
+/// in one table after another, as `TournamentHost` does: a table whose hand
+/// is over but not taken in yet gives up no one, so nobody who just busted
+/// is moved to another table, every finish is a real player, and the tables
+/// end balanced (#210).
+#[test]
+fn hands_ending_together_are_taken_in_one_table_at_a_time() {
+    for seed in 0..12 {
+        let mut t = Tournament::new(config(9, 3, seed), stateless_field(30)).unwrap();
+        let total = t.total_chips();
+        let mut hands = 0u64;
+        while !t.is_over() {
+            let dealt: Vec<usize> = t
+                .table_ids()
+                .into_iter()
+                .filter(|&id| t.can_deal(id))
+                .collect();
+            assert!(!dealt.is_empty(), "stuck with tables {:?}", sizes(&t));
+            for &id in &dealt {
+                t.new_hand(id).unwrap();
+                play_out(&mut t, id);
+                hands += 1;
+            }
+            t.set_level((hands / 30) as usize);
+            for &id in &dealt {
+                t.finish_hand(id).unwrap();
+                if t.is_over() {
+                    break;
+                }
+            }
+            if t.is_over() {
+                break;
+            }
+            assert_eq!(chips(&t), total, "chips conserved (seed {seed})");
+            for s in t.standings() {
+                assert!(
+                    s.stack > 0,
+                    "{} has no chips but is still in (seed {seed})",
+                    s.id
+                );
+            }
+            let s = sizes(&t);
+            assert_eq!(
+                s.iter().sum::<usize>(),
+                t.players_left(),
+                "everyone left is seated"
+            );
+            let (lo, hi) = (*s.iter().min().unwrap(), *s.iter().max().unwrap());
+            assert!(
+                hi - lo <= 1,
+                "tables balanced within one: {s:?} (seed {seed})"
+            );
+        }
+        assert!(
+            t.finishes().iter().all(|f| !f.id.is_empty()),
+            "every finish is a player"
+        );
+        let places: HashSet<usize> = t.finishes().iter().map(|f| f.place).collect();
+        assert_eq!(
+            places,
+            (2..=30).collect(),
+            "every place 2..30 once (seed {seed})"
+        );
+    }
+}
+
 #[test]
 fn an_absent_player_is_blinded_off_and_never_removed() {
     let mut players = vec![Entrant::person("away", "Away")];

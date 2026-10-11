@@ -621,18 +621,29 @@ impl Tournament {
         Ok(report)
     }
 
+    /// Whether table `id` is between hands with its last hand taken in. A
+    /// hand can be over but not taken in yet (several tables' hands ending
+    /// together are taken in one at a time): that table still seats players
+    /// who just busted, so it gives up no one until its own
+    /// [`Self::finish_hand`] (#210).
+    fn settled(&self, id: usize) -> bool {
+        self.table(id)
+            .is_some_and(|t| !t.in_hand() && t.hand_number() == self.finished[id])
+    }
+
     /// Breaks tables while the field fits on fewer, then moves players from
     /// the fullest tables to the shortest until no two differ by more than
-    /// one. Only tables between hands give up players.
+    /// one. Only settled tables (between hands, their last hand taken in)
+    /// give up players.
     fn rebalance(&mut self, report: &mut HandReport) -> Result<(), PlayError> {
         loop {
             let ids = self.table_ids();
             let needed = self.players_left().div_ceil(self.config.table_size).max(1);
             if ids.len() > needed {
-                // Break the shortest table that isn't mid-hand.
+                // Break the shortest settled table.
                 let Some(&victim) = ids
                     .iter()
-                    .filter(|&&t| !self.table(t).expect("live").in_hand())
+                    .filter(|&&t| self.settled(t))
                     .min_by_key(|&&t| (self.players_at(t), usize::MAX - t))
                 else {
                     break;
@@ -664,10 +675,10 @@ impl Tournament {
                 report.broken.push(victim);
                 continue;
             }
-            // Balance: fullest table between hands → shortest table.
+            // Balance: fullest settled table → shortest table.
             let Some(&src) = ids
                 .iter()
-                .filter(|&&t| !self.table(t).expect("live").in_hand())
+                .filter(|&&t| self.settled(t))
                 .max_by_key(|&&t| (self.players_at(t), usize::MAX - t))
             else {
                 break;
