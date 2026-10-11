@@ -16,7 +16,7 @@ use crate::{
     bot::{Bot, HandSummary, Observation},
     bots::rng,
     hand::{Action, Event, LegalActions, Street},
-    ranges::range_equity,
+    ranges::{has_nuts, range_equity},
     rules::Variant,
     stats::OpponentModel,
     strength::{observation_equity, preflop_percentile},
@@ -1186,6 +1186,14 @@ impl PersonalityBot {
             Some(call) => {
                 let raise_size =
                     obs.current_bet + ((pot + call as f64) * style.bet_size).round() as u64;
+                // Heads-up with the nuts: never just call, raise something
+                // (calling only when raising isn't allowed).
+                if players == 2 {
+                    let hole: Vec<_> = obs.hole_cards.iter(false).collect();
+                    if has_nuts(obs.rules.variant, &hole, &obs.board) {
+                        return raise_to(legal, raise_size).unwrap_or(Action::Call);
+                    }
+                }
                 let raise_chance = if monster {
                     style.aggression.max(style.trap)
                 } else {

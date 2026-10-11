@@ -163,6 +163,36 @@ pub fn made_score(variant: Variant, hole: &[Card], board: &[Card]) -> u32 {
     }
 }
 
+/// Whether `hole` holds the nuts on `board` (3 to 5 cards) right now: no
+/// hand an opponent could hold makes a better five-card hand (a tie still
+/// counts). In Hold'em an opponent holds two unseen cards; in Omaha its best
+/// hand uses exactly two of its cards. Either way, checking every pair of
+/// unseen cards with the board covers every hand it could make.
+pub fn has_nuts(variant: Variant, hole: &[Card], board: &[Card]) -> bool {
+    if board.len() < 3 {
+        return false;
+    }
+    let mine = made_score(variant, hole, board);
+    let mut known = Deck::empty();
+    for &c in hole.iter().chain(board) {
+        known |= c;
+    }
+    let unseen: Vec<Card> = (Deck::all_cards() - known).iter(false).collect();
+    // A pair of cards scored as a two-card hand of the same game.
+    let pair_variant = match variant {
+        Variant::Holdem => Variant::Holdem,
+        Variant::Omaha { .. } => Variant::Omaha { hole_cards: 2 },
+    };
+    for (i, &a) in unseen.iter().enumerate() {
+        for &b in &unseen[i + 1..] {
+            if made_score(pair_variant, &[a, b], board) > mine {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Share of starting hands at least as good as `hole`: 0 is the best hand,
 /// 1 the worst.
 pub fn preflop_top(variant: Variant, hole: &[Card]) -> f64 {
