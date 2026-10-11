@@ -1158,6 +1158,14 @@ impl PersonalityBot {
         match legal.call {
             None => {
                 let size = (pot * style.bet_size).round() as u64;
+                // The nuts on the river, last to act: checking would go to
+                // showdown without a bet, so bet. (With someone still to act
+                // behind, it may check to let them bet.)
+                if nuts_on_river(obs) && !acts_after(obs) {
+                    if let Some(action) = bet(legal, size) {
+                        return action;
+                    }
+                }
                 if monster && obs.street != Street::River && self.chance(style.trap) {
                     // Slow-play: check now, raise if bet into.
                     return Action::Check;
@@ -1186,13 +1194,10 @@ impl PersonalityBot {
             Some(call) => {
                 let raise_size =
                     obs.current_bet + ((pot + call as f64) * style.bet_size).round() as u64;
-                // Heads-up with the nuts: never just call, raise something
-                // (calling only when raising isn't allowed).
-                if players == 2 {
-                    let hole: Vec<_> = obs.hole_cards.iter(false).collect();
-                    if has_nuts(obs.rules.variant, &hole, &obs.board) {
-                        return raise_to(legal, raise_size).unwrap_or(Action::Call);
-                    }
+                // The nuts on the river: never just call to showdown, raise
+                // something (calling only when raising isn't allowed).
+                if nuts_on_river(obs) {
+                    return raise_to(legal, raise_size).unwrap_or(Action::Call);
                 }
                 let raise_chance = if monster {
                     style.aggression.max(style.trap)
@@ -1297,6 +1302,16 @@ fn acts_after(obs: &Observation) -> bool {
         .iter()
         .enumerate()
         .any(|(s, v)| s != obs.seat && !v.folded && !v.all_in && order(s) > me)
+}
+
+/// Whether it holds the nuts on the river: no hand anyone could hold beats
+/// it (a tie still counts).
+fn nuts_on_river(obs: &Observation) -> bool {
+    if obs.street != Street::River {
+        return false;
+    }
+    let hole: Vec<_> = obs.hole_cards.iter(false).collect();
+    has_nuts(obs.rules.variant, &hole, &obs.board)
 }
 
 fn passive(legal: &LegalActions) -> Action {

@@ -119,6 +119,33 @@ fn the_nuts_are_recognised() {
 }
 
 #[test]
+fn checked_to_last_on_the_river_with_the_nuts_it_bets() {
+    use ducy_play::{Bot, Personality, PersonalityBot};
+    // The button (seat 0, last to act after the flop) holds the nut flush;
+    // the big blind checks every street. Checking back would end the hand.
+    for p in [Personality::JonnySlow, Personality::MilkKing] {
+        let mut h = hand(&["Ah Th", "8c 3d"], "Kh 7h 2h 9c 4s");
+        h.act(Action::Call).unwrap();
+        h.act(Action::Check).unwrap();
+        for _ in 0..2 {
+            h.act(Action::Check).unwrap();
+            h.act(Action::Check).unwrap();
+        }
+        h.act(Action::Check).unwrap();
+        let obs = h.observation(0).unwrap();
+        assert_eq!(obs.street, Street::River);
+        let mut style = p.style();
+        style.samples = 40;
+        let mut bot = PersonalityBot::new(p.name(), style, Some(1));
+        assert!(
+            matches!(bot.act(&obs), Some(Action::Bet(_))),
+            "{} checked the nuts down",
+            p.name()
+        );
+    }
+}
+
+#[test]
 fn heads_up_with_the_nuts_it_raises_instead_of_calling() {
     use ducy_play::{Bot, Personality, PersonalityBot};
     // Jonny Slow, the most passive caller, holds the nut flush on the river
