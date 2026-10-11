@@ -31,6 +31,7 @@ use ducy_gto::{
     omaha::{
         abstraction::PloAbstraction,
         bot::{PloGtoBot, load_blueprint},
+        river::PloRiverSolving,
     },
 };
 use serde::Serialize;
@@ -228,6 +229,14 @@ const PAGE_RIVER_ITERATIONS: usize = 200;
 const PAGE_TURN_RIVER_SAMPLES: usize = 4;
 const PAGE_TURN_BIASES: bool = true;
 
+/// The PLO GTO bots' real-time river solving in the page: iterations per
+/// solve and hands sampled per range. Natively these keep most of what the
+/// full settings (200, 256) gain over the blueprint's river, at about an
+/// eighth of the cost: −447 ± 115 mbb/hand for PLO6, −441 ± 78 for PLO4, in
+/// about 85 ms a solve (#203; `plo_river` example).
+const PAGE_PLO_RIVER_ITERATIONS: usize = 100;
+const PAGE_PLO_RIVER_HANDS: usize = 128;
+
 /// The PLO GTO bot's data, once the page has loaded it with `loadGtoPlo`.
 struct GtoPlo {
     config: HunlConfig,
@@ -362,7 +371,12 @@ fn gto_plo_seat(id: &'static str, seed: u64) -> Result<TableSeat, JsError> {
             g.blueprint.clone(),
             g.tree.clone(),
             seed,
-        );
+        )
+        .with_river_solving(PloRiverSolving {
+            iterations: PAGE_PLO_RIVER_ITERATIONS,
+            hands: PAGE_PLO_RIVER_HANDS,
+            time: None,
+        });
         Ok(TableSeat::with_bot("GTO", id, Box::new(bot)))
     })
 }

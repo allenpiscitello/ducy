@@ -5,7 +5,7 @@ use ducy_gto::{
     holdem::{
         blueprint::Blueprint,
         cards::{Card, mask},
-        hunl::{HuPlo, HunlConfig},
+        hunl::{HuPlo, Hunl, HunlConfig},
     },
     omaha::{
         abstraction::{PloAbstraction, PloAbstractionConfig},
@@ -14,16 +14,19 @@ use ducy_gto::{
     },
 };
 use ducy_play::{
-    Bot, MatchConfig, TableRules,
+    Bot, MatchConfig, TableRules, Variant,
     bots::{CallingStation, RandomBot},
     run_match,
 };
 
-/// A small abstraction and a briefly trained 10 big blind blueprint.
-fn setup() -> (HunlConfig, Arc<PloAbstraction>, Blueprint) {
+/// A small abstraction for `H` hole cards and a briefly trained 10 big
+/// blind blueprint.
+fn setup_for<const H: usize>() -> (HunlConfig, Arc<PloAbstraction>, Blueprint) {
     let cards = Arc::new(PloAbstraction::build(
         PloAbstractionConfig {
-            preflop: 0,
+            hole_cards: H,
+            // One bucket per class needs four cards; six use a small model.
+            preflop: if H == 4 { 0 } else { 16 },
             flop: 8,
             turn: 8,
             river: 8,
@@ -34,7 +37,7 @@ fn setup() -> (HunlConfig, Arc<PloAbstraction>, Blueprint) {
         |_| {},
     ));
     let config = HunlConfig::pot_limit_omaha_lean(10);
-    let game = HuPlo::with_cards(config.clone(), Some(&*cards));
+    let game = Hunl::<_, H>::with_cards(config.clone(), Some(&*cards));
     let mut m = Mccfr::new(
         &game,
         Config {
@@ -50,6 +53,10 @@ fn setup() -> (HunlConfig, Arc<PloAbstraction>, Blueprint) {
             .unwrap_or_else(|| vec![1.0 / n as f64; n])
     });
     (config, cards, bp)
+}
+
+fn setup() -> (HunlConfig, Arc<PloAbstraction>, Blueprint) {
+    setup_for::<4>()
 }
 
 #[test]
@@ -80,13 +87,13 @@ fn river_solves_converge_and_beat_the_blueprint_river() {
         let Some(bp_root) = root else { continue };
         checked += 1;
         let bot = 1;
-        let mut sample = |player: usize, blocked: u64, first: Option<[Card; 4]>, n: usize| {
+        let mut sample = |player: usize, blocked: u64, first: Option<&[Card]>, n: usize| {
             sample_range(
                 &cards, &blueprint, &game.tree, &steps, player, &s.board, blocked, n, first,
                 &mut rng,
             )
         };
-        let mine = sample(bot, 0, Some(s.hole[bot]), 40);
+        let mine = sample(bot, 0, Some(&s.hole[bot][..]), 40);
         let theirs = sample(1 - bot, mask(&s.hole[bot]), None, 40);
         assert_eq!(mine.hands[0], s.hole[bot], "our own hand is hand 0");
         let fresh = sample(1 - bot, 0, None, 80);
@@ -134,15 +141,26 @@ fn river_solves_converge_and_beat_the_blueprint_river() {
 
 #[test]
 fn the_bot_solves_rivers_and_plays_legally() {
-    let (config, cards, blueprint) = setup();
-    let game = HuPlo::with_cards(config.clone(), Some(&*cards));
+    solves_rivers_and_plays_legally::<4>();
+}
+
+#[test]
+fn the_plo6_bot_solves_rivers_and_plays_legally() {
+    solves_rivers_and_plays_legally::<6>();
+}
+
+fn solves_rivers_and_plays_legally<const H: usize>() {
+    let (config, cards, blueprint) = setup_for::<H>();
+    let game = Hunl::<_, H>::with_cards(config.clone(), Some(&*cards));
     let tree = Arc::new(game.tree);
     let blueprint = Arc::new(blueprint);
     let mut solving = PloRiverSolving::new(30);
     solving.hands = 32;
     let me = PloGtoBot::from_parts(config, cards, blueprint, tree, 3).with_river_solving(solving);
     let solves = Rc::new(Cell::new(0));
-    let rules = TableRules::pot_limit_omaha(1, 2);
+    let rules = TableRules::pot_limit_omaha(1, 2).with_variant(Variant::Omaha {
+        hole_cards: H as u32,
+    });
     let mut bots: Vec<Box<dyn Bot>> = vec![
         Box::new(Watched(me, solves.clone())),
         Box::new(CallingStation),

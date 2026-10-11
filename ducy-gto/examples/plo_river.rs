@@ -4,6 +4,8 @@
 //!     cargo run --release -p ducy-gto --example plo_river -- \
 //!         --cards plo-cards.bin --blueprint plo-blueprint.bin --spots 300
 //!
+//! The game has as many hole cards as the abstraction (six for PLO6, #203).
+//!
 //! Options: `--bb N` (the blueprint's depth, default 100), `--spots N`
 //! (river spots, default 300), `--iterations N` and `--hands N` (the solve's
 //! settings, default 200 and 256), `--exploiter N` (hands in the
@@ -26,7 +28,7 @@ use ducy_gto::{
     holdem::{
         blueprint::Blueprint,
         cards::{Card, mask},
-        hunl::{HuPlo, HunlConfig},
+        hunl::{Hunl, HunlConfig},
     },
     omaha::{
         abstraction::PloAbstraction,
@@ -55,9 +57,17 @@ fn mean_ci(x: &[f64]) -> (f64, f64) {
 fn main() {
     let cards = PloAbstraction::load(&std::fs::read(arg("--cards").expect("--cards")).unwrap())
         .expect("a PLO abstraction");
+    match cards.config.hole_cards {
+        4 => run::<4>(cards),
+        5 => run::<5>(cards),
+        _ => run::<6>(cards),
+    }
+}
+
+fn run<const H: usize>(cards: PloAbstraction) {
     let bb = num("--bb", 100) as u64;
     let config = HunlConfig::pot_limit_omaha_lean(bb);
-    let game = HuPlo::with_cards(config.clone(), Some(&cards));
+    let game = Hunl::<_, H>::with_cards(config.clone(), Some(&cards));
     let bytes = std::fs::read(arg("--blueprint").expect("--blueprint")).unwrap();
     let blueprint = Blueprint::load(&bytes, &game, &cards).expect("a blueprint for this game");
     let spots = num("--spots", 300);
@@ -95,13 +105,13 @@ fn main() {
         let root = game.tree.nodes[bp_root as usize].betting.clone();
         for bot in 0..2 {
             let hole = s.hole[bot];
-            let mut sample = |player: usize, blocked: u64, first: Option<[Card; 4]>, n: usize| {
+            let mut sample = |player: usize, blocked: u64, first: Option<&[Card]>, n: usize| {
                 sample_range(
                     &cards, &blueprint, &game.tree, &steps, player, &board, blocked, n, first,
                     &mut rng,
                 )
             };
-            let mine = sample(bot, 0, Some(hole), hands);
+            let mine = sample(bot, 0, Some(&hole[..]), hands);
             let theirs = sample(1 - bot, mask(&hole), None, hands);
             let fresh = sample(1 - bot, 0, None, exploiter);
             let ranges = if bot == 0 {

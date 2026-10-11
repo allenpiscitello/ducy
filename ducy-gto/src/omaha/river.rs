@@ -73,10 +73,11 @@ impl Default for PloRiverSolving {
     }
 }
 
-/// A sampled river range: four-card hands and their weights (summing to 1).
+/// A sampled river range: hands (of the abstraction's hole-card count) and
+/// their weights (summing to 1).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RiverRange {
-    pub hands: Vec<[Card; 4]>,
+    pub hands: Vec<Vec<Card>>,
     pub weights: Vec<f32>,
 }
 
@@ -113,8 +114,9 @@ pub fn reach_weight(
 
 /// Player `player`'s range at the start of the river on `board`, sampled:
 /// `4 * n` candidates from the cards outside `blocked`, weighted by
-/// [`reach_weight`], resampled to `n` hands of equal weight. `first`, if
-/// given, is kept as hand 0 (the bot's own).
+/// [`reach_weight`], resampled to `n` hands of equal weight. Hands have as
+/// many cards as `cards` was built for. `first`, if given, is kept as hand 0
+/// (the bot's own).
 #[allow(clippy::too_many_arguments)]
 pub fn sample_range(
     cards: &PloAbstraction,
@@ -125,17 +127,23 @@ pub fn sample_range(
     board: &[Card; 5],
     blocked: u64,
     n: usize,
-    first: Option<[Card; 4]>,
+    first: Option<&[Card]>,
     rng: &mut Rng,
 ) -> RiverRange {
+    let k = cards.config.hole_cards;
+    // The flop and turn views don't depend on the hand size (only the
+    // river's sampled opponents do).
     let views = [BoardView::new(&board[..3]), BoardView::new(&board[..4])];
-    let mut hands: Vec<[Card; 4]> = Vec::with_capacity(n);
-    hands.extend(first);
+    let mut hands: Vec<Vec<Card>> = Vec::with_capacity(n);
+    hands.extend(first.map(<[Card]>::to_vec));
     let want = n.saturating_sub(hands.len());
-    let candidates: Vec<([Card; 4], f64)> = (0..4 * want.max(1))
+    let deal = |rng: &mut Rng| {
+        let mut used = blocked | mask(board);
+        (0..k).map(|_| draw(&mut used, rng)).collect::<Vec<Card>>()
+    };
+    let candidates: Vec<(Vec<Card>, f64)> = (0..4 * want.max(1))
         .map(|_| {
-            let mut used = blocked | mask(board);
-            let h: [Card; 4] = std::array::from_fn(|_| draw(&mut used, rng));
+            let h = deal(rng);
             let w = reach_weight(cards, blueprint, tree, steps, player, &h, &views);
             (h, w)
         })
@@ -150,15 +158,14 @@ pub fn sample_range(
         for (h, w) in &candidates {
             acc += w;
             while at < acc && hands.len() < n {
-                hands.push(*h);
+                hands.push(h.clone());
                 at += step;
             }
         }
     }
     while hands.len() < n {
         // No weight anywhere (a line the blueprint never takes): uniform.
-        let mut used = blocked | mask(board);
-        hands.push(std::array::from_fn(|_| draw(&mut used, rng)));
+        hands.push(deal(rng));
     }
     let weights = vec![1.0 / n as f32; n];
     RiverRange { hands, weights }
@@ -175,9 +182,9 @@ struct Matchups {
 }
 
 impl Matchups {
-    fn new(board: &[Card; 5], a: &[[Card; 4]], b: &[[Card; 4]]) -> Self {
+    fn new(board: &[Card; 5], a: &[Vec<Card>], b: &[Vec<Card>]) -> Self {
         let table = PairTable::new(board);
-        let score = |h: &[Card; 4]| table.score(h);
+        let score = |h: &Vec<Card>| table.score(h);
         let sa: Vec<u32> = a.iter().map(score).collect();
         let sb: Vec<u32> = b.iter().map(score).collect();
         let ma: Vec<u64> = a.iter().map(|h| mask(h)).collect();
@@ -515,14 +522,15 @@ fn br(
 /// call.
 pub fn blueprint_strategy(
     tree: &RiverTree,
-    hands: [&[[Card; 4]]; 2],
+    hands: [&[Vec<Card>]; 2],
     cards: &PloAbstraction,
     board: &[Card; 5],
     blueprint: &Blueprint,
     bp_tree: &BettingTree,
     bp_root: u32,
 ) -> Strategy {
-    let view = BoardView::new(board);
+    // River buckets come from equity against opponents of the same size.
+    let view = BoardView::for_hands(board, cards.config.hole_cards);
     let buckets: [Vec<u16>; 2] =
         [0, 1].map(|p| hands[p].iter().map(|h| cards.bucket_on(h, &view)).collect());
     let matched = match_blueprint(tree, bp_tree, bp_root);

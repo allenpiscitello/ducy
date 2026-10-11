@@ -754,11 +754,30 @@ count from the abstraction.
 - **River:** equity against 1,024 sampled six-card opponents (about 58% of
   them share a card with a six-card hand and are skipped, against 31% for
   four cards, so twice PLO4's 512).
-- **River solving** stays four-card only; the PLO6 bot plays the blueprint's
-  river.
+- **River solving** (#203) samples six-card ranges the same way as PLO4's
+  (the abstraction's hole-card count sets the hand size), and the
+  blueprint's river buckets for the gadget use six-card opponents.
 - **In the browser:** `loadGtoPlo` takes a six-card model too and seats it
   as `gto-plo6` at a `plo6` table (`gtoPlo6Loaded()`); a four-card and a
-  six-card model can be loaded side by side.
+  six-card model can be loaded side by side. Both PLO bots solve the river
+  there (100 iterations, 128 hands per range; before #203 the page played
+  the blueprint's river).
+
+River solving against the blueprint's river (`plo_river`, 100 spots, both
+players as the bot; the 20M PLO6 blueprint and the 25M PLO4 one; one core,
+while training ran on the others):
+
+| Game | Iterations, hands | vs the blueprint's river (paired) | Solve time (mean / slowest) |
+|---|---|---|---|
+| PLO6 | 200, 256 | −517 ± 130 mbb/hand | 623 / 1,391 ms |
+| PLO6 | 100, 128 | −447 ± 115 mbb/hand | 83 / 211 ms |
+| PLO4 | 100, 128 | −441 ± 78 mbb/hand | 85 / 208 ms |
+
+In Node with WASM and the page's settings, over 200 hands each, decisions
+took 29.8 ms on average (slowest 400 ms) for PLO4 and 28.1 ms (slowest
+391 ms) for PLO6. Head to head, river solving against the blueprint alone
+(PLO6, 2,000 duplicate deals) was −34 ± 50 bb/100: too close to call at
+that size, as expected when only the river differs.
 
 ```sh
 cargo run --release -p ducy-gto --example plo_abstraction -- --hole-cards 6 --out plo6-cards.bin

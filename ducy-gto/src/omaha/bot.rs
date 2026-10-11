@@ -22,8 +22,8 @@
 //! solved again when the opponent bets a size the solution doesn't have.
 //!
 //! It plays as many hole cards as its abstraction was built for: four for
-//! PLO, six for PLO6 (#200). River solving is four-card only; with more
-//! cards it plays the blueprint's river.
+//! PLO, six for PLO6 (#200), and solves the river with the same number of
+//! cards in each sampled hand (#203).
 
 use std::sync::Arc;
 
@@ -152,10 +152,9 @@ impl PloGtoBot {
     /// solution yet or the real river left its tree. `None` to play the
     /// blueprint instead.
     fn river_action(&mut self, obs: &Observation) -> Option<Action> {
-        // River solving samples four-card ranges.
+        // River solving samples ranges of the abstraction's hand size.
         if obs.seats.len() != 2
-            || obs.hole_cards.num_cards() != 4
-            || self.cards.config.hole_cards != 4
+            || obs.hole_cards.num_cards() as usize != self.cards.config.hole_cards
         {
             return None;
         }
@@ -198,11 +197,10 @@ impl PloGtoBot {
         let board: Vec<Card> = obs.board.iter().copied().map(from_ducy).collect();
         let board: [Card; 5] = board.try_into().ok()?;
         let hole: Vec<Card> = obs.hole_cards.iter(false).map(from_ducy).collect();
-        let hole: [Card; 4] = hole.try_into().ok()?;
         let me = self.track.me;
         let steps = self.track.follow.steps_before_river(&self.tree);
         let mut rng = Rng::new(self.rng.next_u64());
-        let mut range = |player: usize, blocked: u64, first: Option<[Card; 4]>| {
+        let mut range = |player: usize, blocked: u64, first: Option<&[Card]>| {
             sample_range(
                 &self.cards,
                 &self.blueprint,
@@ -218,7 +216,7 @@ impl PloGtoBot {
         };
         // Ours is public (only the board is known to the opponent), with our
         // real hand first; theirs can't hold our cards.
-        let mine = range(me, 0, Some(hole));
+        let mine = range(me, 0, Some(&hole));
         let theirs = range(1 - me, mask(&hole), None);
         let ranges = if me == 0 {
             [mine, theirs]
