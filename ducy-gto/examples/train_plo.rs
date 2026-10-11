@@ -4,6 +4,9 @@
 //!     cargo run --release -p ducy-gto --example train_plo -- \
 //!         --cards plo-cards.bin --bb 100 --iters 20000000 --out plo-blueprint.bin
 //!
+//! The game has as many hole cards as the abstraction: build it with
+//! `plo_abstraction --hole-cards 6` for PLO6 (#200).
+//!
 //! Options (all optional except `--cards`):
 //!
 //! - `--cards FILE`: the PLO card abstraction (`plo_abstraction` builds one)
@@ -30,7 +33,7 @@ use ducy_gto::{
     Config, Discount, Mccfr, Rng,
     holdem::{
         blueprint::Blueprint,
-        hunl::{BetMenu, Buckets, HuPlo, HunlConfig},
+        hunl::{BetMenu, Buckets, Hunl, HunlConfig},
     },
     omaha::abstraction::{PloAbstraction, random_spot},
     sampled::sampled_exploitability,
@@ -89,8 +92,8 @@ fn args() -> Args {
 
 /// The button's fold / limp / raise and the big blind's fold / call /
 /// 3-bet against an open, averaged over random hands.
-fn preflop_summary(
-    game: &HuPlo<PloAbstraction>,
+fn preflop_summary<const H: usize>(
+    game: &Hunl<PloAbstraction, H>,
     cards: &PloAbstraction,
     strategy: &impl Fn(u64, usize) -> Vec<f64>,
 ) -> String {
@@ -101,7 +104,7 @@ fn preflop_summary(
     let (mut sb, mut bb) = ([0.0; 3], [0.0; 3]);
     let n = 4000;
     for _ in 0..n {
-        let (hole, _) = random_spot(4, 0, &mut rng);
+        let (hole, _) = random_spot(H, 0, &mut rng);
         let b = cards.hand_bucket(&hole, &[]) as u64;
         let s = strategy(b, root.actions.len());
         sb[0] += s[0];
@@ -126,9 +129,17 @@ fn preflop_summary(
 
 fn main() {
     let a = args();
-    let start = Instant::now();
     let cards = PloAbstraction::load(&std::fs::read(&a.cards).expect("read --cards"))
         .expect("a PLO card abstraction");
+    match cards.config.hole_cards {
+        4 => train::<4>(a, cards),
+        5 => train::<5>(a, cards),
+        _ => train::<6>(a, cards),
+    }
+}
+
+fn train<const H: usize>(a: Args, cards: PloAbstraction) {
+    let start = Instant::now();
     let config = HunlConfig {
         menu: if a.full {
             BetMenu::pot_limit()
@@ -137,10 +148,10 @@ fn main() {
         },
         ..HunlConfig::pot_limit_omaha_lean(a.bb)
     };
-    let game = HuPlo::with_cards(config, Some(&cards));
+    let game = Hunl::<_, H>::with_cards(config, Some(&cards));
     let stats = game.tree_stats();
     println!(
-        "PLO {} BB, {} menu: {} betting nodes; {:?} information sets per street; {:.0} MB of regrets and sums",
+        "PLO{H} {} BB, {} menu: {} betting nodes; {:?} information sets per street; {:.0} MB of regrets and sums",
         a.bb,
         if a.full { "full" } else { "lean" },
         game.tree.nodes.len(),

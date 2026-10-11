@@ -20,6 +20,10 @@
 //! With [`PloGtoBot::with_river_solving`], river decisions come from a
 //! real-time solve over sampled ranges instead ([`river`](super::river)),
 //! solved again when the opponent bets a size the solution doesn't have.
+//!
+//! It plays as many hole cards as its abstraction was built for: four for
+//! PLO, six for PLO6 (#200). River solving is four-card only; with more
+//! cards it plays the blueprint's river.
 
 use std::sync::Arc;
 
@@ -36,10 +40,34 @@ use crate::{
         bot::{fallback, real_action, realize, replays_to_me, same_kind, shove, street_root},
         cards::{Card, from_ducy, mask},
         follow::{Follower, street_index},
-        hunl::{Betting, BettingTree, Buckets, HuPlo, HunlAction, HunlConfig},
+        hunl::{Betting, BettingTree, Buckets, Hunl, HunlAction, HunlConfig},
     },
     rng::Rng,
 };
+
+/// Loads a PLO blueprint trained for `config` with `cards`, for the number
+/// of hole cards `cards` was built for, with the betting tree it was
+/// trained on.
+pub fn load_blueprint(
+    config: &HunlConfig,
+    cards: &PloAbstraction,
+    bytes: &[u8],
+) -> Result<(Blueprint, BettingTree), BlueprintError> {
+    fn load<const H: usize>(
+        config: &HunlConfig,
+        cards: &PloAbstraction,
+        bytes: &[u8],
+    ) -> Result<(Blueprint, BettingTree), BlueprintError> {
+        let game = Hunl::<_, H>::with_cards(config.clone(), Some(cards));
+        let blueprint = Blueprint::load(bytes, &game, cards)?;
+        Ok((blueprint, game.tree))
+    }
+    match cards.config.hole_cards {
+        4 => load::<4>(config, cards, bytes),
+        5 => load::<5>(config, cards, bytes),
+        _ => load::<6>(config, cards, bytes),
+    }
+}
 
 /// How a hand is being followed on the tree.
 #[derive(Clone, Debug, Default)]
@@ -80,14 +108,12 @@ impl PloGtoBot {
         blueprint_bytes: &[u8],
         seed: u64,
     ) -> Result<Self, BlueprintError> {
-        let game = HuPlo::with_cards(config.clone(), Some(&*cards));
-        let blueprint = Blueprint::load(blueprint_bytes, &game, &*cards)?;
-        let tree = Arc::new(game.tree);
+        let (blueprint, tree) = load_blueprint(&config, &cards, blueprint_bytes)?;
         Ok(Self::from_parts(
             config,
             cards,
             Arc::new(blueprint),
-            tree,
+            Arc::new(tree),
             seed,
         ))
     }
@@ -126,7 +152,11 @@ impl PloGtoBot {
     /// solution yet or the real river left its tree. `None` to play the
     /// blueprint instead.
     fn river_action(&mut self, obs: &Observation) -> Option<Action> {
-        if obs.seats.len() != 2 || obs.hole_cards.num_cards() != 4 {
+        // River solving samples four-card ranges.
+        if obs.seats.len() != 2
+            || obs.hole_cards.num_cards() != 4
+            || self.cards.config.hole_cards != 4
+        {
             return None;
         }
         self.follow(obs);
@@ -215,7 +245,9 @@ impl PloGtoBot {
     /// actions they belong to, or `None` when the hand can't be followed on
     /// the tree.
     pub fn strategy(&mut self, obs: &Observation) -> Option<(Vec<HunlAction>, Vec<f64>)> {
-        if obs.seats.len() != 2 || obs.hole_cards.num_cards() != 4 {
+        if obs.seats.len() != 2
+            || obs.hole_cards.num_cards() as usize != self.cards.config.hole_cards
+        {
             return None;
         }
         self.follow(obs);

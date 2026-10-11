@@ -31,7 +31,9 @@
 //! trained for (default 100). The bot is `omaha::bot::PloGtoBot`, against
 //! itself, `EquityBot`, a calling station and every personality bot.
 //! `--river-solve N` makes it solve the river in real time (#132); `--only
-//! self` is then river solving against the blueprint.
+//! self` is then river solving against the blueprint. The game has as many
+//! hole cards as the abstraction (six for a PLO6 one, #200; `--game plo6`
+//! is the same as `--game plo`).
 
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Instant};
 
@@ -41,13 +43,17 @@ use ducy_gto::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
         bot::{GtoBot, RiverSolving, TurnSolving},
-        hunl::{BettingTree, HuPlo, Hunl, HunlConfig},
+        hunl::{BettingTree, Hunl, HunlConfig},
         lbr::{LbrResult, lbr_hands_solving},
     },
-    omaha::{abstraction::PloAbstraction, bot::PloGtoBot, river::PloRiverSolving},
+    omaha::{
+        abstraction::PloAbstraction,
+        bot::{PloGtoBot, load_blueprint},
+        river::PloRiverSolving,
+    },
 };
 use ducy_play::{
-    Bot, MatchConfig, TableRules,
+    Bot, MatchConfig, TableRules, Variant,
     bots::{CallingStation, EquityBot},
     personality::Personality,
     run_match,
@@ -79,7 +85,7 @@ fn main() {
             "--lbr" => lbr = v().replace('_', "").parse().expect("--lbr"),
             "--river-solve" => river = v().parse().expect("--river-solve"),
             "--turn-solve" => turn = v().parse().expect("--turn-solve"),
-            "--game" => plo = v() == "plo",
+            "--game" => plo = v().starts_with("plo"),
             "--bb" => bb = v().parse().expect("--bb"),
             f => panic!("unknown option {f}"),
         }
@@ -242,28 +248,18 @@ fn plo_match(
             .expect("a PLO abstraction"),
     );
     let config = HunlConfig::pot_limit_omaha_lean(bb);
-    let game = HuPlo::with_cards(config.clone(), Some(&*cards));
     let bytes = std::fs::read(blueprint_path).expect("read --blueprint");
-    let blueprint = match Blueprint::load(&bytes, &game, &*cards) {
+    let k = cards.config.hole_cards;
+    let (blueprint, tree) = match load_blueprint(&config, &cards, &bytes) {
         Ok(b) => b,
-        Err(_) => {
-            let c = Config {
-                seed,
-                batch: 4096,
-                discount: Discount::DCFR,
-                prune: None,
-            };
-            let m = Mccfr::load(&game, c, &bytes)
-                .expect("a PLO blueprint, or a checkpoint for this game and --seed");
-            println!("checkpoint at {} iterations", m.iterations());
-            Blueprint::from_strategy(&game, &*cards, |info, n| {
-                m.average_at(&info)
-                    .unwrap_or_else(|| vec![1.0 / n as f64; n])
-            })
-        }
+        Err(_) => match k {
+            4 => from_checkpoint::<4>(&config, &cards, &bytes, seed),
+            5 => from_checkpoint::<5>(&config, &cards, &bytes, seed),
+            _ => from_checkpoint::<6>(&config, &cards, &bytes, seed),
+        },
     };
     let blueprint = Arc::new(blueprint);
-    let tree = Arc::new(game.tree);
+    let tree = Arc::new(tree);
     let gto = |s: u64| {
         PloGtoBot::from_parts(
             config.clone(),
@@ -294,10 +290,14 @@ fn plo_match(
             Box::new(move |s| Box::new(p.bot(Some(s))) as Box<dyn Bot>),
         ));
     }
-    let rules = TableRules::pot_limit_omaha(config.small_blind, config.big_blind);
+    let rules = TableRules::pot_limit_omaha(config.small_blind, config.big_blind).with_variant(
+        Variant::Omaha {
+            hole_cards: k as u32,
+        },
+    );
     let per_block = (deals / BLOCKS).max(1);
     println!(
-        "PLO {bb} BB. {:>12} {:>9} {:>10} {:>10} {:>8}",
+        "PLO{k} {bb} BB. {:>11} {:>9} {:>10} {:>10} {:>8}",
         "opponent", "hands", "bb/100", "± 95%", "off-tree"
     );
     for (name, make) in &opponents {
@@ -331,6 +331,30 @@ fn plo_match(
             t.elapsed().as_secs_f64()
         );
     }
+}
+
+/// The blueprint from a `train_plo` checkpoint for `H` hole cards.
+fn from_checkpoint<const H: usize>(
+    config: &HunlConfig,
+    cards: &PloAbstraction,
+    bytes: &[u8],
+    seed: u64,
+) -> (Blueprint, BettingTree) {
+    let game = Hunl::<_, H>::with_cards(config.clone(), Some(cards));
+    let c = Config {
+        seed,
+        batch: 4096,
+        discount: Discount::DCFR,
+        prune: None,
+    };
+    let m = Mccfr::load(&game, c, bytes)
+        .expect("a PLO blueprint, or a checkpoint for this game and --seed");
+    println!("checkpoint at {} iterations", m.iterations());
+    let blueprint = Blueprint::from_strategy(&game, cards, |info, n| {
+        m.average_at(&info)
+            .unwrap_or_else(|| vec![1.0 / n as f64; n])
+    });
+    (blueprint, game.tree)
 }
 
 /// The PLO bot, sharing its off-tree count with the report.
