@@ -178,6 +178,9 @@ fn train<const H: usize>(a: Args, cards: PloAbstraction) {
         _ => Mccfr::new(&game, solver_config),
     };
 
+    if let Some(dir) = &a.snapshots {
+        std::fs::create_dir_all(dir).expect("create the snapshots directory");
+    }
     let target = solver.iterations() + a.iters;
     while solver.iterations() < target {
         let t = Instant::now();
@@ -210,13 +213,15 @@ fn train<const H: usize>(a: Args, cards: PloAbstraction) {
             );
         }
         println!("{line} | {}", preflop_summary(&game, &cards, &strategy));
+        // The checkpoint first: if a snapshot can't be written, the
+        // training so far is still saved.
+        if let Some(p) = &a.checkpoint {
+            std::fs::write(p, solver.save()).expect("write checkpoint");
+        }
         if let Some(dir) = &a.snapshots {
             let bp = Blueprint::from_strategy(&game, &cards, strategy);
             let path = dir.join(format!("plo-{}.bin", solver.iterations()));
             std::fs::write(&path, bp.save()).expect("write snapshot");
-        }
-        if let Some(p) = &a.checkpoint {
-            std::fs::write(p, solver.save()).expect("write checkpoint");
         }
     }
 

@@ -5,7 +5,8 @@ use ducy_gto::{
         hunl::Buckets,
     },
     omaha::abstraction::{
-        BoardView, PloAbstraction, PloAbstractionConfig, PreflopClasses, canonical_key, random_spot,
+        BoardView, PloAbstraction, PloAbstractionConfig, PreflopClasses, beaten_share,
+        canonical_key, nutness, random_spot,
     },
 };
 
@@ -222,7 +223,7 @@ fn six_cards_bucket_preflop_with_a_model() {
     // A double-suited rundown predicts more equity than a rainbow pile of
     // low cards with trips.
     let model = cards.street_model(0).expect("a preflop model");
-    let e = |h: &str| model.predict(&ducy_gto::omaha::abstraction::preflop_features(&p(h)));
+    let e = |h: &str| model.predict(&cards.preflop_features(&p(h)));
     assert!(
         e("As Ks Qd Jd Th 9h") > e("7c 7d 7h 2s 3c 4d") + 0.03,
         "{} {}",
@@ -231,6 +232,125 @@ fn six_cards_bucket_preflop_with_a_model() {
     );
     // River equity samples six-card opponents: on an unpaired board with no
     // straight flush, the ace-high flush is never beaten.
-    let view = cards.view(&p("Kh 8h 3h Qc 2d"));
+    let view = BoardView::for_hands(&p("Kh 8h 3h Qc 2d"), 6);
     assert_eq!(view.river_equity(&p("Ah 5h 4s 4c 9s 6c")), 1.0);
+}
+
+/// A small build that isn't nut-aware, as abstractions were before #204.
+fn small_plain(hole_cards: usize) -> PloAbstraction {
+    PloAbstraction::build(
+        PloAbstractionConfig {
+            hole_cards,
+            preflop: if hole_cards == 4 { 0 } else { 20 },
+            flop: 20,
+            turn: 20,
+            river: 20,
+            fit_hands: 1000,
+            equity_samples: 100,
+            nut_aware: false,
+            ..PloAbstractionConfig::default()
+        },
+        |_| {},
+    )
+}
+
+#[test]
+fn plain_abstractions_save_and_hash_as_before() {
+    for k in [4, 6] {
+        let cards = small_plain(k);
+        let bytes = cards.save();
+        // Versions 1 (four cards) and 2 (six), as before #204.
+        assert_eq!(
+            &bytes[..9],
+            if k == 4 {
+                b"DUCYPLOA\x01"
+            } else {
+                b"DUCYPLOA\x02"
+            }
+        );
+        let loaded = PloAbstraction::load(&bytes).expect("loads");
+        assert!(!loaded.config.nut_aware);
+        assert_eq!(loaded.save(), bytes);
+        // Published blueprints hash these settings: they mustn't change.
+        assert_eq!(
+            cards.settings(),
+            format!(
+                "PloAbstractionConfig {{ hole_cards: {k}, preflop: {}, flop: 20, turn: 20, \
+                 river: 20, fit_hands: 1000, equity_samples: 100, seed: 1 }}|plo-features-v1",
+                if k == 4 { 0 } else { 20 }
+            )
+        );
+    }
+}
+
+#[test]
+fn nut_aware_abstractions_save_as_version_3() {
+    let cards = small();
+    assert!(cards.config.nut_aware);
+    let bytes = cards.save();
+    assert_eq!(&bytes[..9], b"DUCYPLOA\x03");
+    let loaded = PloAbstraction::load(&bytes).expect("loads");
+    assert!(loaded.config.nut_aware);
+    assert_eq!(loaded.save(), bytes);
+    assert!(cards.settings().ends_with("|plo-features-v2"));
+}
+
+#[test]
+fn nutness_counts_holdings_that_beat_the_hand() {
+    // The nut flush beats every two-card holding: nutness 1.
+    let board: [Card; 5] = p("Kh 8h 3h Qc 2d").try_into().unwrap();
+    assert_eq!(beaten_share(&p("Ah 5h 4s 4c"), &board), 0.0);
+    assert_eq!(nutness(0.0), 1.0);
+    // A low flush is beaten by many hands holding two higher hearts.
+    let low = beaten_share(&p("6h 5h 4s 4c"), &board);
+    assert!(low > 0.01 && low < 0.1, "{low}");
+    // Bottom pair is far from the nuts.
+    assert_eq!(nutness(beaten_share(&p("2s 7c 9d Td"), &board)), 0.0);
+    // Blockers count: holding the A♥ alone, fewer hands make the nut flush.
+    let without = beaten_share(&p("Kd Ks 9c 9d"), &board);
+    let with = beaten_share(&p("Kd Ks 9c Ah"), &board);
+    assert!(with < without, "{with} {without}");
+}
+
+#[test]
+fn nut_features_tell_nut_draws_from_weaker_ones() {
+    let at = |board: &str, hole: &str| BoardView::exact(&p(board)).nut_features(&p(hole));
+    // Indices past the plain features: 14 near the nuts, 15 the nuts, 16
+    // nut straight outs, 17 second-nut flush draw, 18 backdoor nut flush
+    // draw, 21 a lone nut-flush blocker, 22 set draws.
+    let set = at("8c 7d 2h", "8s 8h Kc 3d");
+    assert_eq!(set[15], 1.0, "top set on a dry flop is the nuts");
+    // On 8-7-2 a J, T, 9, 6, 5 or 4 brings straights. J-T-9 holds the top
+    // one after a J, T, 9 or 6; 6-5-4-3 never does.
+    let high = at("8c 7d 2h", "Js Ts 9d 3c");
+    let low = at("8c 7d 2h", "6s 5s 4d 3c");
+    assert!(high[16] > low[16], "{} {}", high[16], low[16]);
+    // Flush draws: K-high with the ace out is the second nuts.
+    let second = at("Qh 7h 2c", "Kh 5h 9s 9d");
+    let nut = at("Qh 7h 2c", "Ah 5h 9s 9d");
+    assert_eq!(second[17], 1.0);
+    assert_eq!(nut[17], 0.0);
+    assert_eq!(nut[4], 1.0);
+    // A backdoor nut flush draw on the flop.
+    assert_eq!(at("Qh 7c 2d", "Ah 5h 9s 9d")[18], 1.0);
+    // A lone ace on a three-heart board blocks the nut flush.
+    assert_eq!(at("Qh 7h 2h", "Ah 5c 9s 9d")[21], 1.0);
+    // Two pocket pairs to make sets with.
+    assert!((at("Qh 7c 2d", "Ah 5h 9s 9d Ks Kc")[22] - 2.0 / 3.0).abs() < 1e-9);
+}
+
+#[test]
+fn nut_aware_flops_separate_nut_draws_of_similar_equity() {
+    let cards = small();
+    let flop = p("Qh 7h 2c");
+    let view = cards.view(&flop);
+    // The nut flush draw predicts more nut potential than the K-high one.
+    let nut = p("Ah 5h 9s 8d");
+    let second = p("Kh 5h 9s 8d");
+    assert!(
+        cards.predicted_nuts(&nut, &view) > cards.predicted_nuts(&second, &view),
+        "{} {}",
+        cards.predicted_nuts(&nut, &view),
+        cards.predicted_nuts(&second, &view)
+    );
 }

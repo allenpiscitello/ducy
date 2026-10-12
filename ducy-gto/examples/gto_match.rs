@@ -33,7 +33,9 @@
 //! `--river-solve N` makes it solve the river in real time (#132); `--only
 //! self` is then river solving against the blueprint. The game has as many
 //! hole cards as the abstraction (six for a PLO6 one, #200; `--game plo6`
-//! is the same as `--game plo`).
+//! is the same as `--game plo`). `--rival-cards FILE --rival-blueprint
+//! FILE` adds a `rival` opponent: another PLO blueprint on its own
+//! abstraction, such as the published one, to play head to head (#204).
 
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Instant};
 
@@ -73,6 +75,8 @@ fn main() {
     let mut turn = 0usize;
     let mut plo = false;
     let mut bb = 100u64;
+    let mut rival_cards: Option<String> = None;
+    let mut rival_blueprint: Option<String> = None;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut v = || it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
@@ -87,6 +91,8 @@ fn main() {
             "--turn-solve" => turn = v().parse().expect("--turn-solve"),
             "--game" => plo = v().starts_with("plo"),
             "--bb" => bb = v().parse().expect("--bb"),
+            "--rival-cards" => rival_cards = Some(v()),
+            "--rival-blueprint" => rival_blueprint = Some(v()),
             f => panic!("unknown option {f}"),
         }
     }
@@ -99,6 +105,7 @@ fn main() {
             seed,
             only.as_deref(),
             river,
+            rival_cards.as_deref().zip(rival_blueprint.as_deref()),
         );
         return;
     }
@@ -234,6 +241,7 @@ fn main() {
 /// Duplicate matches between the PLO blueprint and every PLO opponent;
 /// with `river` iterations, the measured bot solves the river in real time
 /// (the opponents, `self` included, keep playing the blueprint).
+#[allow(clippy::too_many_arguments)]
 fn plo_match(
     cards_path: &str,
     blueprint_path: &str,
@@ -242,24 +250,11 @@ fn plo_match(
     seed: u64,
     only: Option<&str>,
     river: usize,
+    rival: Option<(&str, &str)>,
 ) {
-    let cards = Arc::new(
-        PloAbstraction::load(&std::fs::read(cards_path).expect("read --cards"))
-            .expect("a PLO abstraction"),
-    );
     let config = HunlConfig::pot_limit_omaha_lean(bb);
-    let bytes = std::fs::read(blueprint_path).expect("read --blueprint");
+    let (cards, blueprint, tree) = load_plo(&config, cards_path, blueprint_path, seed);
     let k = cards.config.hole_cards;
-    let (blueprint, tree) = match load_blueprint(&config, &cards, &bytes) {
-        Ok(b) => b,
-        Err(_) => match k {
-            4 => from_checkpoint::<4>(&config, &cards, &bytes, seed),
-            5 => from_checkpoint::<5>(&config, &cards, &bytes, seed),
-            _ => from_checkpoint::<6>(&config, &cards, &bytes, seed),
-        },
-    };
-    let blueprint = Arc::new(blueprint);
-    let tree = Arc::new(tree);
     let gto = |s: u64| {
         PloGtoBot::from_parts(
             config.clone(),
@@ -269,8 +264,29 @@ fn plo_match(
             s,
         )
     };
+    // Another blueprint, on its own abstraction, to play head to head.
+    let rival = rival.map(|(c, b)| {
+        let r = load_plo(&config, c, b, seed);
+        assert_eq!(r.0.config.hole_cards, k, "the rival plays the same game");
+        r
+    });
     type Make<'a> = Box<dyn Fn(u64) -> Box<dyn Bot> + 'a>;
-    let mut opponents: Vec<(String, Make)> = vec![
+    let mut opponents: Vec<(String, Make)> = Vec::new();
+    if let Some((c, b, t)) = &rival {
+        opponents.push((
+            "rival".into(),
+            Box::new(|s| {
+                Box::new(PloGtoBot::from_parts(
+                    config.clone(),
+                    c.clone(),
+                    b.clone(),
+                    t.clone(),
+                    s,
+                )) as Box<dyn Bot>
+            }),
+        ));
+    }
+    opponents.extend::<Vec<(String, Make)>>(vec![
         (
             "self".into(),
             Box::new(|s| Box::new(gto(s)) as Box<dyn Bot>),
@@ -283,7 +299,7 @@ fn plo_match(
             "calling".into(),
             Box::new(|_| Box::new(CallingStation) as Box<dyn Bot>),
         ),
-    ];
+    ]);
     for p in Personality::ALL {
         opponents.push((
             p.id().to_string(),
@@ -331,6 +347,29 @@ fn plo_match(
             t.elapsed().as_secs_f64()
         );
     }
+}
+
+/// A PLO abstraction and the blueprint (or checkpoint) trained on it.
+fn load_plo(
+    config: &HunlConfig,
+    cards_path: &str,
+    blueprint_path: &str,
+    seed: u64,
+) -> (Arc<PloAbstraction>, Arc<Blueprint>, Arc<BettingTree>) {
+    let cards = Arc::new(
+        PloAbstraction::load(&std::fs::read(cards_path).expect("read the abstraction"))
+            .expect("a PLO abstraction"),
+    );
+    let bytes = std::fs::read(blueprint_path).expect("read the blueprint");
+    let (blueprint, tree) = match load_blueprint(config, &cards, &bytes) {
+        Ok(b) => b,
+        Err(_) => match cards.config.hole_cards {
+            4 => from_checkpoint::<4>(config, &cards, &bytes, seed),
+            5 => from_checkpoint::<5>(config, &cards, &bytes, seed),
+            _ => from_checkpoint::<6>(config, &cards, &bytes, seed),
+        },
+    };
+    (cards, Arc::new(blueprint), Arc::new(tree))
 }
 
 /// The blueprint from a `train_plo` checkpoint for `H` hole cards.
