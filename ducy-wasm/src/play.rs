@@ -213,20 +213,23 @@ struct Gto {
 
 /// Turn and river iterations per solve for the GTO bot in the page. Far
 /// less turn work than natively (`TurnSolving::default`: 50 iterations of 8
-/// rivers each): WebAssembly runs on one core, and a turn decision there
-/// took about 3.7 s at 20 iterations of 8 rivers, too slow to play against.
-/// 10 iterations of 4 rivers (below) take about a third of that, keeping
-/// the opponent's river styles (Node, the `test-30m` model, CPU time, the
-/// settings interleaved: 4.8 s against 1.6 s on a busy machine). A river
-/// solve takes about 0.4 s.
-const PAGE_TURN_ITERATIONS: usize = 10;
+/// rivers each): WebAssembly runs on one core. With the `gto-hunl-300m`
+/// model a turn solve took 2–3 s at 10 iterations of 4 rivers. 15
+/// iterations of 1 river (below) do less work and still solve the turn a
+/// little better: in `turn_bench` (three boards, every river valued
+/// exactly) the solution is exploitable for about 34% of the pot, against
+/// 38% at 10 of 4, 40% at 10 of 2 and 25% at 20 of 1; the number of
+/// iterations matters far more than the rivers dealt in each. Much of what
+/// is left is fixed: the opponent's best response for the safety gadget,
+/// over every river. A river solve takes about 0.6 s.
+const PAGE_TURN_ITERATIONS: usize = 15;
 const PAGE_RIVER_ITERATIONS: usize = 200;
 
 /// Turn solving's other settings in the page: river cards dealt per
 /// iteration (`TurnSolving::new` deals 8), and whether the opponent picks
 /// among river styles at each leaf (`TurnSolving::biases`, kept: the solve
-/// is harder to exploit, and dropping them saved little at these settings).
-const PAGE_TURN_RIVER_SAMPLES: usize = 4;
+/// is harder to exploit).
+const PAGE_TURN_RIVER_SAMPLES: usize = 1;
 const PAGE_TURN_BIASES: bool = true;
 
 /// The PLO GTO bots' real-time river solving in the page: iterations per
