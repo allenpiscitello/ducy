@@ -259,6 +259,23 @@ impl GtoBot {
         })
     }
 
+    /// On the flop, with turn or river solving on, works out every hand's
+    /// flop bucket ahead of time. The first solve of the hand needs them to
+    /// replay the ranges, and with a compact abstraction they take a few
+    /// hundred milliseconds on one core: spent here, a flop decision is still
+    /// quick (it needs only its own bucket otherwise), and the turn's is that
+    /// much quicker. Cached, so later flop decisions don't pay again.
+    fn warm_up(&mut self, obs: &Observation) {
+        if obs.street != Street::Flop
+            || obs.seats.len() != 2
+            || (self.turn.is_none() && self.river.is_none())
+        {
+            return;
+        }
+        let flop: Vec<Card> = obs.board.iter().copied().map(from_ducy).collect();
+        self.buckets.get(&self.cards, &flop);
+    }
+
     /// Brings the tracked node up to date with the real history.
     fn follow(&mut self, obs: &Observation) {
         let hole = u64::from(obs.hole_cards);
@@ -654,6 +671,7 @@ impl Bot for GtoBot {
         if self.committed(obs) {
             return Some(shove(obs));
         }
+        self.warm_up(obs);
         if self.turn.is_some()
             && obs.street == Street::Turn
             && let Some(action) = self.turn_action(obs)
