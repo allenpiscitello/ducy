@@ -640,6 +640,16 @@ impl BotTable {
         Ok(())
     }
 
+    /// Sets one seat's chips for the next hand, e.g. to resume a game where
+    /// it was left (the heads-up ladder). Only between hands.
+    #[wasm_bindgen(js_name = setStack)]
+    pub fn set_stack(&mut self, seat: usize, chips: u64) -> Result<(), JsError> {
+        if seat >= self.table.num_seats() {
+            return Err(JsError::new("no such seat"));
+        }
+        self.table.set_stack(seat, chips).map_err(err)
+    }
+
     /// Hands kept for review (heads-up no-limit Hold'em against "gto").
     #[wasm_bindgen(js_name = reviewableHands)]
     pub fn reviewable_hands(&self) -> usize {
