@@ -840,6 +840,77 @@ caveat applies (their Omaha play isn't tuned). In Node, with WASM, the
 to enumerate), and over 200 hands (704 decisions) a decision took 0.1 ms
 on average and 0.9 ms at most.
 
+#### Nut-aware buckets (#204)
+
+Training the PLO6 blueprint from 20 million iterations to 220 million won
+only +4 ± 15 bb/100 head to head: the abstraction, not the training, was the
+limit. Equity alone lumps together hands that play very differently in
+Omaha, such as a nut flush draw and a weaker one at the same equity, or the
+nut straight and a lower one. So the buckets now also look at how close a
+hand is, or can get, to the nuts:
+
+- **Nut potential:** over 50 random runouts, the mean `nutness` of the hand
+  on the river, where `nutness` falls from 1 for the nuts to 0 once 3% of
+  the opponent's two-card holdings beat it (`beaten_share`, exact, with
+  blockers counted; ties count half).
+- **Nut features** (`BoardView::nut_features`, 24 in all): the 14 equity
+  features plus whether the hand has the nuts, how near it is, nut outs,
+  second-nut flush draws, backdoors, the nut flush draw and nut outs scaled
+  by how unlikely the board is to pair, blockers to the nuts, set draws,
+  and nearness on paired boards. Preflop (`preflop_nut_features`, 20) adds
+  suited aces and kings, double-suitedness, the top pair, tight four-rank
+  windows and dangling cards.
+- **Clustering:** a second linear model predicts nut potential from the same
+  features, and k-means runs on (predicted equity, predicted nut potential,
+  feature 1) instead of two dimensions. The river is unchanged: equal-mass
+  bins of equity against sampled opponents. (Buckets on the river from
+  exact hand strength were tried: they spread equity 0.053 against 0.019.)
+- **Format:** nut-aware abstractions save as version 3 (`DUCYPLOA\x03`,
+  with each model's nut weights). `PloAbstractionConfig::nut_aware` is on by default;
+  with it off (`plo_abstraction --plain`), files save and hash exactly as
+  before, so the published four- and six-card models still load.
+
+Within-bucket spread of equity / nut potential, 4,000 hands per street
+(`plo_abstraction --hole-cards 6 --flop 500 --turn 500 --compare
+plo6-cards.bin`):
+
+| Street | Buckets | Nut-aware | Before (buckets) | Cost per hand |
+|---|---|---|---|---|
+| Preflop | 500 | 0.014 / 0.023 | 0.015 / 0.024 (500) | 3.2 µs |
+| Flop | 500 | 0.052 / 0.049 | 0.060 / 0.064 (200) | 18 µs |
+| Turn | 500 | 0.051 / 0.057 | 0.062 / 0.080 (200) | 44 µs |
+| River | 200 | 0.019 / 0.020 | 0.019 / 0.020 (200) | 129 µs |
+
+It builds in 4 minutes on 12 cores into a 20.8 KB file; a whole deal's
+buckets take 363 µs. The 100 BB blueprint has about 953,000 information
+sets (2.4 MB) and trained 200 million iterations in 9.8 hours at about
+5,800 a second. Its button raises more as training goes on (fold / limp /
+raise 11 / 42 / 46% at 25 M, 8 / 36 / 56% at 200 M); the big blind against
+an open settled at 44 / 37 / 19%.
+
+**Head to head** against the 220 M blueprint on the old buckets
+(`gto_match --rival-cards plo6-cards.bin --rival-blueprint plo6-220m.bin
+--only rival`): **+5.3 ± 2.1 bb/100** over 1,000,000 duplicate hands
+(500,000 deals). Against the bots, 20,000 deals each:
+
+| Opponent | bb/100 (± 95%) | Opponent | bb/100 (± 95%) |
+|---|---|---|---|
+| itself | −4.7 ± 11.3 | Robin Jane Lewd | +136.1 ± 13.0 |
+| EquityBot | +93.6 ± 19.3 | Gus Bluffsen | +93.6 ± 16.0 |
+| calling station | +185.2 ± 12.8 | Jen Silly | +72.7 ± 17.6 |
+| Doug Poker | +43.2 ± 16.0 | Michael Miserable | +36.1 ± 14.4 |
+| Jonny Slow | +43.9 ± 4.8 | Brad Owned | +44.6 ± 6.5 |
+| Mister Cheating | +101.3 ± 22.0 | Nik Airbag | +225.6 ± 37.6 |
+| Milk King | +104.8 ± 13.7 | Bungleman | +219.2 ± 28.3 |
+| Phil Bigmouth | +35.2 ± 12.4 | Tom Collins | +70.6 ± 15.7 |
+| Rampart | +227.3 ± 32.1 | The Mathematician | +40.2 ± 15.1 |
+| Danny Smallball | +52.9 ± 16.0 | Andrew Favorable | +37.2 ± 16.1 |
+| Chris Moneybags | +179.5 ± 22.5 | Tommy Sweeden | +49.8 ± 12.9 |
+
+On average +99.6 against the 21 bots (the 220 M blueprint: +103), the same
+within the noise; the gain shows against a strong opponent rather than the
+weak ones.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)

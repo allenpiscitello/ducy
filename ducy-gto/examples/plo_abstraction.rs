@@ -5,16 +5,22 @@
 //! Options: `--out FILE`, `--hole-cards N` (4, the default, or 6 for PLO6),
 //! `--preflop N` (0 for one bucket per class, four cards only), `--flop N`,
 //! `--turn N`, `--river N`, `--fit N` (sampled hands per street), `--check
-//! N` (hands per street for the quality check).
+//! N` (hands per street for the quality check), `--plain` (not nut-aware,
+//! as before #204), `--compare FILE` (measure a saved abstraction, such as
+//! the published one, on the same hands).
 //!
 //! For each street it reports the within-bucket spread of equity (measured
-//! with 2,000 samples per hand, ±1.1%) for:
-//! - these buckets;
+//! with 2,000 samples per hand, ±1.1%) and of nut potential (how close to
+//! the nuts the hand ends on the river, over 200 runouts) for:
+//! - these buckets (and the `--compare` ones);
 //! - equity buckets at the same cost: sampled equity with as many samples as
 //!   these features cost, in equal-mass bins (the plain-equity baseline);
 //! - equity buckets from a separate 2,000-sample estimate: what equity
 //!   buckets reach when cost is no object (hundreds of times too slow for
 //!   training), with the measurement's own noise.
+//!
+//! Equity buckets can't see nut potential, which is the point of #204: a
+//! nut and a non-nut draw of the same equity share a bucket.
 //!
 //! Then the bucketing cost per hand, its share of a training iteration, and
 //! the file's size and load time.
@@ -28,7 +34,7 @@ use ducy_gto::{
         hunl::{Buckets, Hunl, HunlConfig},
     },
     omaha::{
-        abstraction::{PloAbstraction, PloAbstractionConfig, random_spot},
+        abstraction::{PloAbstraction, PloAbstractionConfig, nut_potential, random_spot},
         showdown::{PairTable, equity_vs_random},
     },
 };
@@ -111,8 +117,18 @@ fn main() {
         turn: num("--turn", 200),
         river: num("--river", 200),
         fit_hands: num("--fit", 40_000),
+        nut_aware: !std::env::args().any(|a| a == "--plain"),
         ..PloAbstractionConfig::default()
     };
+    let compare = arg("--compare").map(|f| {
+        let bytes = std::fs::read(&f).expect("read --compare");
+        let old = PloAbstraction::load(&bytes).expect("--compare is an abstraction");
+        assert_eq!(
+            old.config.hole_cards, k,
+            "--compare has the same hole cards"
+        );
+        old
+    });
     let check = num("--check", 4000);
     let start = Instant::now();
     let cards = PloAbstraction::build(config.clone(), |s| {
@@ -137,30 +153,54 @@ fn main() {
     assert_eq!(loaded.save(), bytes, "load and save round-trip");
 
     println!(
-        "\nWithin-bucket spread of equity (std. dev., {check} hands per street, equity from 2,000 samples):"
+        "\nWithin-bucket spread (std. dev.) of equity / nut potential, {check} hands per street \
+         (equity from 2,000 samples, nut potential from 200 runouts):"
     );
     println!(
-        "| Street | Buckets | These buckets | Equity buckets, same cost | Equity buckets, 2,000 samples | Cost per hand |"
+        "| Street | Buckets | These buckets |{} Equity buckets, same cost | Equity buckets, 2,000 samples | Cost per hand |",
+        if compare.is_some() {
+            " Compared buckets |"
+        } else {
+            ""
+        }
     );
-    println!("|---|---|---|---|---|---|");
+    println!(
+        "|---|---|---|{}---|---|---|",
+        if compare.is_some() { "---|" } else { "" }
+    );
+    let both =
+        |b: &[u16], e: &[f64], n: &[f64]| format!("{:.3} / {:.3}", spread(b, e), spread(b, n));
     for (name, board_len) in [("Flop", 3), ("Turn", 4), ("River", 5)] {
-        let spots: Vec<(Vec<Card>, Vec<Card>, f64)> = par_map((0..check).collect(), |i| {
+        let spots: Vec<(Vec<Card>, Vec<Card>, f64, f64)> = par_map((0..check).collect(), |i| {
             let mut rng = Rng::new(99 + board_len as u64 * 7919 + i as u64 * 104_729);
             let (hole, board) = random_spot(k, board_len, &mut rng);
             let e = equity_vs_random(&hole, &board, 2000, &mut rng).mean;
-            (hole, board, e)
+            let n = nut_potential(&hole, &board, 200, &mut rng);
+            (hole, board, e, n)
         });
         let truth: Vec<f64> = spots.iter().map(|s| s.2).collect();
+        let nuts: Vec<f64> = spots.iter().map(|s| s.3).collect();
+        let compared = compare.as_ref().map(|old| {
+            let b: Vec<u16> = spots
+                .iter()
+                .map(|(h, b, ..)| old.bucket_on(h, &old.view(b)))
+                .collect();
+            format!(
+                " {} ({}) |",
+                both(&b, &truth, &nuts),
+                old.bucket_count(board_len)
+            )
+        });
         // Cost: the board's work shared by two hands, plus each hand's own.
         let t = Instant::now();
         let ours: Vec<u16> = spots
             .iter()
-            .map(|(h, b, _)| cards.bucket_on(h, &cards.view(b)))
+            .map(|(h, b, ..)| cards.bucket_on(h, &cards.view(b)))
             .collect();
         let per_hand_us = t.elapsed().as_secs_f64() * 1e6 / check as f64;
         let view_cost = {
             let t = Instant::now();
-            for (_, b, _) in spots.iter().take(500) {
+            for (_, b, ..) in spots.iter().take(500) {
                 std::hint::black_box(cards.view(b));
             }
             t.elapsed().as_secs_f64() * 1e6 / 500.0
@@ -172,7 +212,7 @@ fn main() {
         // sharing: its half of a table, then samples.
         let k = if board_len == 5 {
             let t = Instant::now();
-            for (_, b, _) in spots.iter().take(500) {
+            for (_, b, ..) in spots.iter().take(500) {
                 let board = [b[0], b[1], b[2], b[3], b[4]];
                 std::hint::black_box(PairTable::new(&board));
             }
@@ -183,32 +223,36 @@ fn main() {
         }
         .max(1);
         let sampled = |k: usize, salt: u64| -> Vec<f64> {
-            par_map(spots.clone(), |(h, b, _)| {
+            par_map(spots.clone(), |(h, b, ..)| {
                 let mut rng = Rng::new(h.iter().chain(&b).fold(salt, |a, &c| a * 53 + c as u64));
                 equity_vs_random(&h, &b, k, &mut rng).mean
             })
         };
         let n = cards.bucket_count(board_len);
         println!(
-            "| {name} | {n} | {:.3} | {:.3} ({k} samples) | {:.3} | {shared_cost:.0} µs |",
-            spread(&ours, &truth),
-            spread(&quantile_buckets(&sampled(k, 3), n), &truth),
-            spread(&quantile_buckets(&sampled(2000, 4), n), &truth),
+            "| {name} | {n} | {} |{} {} ({k} samples) | {} | {shared_cost:.0} µs |",
+            both(&ours, &truth, &nuts),
+            compared.unwrap_or_default(),
+            both(&quantile_buckets(&sampled(k, 3), n), &truth, &nuts),
+            both(&quantile_buckets(&sampled(2000, 4), n), &truth, &nuts),
         );
     }
 
-    // Preflop: the classes' equity spread inside each bucket.
-    let mut rng = Rng::new(5);
-    let pre: Vec<(u16, f64)> = (0..check)
-        .map(|_| {
-            let (h, _) = random_spot(k, 0, &mut rng);
-            (
-                cards.preflop_bucket(&h),
-                equity_vs_random(&h, &[], 2000, &mut rng).mean,
-            )
-        })
-        .collect();
-    let (b, e): (Vec<u16>, Vec<f64>) = pre.into_iter().unzip();
+    // Preflop: the spread inside each bucket.
+    let pre: Vec<(Vec<Card>, f64, f64)> = par_map((0..check).collect(), |i| {
+        let mut rng = Rng::new(5 + i as u64 * 104_729);
+        let (h, _) = random_spot(k, 0, &mut rng);
+        let e = equity_vs_random(&h, &[], 2000, &mut rng).mean;
+        let n = nut_potential(&h, &[], 200, &mut rng);
+        (h, e, n)
+    });
+    let e: Vec<f64> = pre.iter().map(|p| p.1).collect();
+    let n: Vec<f64> = pre.iter().map(|p| p.2).collect();
+    let b: Vec<u16> = pre.iter().map(|p| cards.preflop_bucket(&p.0)).collect();
+    let compared = compare.as_ref().map(|old| {
+        let b: Vec<u16> = pre.iter().map(|p| old.preflop_bucket(&p.0)).collect();
+        format!(" {} ({}) |", both(&b, &e, &n), old.bucket_count(0))
+    });
     let t = Instant::now();
     let mut rng = Rng::new(7);
     for _ in 0..2000 {
@@ -216,9 +260,10 @@ fn main() {
         std::hint::black_box(cards.preflop_bucket(&h));
     }
     println!(
-        "| Preflop | {} | {:.3} | | | {:.1} µs |",
+        "| Preflop | {} | {} |{} | | {:.1} µs |",
         cards.bucket_count(0),
-        spread(&b, &e),
+        both(&b, &e, &n),
+        compared.unwrap_or_default(),
         t.elapsed().as_secs_f64() * 1e6 / 2000.0
     );
 
