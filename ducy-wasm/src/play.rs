@@ -13,6 +13,8 @@
 use ducy_play::{
     Action, ChipRequest, Command, Departure, Outgoing, Personality, Refund, SeatedPlayer, Table,
     TableHost, TableRules, TableSeat, Variant,
+    features::NUM_FEATURES,
+    net::{Mlp, NUM_CLASSES, NetBot},
 };
 use std::{
     cell::{Cell, RefCell},
@@ -307,6 +309,53 @@ pub fn gto_loaded() -> bool {
     GTO.with(|g| g.borrow().is_some())
 }
 
+thread_local! {
+    /// The network the "net:" bots play from, once `loadNet` has run.
+    static NET: RefCell<Option<Arc<Mlp>>> = const { RefCell::new(None) };
+}
+
+/// Network bots (#215) are seated as "net:" and a personality id, e.g.
+/// "net:doug_poker": that personality, played from the loaded network.
+const NET_PREFIX: &str = "net:";
+
+/// Loads a network weight file (`ducy_play::net::Mlp`) for the "net:" bots.
+/// It must take the decision features and give an output per action class.
+#[wasm_bindgen(js_name = loadNet)]
+pub fn load_net(bytes: &[u8]) -> Result<(), JsError> {
+    let net = Mlp::load(bytes).map_err(|e| JsError::new(&e.to_string()))?;
+    let sizes = net.sizes();
+    if sizes[0] != NUM_FEATURES || *sizes.last().unwrap() != NUM_CLASSES {
+        return Err(JsError::new(&format!(
+            "the network is {sizes:?}: it needs {NUM_FEATURES} inputs and {NUM_CLASSES} outputs"
+        )));
+    }
+    NET.with(|n| *n.borrow_mut() = Some(Arc::new(net)));
+    Ok(())
+}
+
+/// Whether `loadNet` has been called.
+#[wasm_bindgen(js_name = netLoaded)]
+pub fn net_loaded() -> bool {
+    NET.with(|n| n.borrow().is_some())
+}
+
+/// A "net:" bot's seat, if `id` is one.
+fn net_seat(id: &str, seed: u64) -> Option<Result<TableSeat, JsError>> {
+    let name = id.strip_prefix(NET_PREFIX)?;
+    Some((|| {
+        let p = Personality::from_name(name)
+            .ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
+        let net = NET
+            .with(|n| n.borrow().clone())
+            .ok_or_else(|| JsError::new("call loadNet first"))?;
+        Ok(TableSeat::with_bot(
+            p.name(),
+            id,
+            Box::new(NetBot::new(p, net, Some(seed))),
+        ))
+    })())
+}
+
 /// The id that seats the PLO GTO bot.
 const GTO_PLO_ID: &str = "gto-plo";
 /// The id that seats the PLO6 GTO bot.
@@ -424,6 +473,10 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
             seats.push(gto_plo_seat(plo, seed.wrapping_add(i as u64 + 1))?);
             continue;
         }
+        if let Some(seat) = net_seat(id, seed.wrapping_add(i as u64 + 1)) {
+            seats.push(seat?);
+            continue;
+        }
         let p =
             Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
         seats.push(TableSeat::bot(
@@ -444,6 +497,9 @@ fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
         return gto_plo_seat(plo, seed)?
             .bot
             .ok_or_else(|| JsError::new("no bot"));
+    }
+    if let Some(seat) = net_seat(id, seed) {
+        return seat?.bot.ok_or_else(|| JsError::new("no bot"));
     }
     let p = Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
     Ok(Box::new(p.bot(Some(seed))))
