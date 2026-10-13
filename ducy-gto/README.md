@@ -916,6 +916,39 @@ On average +99.6 against the 21 bots (the 220 M blueprint: +103), the same
 within the noise; the gain shows against a strong opponent rather than the
 weak ones.
 
+#### PLO4 on nut-aware buckets (#224)
+
+The same abstraction for four cards (`plo_abstraction --hole-cards 4
+--preflop 500 --flop 500 --turn 500 --river 200`, 46.3 KB, against 200 flop
+and turn buckets before) and the same lean 100 BB tree: about 962,000
+information sets (2.4 MB), 200 million iterations in 8.7 hours at about
+6,700 a second. The button settled at fold / limp / raise 6 / 31 / 63%
+(12 / 40 / 47% at 10 M); the big blind against an open at 35 / 48 / 16%.
+Published as `gto-plo-nut-200m`.
+
+**Head to head** against the published `gto-plo-25m` blueprint (`gto_match
+--game plo --rival-cards --rival-blueprint --only rival`): **+14.9 ± 2.0
+bb/100** over 2,000,000 duplicate hands, three times the PLO6 gain: the 25 M
+model had both the old buckets and an eighth of the training. Against the
+bots, 20,000 deals each (with their personalities from before #223's
+retune):
+
+| Opponent | bb/100 (± 95%) | Opponent | bb/100 (± 95%) |
+|---|---|---|---|
+| itself | +2.4 ± 13.6 | Robin Jane Lewd | +66.2 ± 12.7 |
+| EquityBot | +101.2 ± 15.3 | Gus Bluffsen | +54.1 ± 14.9 |
+| calling station | +179.3 ± 13.0 | Jen Silly | +35.1 ± 16.2 |
+| Doug Poker | +27.2 ± 10.3 | Michael Miserable | +31.0 ± 12.2 |
+| Jonny Slow | +32.1 ± 5.9 | Brad Owned | +26.6 ± 9.3 |
+| Mister Cheating | +53.7 ± 17.7 | Nik Airbag | +252.6 ± 31.3 |
+| Milk King | +56.3 ± 10.2 | Bungleman | +162.1 ± 24.2 |
+| Phil Bigmouth | +20.5 ± 11.9 | Tom Collins | +46.9 ± 15.8 |
+| Rampart | +163.8 ± 29.4 | The Mathematician | +24.9 ± 12.0 |
+| Danny Smallball | +26.0 ± 10.3 | Andrew Favorable | +24.5 ± 12.6 |
+| Chris Moneybags | +92.7 ± 15.3 | Tommy Sweeden | +49.6 ± 18.4 |
+
+On average +72.7 against the 21 bots; it beats all of them.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
