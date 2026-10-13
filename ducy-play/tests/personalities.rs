@@ -123,11 +123,11 @@ fn personalities_play_their_styles() {
         "milk vpip {}",
         vpip(&milk)
     );
-    // Raising: Mister Cheating most, Milk King almost never.
-    assert!(pfr(&cheating) > pfr(&doug) && pfr(&doug) > pfr(&milk));
-    assert!(pfr(&milk) < 0.06, "milk pfr {}", pfr(&milk));
-    // Milk King is far more passive and calls far more than anyone.
-    assert!(milk.aggressive * 2 < milk.calls);
+    // Raising: Mister Cheating more than Doug, Jonny Slow hardly ever, and
+    // Milk King, the gambler, plenty.
+    assert!(pfr(&cheating) > pfr(&doug) && pfr(&doug) > pfr(&coffee));
+    assert!(pfr(&milk) > 2.0 * pfr(&coffee), "milk pfr {}", pfr(&milk));
+    // Milk King gets the money in: he folds to bets far less than the rock.
     assert!(
         rate(milk.folds_to_bets, milk.faced_bets) < rate(coffee.folds_to_bets, coffee.faced_bets)
     );

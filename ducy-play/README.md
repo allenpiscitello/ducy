@@ -94,19 +94,19 @@ PFR = hands raised preflop). Their range traits are written for a full
 | **Doug Poker** | Balanced, near-GTO: solid positional ranges, 2/3-pot bets with about one bluff per two value bets, pot-odds defense. An approximation, not a solver. | 23% / 16% | 28% |
 | **Jonny Slow** | A rock: few hands, limps and check-calls rather than raising, folds to pressure, never bluffs. (Formerly Old Man Coffee; the old id `old_man_coffee` still works.) | 11% / 3% | 58% |
 | **Mister Cheating** | Loose-aggressive and exploitative: lots of hands, bold plays, adapts to each opponent's leaks. | 44% / 33% | 21% |
-| **Milk King** | Loose-passive: plays most hands, rarely raises, calls far too much. | 60% / 3% | 5% |
+| **Milk King** | Gambler: plays most hands, raises and re-raises plenty, bets big with any piece and draws, and rarely folds once the money's going in. | 70% / 26% | 28% |
 | **Phil Bigmouth** | Tight and proud until a big loss puts him on tilt; then he loosens up and spews for a while. | 17% / 12% | 35% |
 | **Rampart** | Splashy loose-aggressive vlogger: lots of hands, big bluffs, hero calls, bolder on a heater. | 44% / 34% | 9% |
 | **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 36% / 22% | 27% |
-| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 55% / 7% | 11% |
+| **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 42% / 7% | 35% |
 | **Robin Jane Lewd** | Loose-passive hero caller, and never folds a pair. (Formerly Uncle Gary; the old id `uncle_gary` still works.) | 47% / 3% | 18% |
-| **Gus Bluffsen** | Fearless bluffer: bets his air and checks his monsters. | 33% / 23% | 22% |
+| **Gus Bluffsen** | Fearless bluffer: plays plenty of hands, bets his air and checks his monsters. | 39% / 30% | 46% |
 | **Jen Silly** | Plays any suited hand and any ace, because they're pretty. (Formerly Lady Luck Linda; the old id `lady_luck_linda` still works.) | 37% / 6% | 33% |
 | **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 23% / 18% | 31% |
 | **Brad Owned** | Fit-or-fold recreational: sees lots of flops, bets what he hits, gives up when he misses. Always plays pocket jacks. | 33% / 5% | 67% |
-| **Nik Airbag** | Maniac: raises almost everything, 3-bets wide, bluffs huge. | 65% / 45% | 13% |
-| **Bungleman** | Wild card: plays any suited hand, traps one hand and fires huge bluffs the next. | 54% / 28% | 14% |
-| **Tom Collins** | Table captain: raises nearly every pot nobody has raised and bets big whenever checked to, but careful against a raise before the flop and folds to one after it unless strong. | 42% / 33% | 58% |
+| **Nik Airbag** | Maniac: raises a huge share of hands, 3-bets wide, bluffs huge. | 54% / 37% | 8% |
+| **Bungleman** | Mostly a solid regular, then out of nowhere a trap or a huge bluff. | 29% / 21% | 42% |
+| **Tom Collins** | Table captain: raises most pots nobody has raised and bets big when checked to, but careful against a raise before the flop and folds to one after it unless strong. | 44% / 32% | 67% |
 | **The Mathematician** | Theorist: tight, strongly positional starting hands, raise or fold when first in, calls by the pot odds alone, bluffs at a balanced ratio, never tilts. | 16% / 12% | 32% |
 | **Andrew Favorable** | Straightforward and reasonable in Hold'em; loves PLO, where he plays half again as many hands and plays them harder (`omaha` 0.5). | 24% / 16% | 53% |
 | **Tommy Sweeden** | Aggressive but careful: raises a fair range, bets his good hands, and loves a check-raise (about half the times he checks and someone bets). Bets scare him a little more than most. A lost pot puts him on tilt, and it takes a while to wear off. | 29% / 25% | 38% |

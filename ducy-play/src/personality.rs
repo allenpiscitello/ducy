@@ -325,7 +325,7 @@ impl Personality {
             Self::MisterCheating => {
                 "Loose-aggressive: lots of hands, bold plays, exploits each opponent's leaks."
             }
-            Self::MilkKing => "Loose-passive: plays almost anything and calls a lot.",
+            Self::MilkKing => "Gambler: plays almost anything and loves to get the money in.",
             Self::PhilBigmouth => "Tight and proud, until a bad beat sends him on monumental tilt.",
             Self::Rampart => {
                 "Splashy LAG: lots of hands, big bluffs, hero calls, rides his heaters."
@@ -366,7 +366,7 @@ impl Personality {
             Self::DougPoker => "It's all just frequencies.",
             Self::JonnySlow => "I'll wait for aces. I've got time.",
             Self::MisterCheating => "I've seen how you play.",
-            Self::MilkKing => "I call. What did you have?",
+            Self::MilkKing => "Let's get it all in and see.",
             Self::PhilBigmouth => "If it weren't for luck, I'd win every hand.",
             Self::Rampart => "I had to see it.",
             Self::DannySmallball => "I put you on exactly king-jack.",
@@ -452,19 +452,26 @@ impl Personality {
                 ..base
             },
             Self::MilkKing => Style {
+                // A gambler: plays most hands, raises and re-raises plenty
+                // of them, and calls a re-raise with almost anything.
                 vpip: 0.55,
-                pfr: 0.06,
-                three_bet: 0.01,
-                four_bet: 0.003,
+                pfr: 0.2,
+                three_bet: 0.08,
+                four_bet: 0.06,
                 defend: 0.9,
                 position_bonus: 0.15,
-                value_margin: 0.2,
-                aggression: 0.4,
-                bluff: 0.06,
-                bluff_raise: 0.0,
-                call_factor: 0.5,
+                // Any piece of the board is worth betting, and big; draws
+                // get raised.
+                value_margin: 0.04,
+                aggression: 0.85,
+                bluff: 0.2,
+                bluff_raise: 0.15,
+                // Doesn't fold once the money's going in.
+                call_factor: 0.55,
+                pair_call_factor: 0.6,
                 caution: 0.0,
-                bet_size: 0.5,
+                bet_size: 1.0,
+                heater: 0.3,
                 open_size: 2.0,
                 ..base
             },
