@@ -80,6 +80,16 @@ fn main() {
         a.cards.display(),
         start.elapsed().as_secs_f64()
     );
+    // A compact abstraction (the one the site ships) computes every flop
+    // bucket from scratch, about 20 ms each: training runs dozens of times
+    // slower than with the full tables `build_abstraction` writes.
+    if !cards.has_tables() {
+        eprintln!(
+            "warning: {} is a compact abstraction (no flop and turn tables); \
+             training will be very slow. Use the full file build_abstraction wrote.",
+            a.cards.display()
+        );
+    }
     let hunl = HunlConfig::default();
     let game = Hunl::new(
         HunlConfig {
