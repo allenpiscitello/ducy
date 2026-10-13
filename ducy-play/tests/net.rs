@@ -68,15 +68,29 @@ fn the_nuts_on_the_river_always_bet() {
         hand.act(Action::Check).unwrap();
     }
     let obs = hand.observation(0).expect("seat 0 first on the river");
-    // An untrained network might check; the rule bets the pot (4).
-    for seed in 0..5 {
+    // An untrained network might check; the rule makes it bet, but the
+    // network still picks the size, small ones included.
+    let mut sizes = std::collections::BTreeSet::new();
+    for seed in 0..40 {
         let mut bot = NetBot::new(
             Personality::DougPoker,
             Arc::new(Mlp::random(&DEFAULT_SIZES, seed)),
             Some(seed),
         );
-        assert_eq!(bot.act(&obs), Some(Action::Bet(4)));
+        match bot.act(&obs) {
+            Some(Action::Bet(to)) => {
+                sizes.insert(to);
+            }
+            Some(Action::AllIn) => {
+                sizes.insert(200);
+            }
+            other => panic!("with the nuts on the river it bets, not {other:?}"),
+        }
     }
+    // A pot of 4: a third is 1 (the minimum bet, 2), two thirds 3, the pot 4,
+    // twice the pot 8, all-in 200.
+    assert!(sizes.len() >= 3, "sizes vary with the network: {sizes:?}");
+    assert!(sizes.iter().any(|&s| s < 4), "small bets happen: {sizes:?}");
 }
 
 #[test]

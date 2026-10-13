@@ -3,7 +3,8 @@
 //! runs the network, and samples one of the possible action classes.
 //!
 //! Hard rules stay on top of the network: holding the nuts on the river, it
-//! always bets or raises (#212), the most it can up to the pot.
+//! always bets or raises (#212). The network still picks the size, small to
+//! all-in: a small bet is sometimes the one that gets paid.
 
 use std::sync::Arc;
 
@@ -73,41 +74,32 @@ impl NetBot {
     }
 
     /// The probability of each action class for `obs`, 0 for impossible
-    /// ones.
+    /// ones, and for checking, calling and folding with the nuts on the
+    /// river when it can bet or raise.
     pub fn policy(&mut self, obs: &Observation) -> [f32; NUM_CLASSES] {
         let style: Style = self.style.style_for(obs);
         let f = decision_features(obs, &self.model, &style, &self.config, &mut self.rng);
-        let mask = ActionClass::mask(obs);
+        let mut mask = ActionClass::mask(obs);
+        if must_bet(obs, &mask) {
+            mask[ActionClass::Fold.index()] = false;
+            mask[ActionClass::CheckCall.index()] = false;
+        }
         let p = self.net.probs(&f, &mask);
         std::array::from_fn(|i| p[i])
     }
 }
 
-/// On the river with the nuts: the biggest bet or raise up to the pot, or
-/// all-in when that's all there is.
-fn nuts_on_the_river(obs: &Observation) -> Option<Action> {
-    if obs.street != Street::River {
-        return None;
+/// On the river with the nuts, and able to bet or raise: it must (#212).
+fn must_bet(obs: &Observation, mask: &[bool; NUM_CLASSES]) -> bool {
+    if obs.street != Street::River || !mask[ActionClass::Third.index()..].iter().any(|&m| m) {
+        return false;
     }
     let hole: Vec<Card> = obs.hole_cards.iter(false).collect();
-    if hole.is_empty() || !has_nuts(obs.rules.variant, &hole, &obs.board) {
-        return None;
-    }
-    [
-        ActionClass::Pot,
-        ActionClass::TwoThirds,
-        ActionClass::Third,
-        ActionClass::AllIn,
-    ]
-    .into_iter()
-    .find_map(|c| c.action(obs))
+    !hole.is_empty() && has_nuts(obs.rules.variant, &hole, &obs.board)
 }
 
 impl Bot for NetBot {
     fn act(&mut self, obs: &Observation) -> Option<Action> {
-        if let Some(a) = nuts_on_the_river(obs) {
-            return Some(a);
-        }
         let p = self.policy(obs);
         let total: f32 = p.iter().sum();
         if total <= 0.0 {
