@@ -75,6 +75,7 @@ pub mod structure;
 mod table;
 mod tournament;
 mod tournament_host;
+pub mod traits;
 
 pub use bot::{Bot, HandOutcome, HandSummary, Observation, SeatView, fallback_action, play_hand};
 pub use deal::{Deal, Dealer, HiddenDeal};
