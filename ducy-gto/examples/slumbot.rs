@@ -20,8 +20,10 @@
 //! hands. `--log FILE` appends every hand as a JSON line. The API is reached
 //! with `curl`.
 //!
-//! The blueprint is trained for 100 big blinds, so at 200 its all-in and
-//! deep-stack play are approximations; read the results with that in mind.
+//! `--bb N` is the depth the blueprint was trained for (default 100). The
+//! published blueprint is 100 big blinds: at Slumbot's 200 its all-in is a
+//! 200 big blind shove, so train one with `train_blueprint --bb 200` for a
+//! fair measurement.
 
 use std::{io::Write, process::Command, sync::Arc, thread, time::Duration};
 
@@ -242,6 +244,7 @@ fn main() {
     let mut delay = 0u64;
     let mut log: Option<String> = None;
     let mut seed = 1u64;
+    let mut bb = 100u64;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut v = || it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
@@ -253,15 +256,22 @@ fn main() {
             "--delay" => delay = v().parse().expect("--delay"),
             "--log" => log = Some(v()),
             "--seed" => seed = v().parse().expect("--seed"),
+            "--bb" => bb = v().parse().expect("--bb"),
             f => panic!("unknown option {f}"),
         }
     }
+    // The depth the blueprint was trained for (`train_blueprint --bb`).
+    let hunl = HunlConfig::default();
+    let config = HunlConfig {
+        stack: bb * hunl.big_blind,
+        ..hunl
+    };
     let cards = Arc::new(
         CardAbstraction::load(&std::fs::read(&cards_path).expect("read --cards"))
             .expect("abstraction"),
     );
     let bytes = std::fs::read(&blueprint_path).expect("read --blueprint");
-    let mut bot = GtoBot::new(HunlConfig::default(), cards, &bytes, seed).expect("blueprint");
+    let mut bot = GtoBot::new(config, cards, &bytes, seed).expect("blueprint");
     if solve {
         bot = bot.with_solving();
     }
