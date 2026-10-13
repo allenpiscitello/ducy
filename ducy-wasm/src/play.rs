@@ -653,6 +653,31 @@ impl BotTable {
         self.table.set_stack(seat, chips).map_err(err)
     }
 
+    /// Puts the personality bot `id` in bot seat `seat` with `chips`, from
+    /// the next hand: one of the Regulars leaving and another sitting down
+    /// (ducy-web #225). Only between hands, and not seat 0 (the person).
+    #[wasm_bindgen(js_name = setBot)]
+    pub fn set_bot(&mut self, seat: usize, id: &str, chips: u64, seed: u64) -> Result<(), JsError> {
+        if seat == 0 || seat >= self.table.num_seats() {
+            return Err(JsError::new("no such bot seat"));
+        }
+        if self.table.in_hand() {
+            return Err(JsError::new("the current hand isn't over"));
+        }
+        let p =
+            Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
+        *self.table.seat_mut(seat) = TableSeat::bot(p.id(), p.bot(Some(seed)));
+        self.table.set_stack(seat, chips).map_err(err)
+    }
+
+    /// Whether a seat out of chips gets the buy-in again before the next
+    /// hand (on by default). Off, a seat with no chips isn't dealt in until
+    /// `setStack` gives it some: the person rebuys when they choose.
+    #[wasm_bindgen(js_name = setTopUp)]
+    pub fn set_top_up(&mut self, on: bool) {
+        self.table.set_top_up(on);
+    }
+
     /// Hands kept for review (heads-up no-limit Hold'em against "gto").
     #[wasm_bindgen(js_name = reviewableHands)]
     pub fn reviewable_hands(&self) -> usize {
