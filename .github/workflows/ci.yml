@@ -49,6 +49,7 @@ jobs:
       - run: node ducy-wasm/tests/replay.cjs
       - run: node ducy-wasm/tests/partial-board.cjs
       - run: node ducy-wasm/tests/seats.cjs
+      - run: node ducy-wasm/tests/net.cjs
       - run: cargo run -p ducy-gto --example tiny_model -- target/tiny-model
       - run: node ducy-wasm/tests/review.cjs
       - run: node ducy-wasm/tests/gto-plo.cjs
