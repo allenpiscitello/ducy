@@ -63,6 +63,7 @@ mod hand;
 mod host;
 mod matchup;
 pub mod net;
+pub mod net_data;
 pub mod personality;
 #[cfg(feature = "process")]
 mod process;
