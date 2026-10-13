@@ -154,7 +154,9 @@ fn bot_tournament(
 fn the_estimate_is_within_a_quarter_of_bot_tournaments() {
     // Small fields keep this quick in a debug build; the 60-case calibration
     // with fields up to 45 is the tourney_time example.
-    const RUNS: u64 = 10;
+    // Six-player fields vary a lot from run to run: 60 runs keep the mean
+    // steady enough to compare with the estimate.
+    const RUNS: u64 = 60;
     for (preset, stack, players, table_size, hph) in [
         ("turbo", 1500, 9, 9, 30.0),
         ("regular", 1500, 9, 9, 30.0),
