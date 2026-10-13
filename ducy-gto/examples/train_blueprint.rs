@@ -12,6 +12,7 @@
 //!   it as training goes (every `--every` iterations and at the end)
 //! - `--every N`: report and checkpoint interval (default 1,000,000)
 //! - `--seed N`, `--batch N`: sampling seed and parallel batch size
+//! - `--bb N`: stacks in big blinds (default 100); Slumbot plays 200
 //!
 //! Each report prints iterations per second and the button's and big blind's
 //! preflop frequencies, which settle as the strategy converges.
@@ -36,6 +37,7 @@ struct Args {
     every: u64,
     seed: u64,
     batch: u64,
+    bb: u64,
 }
 
 fn args() -> Args {
@@ -47,6 +49,7 @@ fn args() -> Args {
         every: 1_000_000,
         seed: 1,
         batch: 4096,
+        bb: 100,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -59,6 +62,7 @@ fn args() -> Args {
             "--every" => a.every = value().replace('_', "").parse().expect("--every"),
             "--seed" => a.seed = value().parse().expect("--seed"),
             "--batch" => a.batch = value().parse().expect("--batch"),
+            "--bb" => a.bb = value().parse().expect("--bb"),
             f => panic!("unknown option {f}"),
         }
     }
@@ -76,7 +80,14 @@ fn main() {
         a.cards.display(),
         start.elapsed().as_secs_f64()
     );
-    let game = Hunl::new(HunlConfig::default(), Some(&cards));
+    let hunl = HunlConfig::default();
+    let game = Hunl::new(
+        HunlConfig {
+            stack: a.bb * hunl.big_blind,
+            ..hunl
+        },
+        Some(&cards),
+    );
     let stats = game.tree_stats();
     println!(
         "{} betting nodes; {:?} information sets per street; {:.0} MB of regrets and sums",
