@@ -77,6 +77,7 @@ mod table;
 mod tournament;
 mod tournament_host;
 pub mod traits;
+mod variants;
 
 pub use bot::{Bot, HandOutcome, HandSummary, Observation, SeatView, fallback_action, play_hand};
 pub use deal::{Deal, Dealer, HiddenDeal};
@@ -103,3 +104,4 @@ pub use tournament::{
     Entrant, Finish, HandReport, Level, Move, SeatRef, Standing, Tournament, TournamentConfig,
 };
 pub use tournament_host::{TournamentEvents, TournamentHost};
+pub use variants::{Comparison, VariantResult, run_variants};
