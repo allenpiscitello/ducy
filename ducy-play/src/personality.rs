@@ -325,7 +325,7 @@ impl Personality {
             Self::MisterCheating => {
                 "Loose-aggressive: lots of hands, bold plays, exploits each opponent's leaks."
             }
-            Self::MilkKing => "Loose-passive: plays almost anything and calls a lot.",
+            Self::MilkKing => "Gambler: plays almost anything and loves to get the money in.",
             Self::PhilBigmouth => "Tight and proud, until a bad beat sends him on monumental tilt.",
             Self::Rampart => {
                 "Splashy LAG: lots of hands, big bluffs, hero calls, rides his heaters."
@@ -344,7 +344,7 @@ impl Personality {
                 "Fit-or-fold: lots of flops, gives up when he misses, always plays jacks."
             }
             Self::NikAirbag => "Maniac: raises almost everything and bluffs huge.",
-            Self::Bungleman => "Wild card: any suited hand, traps and huge bluffs.",
+            Self::Bungleman => "Mostly solid, then out of nowhere a trap or a huge bluff.",
             Self::TomCollins => {
                 "Table captain: takes charge of every pot, until someone pushes back."
             }
@@ -366,7 +366,7 @@ impl Personality {
             Self::DougPoker => "It's all just frequencies.",
             Self::JonnySlow => "I'll wait for aces. I've got time.",
             Self::MisterCheating => "I've seen how you play.",
-            Self::MilkKing => "I call. What did you have?",
+            Self::MilkKing => "Let's get it all in and see.",
             Self::PhilBigmouth => "If it weren't for luck, I'd win every hand.",
             Self::Rampart => "I had to see it.",
             Self::DannySmallball => "I put you on exactly king-jack.",
@@ -452,19 +452,26 @@ impl Personality {
                 ..base
             },
             Self::MilkKing => Style {
+                // A gambler: plays most hands, raises and re-raises plenty
+                // of them, and calls a re-raise with almost anything.
                 vpip: 0.55,
-                pfr: 0.03,
-                three_bet: 0.007,
-                four_bet: 0.003,
+                pfr: 0.2,
+                three_bet: 0.08,
+                four_bet: 0.06,
                 defend: 0.9,
                 position_bonus: 0.15,
-                value_margin: 0.25,
-                aggression: 0.2,
-                bluff: 0.02,
-                bluff_raise: 0.0,
-                call_factor: 0.5,
+                // Any piece of the board is worth betting, and big; draws
+                // get raised.
+                value_margin: 0.04,
+                aggression: 0.85,
+                bluff: 0.2,
+                bluff_raise: 0.15,
+                // Doesn't fold once the money's going in.
+                call_factor: 0.55,
+                pair_call_factor: 0.6,
                 caution: 0.0,
-                bet_size: 0.4,
+                bet_size: 1.0,
+                heater: 0.3,
                 open_size: 2.0,
                 ..base
             },
@@ -518,7 +525,7 @@ impl Personality {
                 ..base
             },
             Self::ChrisMoneybags => Style {
-                vpip: 0.33,
+                vpip: 0.26,
                 pfr: 0.05,
                 three_bet: 0.013,
                 defend: 0.85,
@@ -550,12 +557,13 @@ impl Personality {
                 ..base
             },
             Self::GusBluffsen => Style {
-                vpip: 0.25,
-                pfr: 0.17,
+                vpip: 0.31,
+                pfr: 0.23,
+                three_bet: 0.08,
                 backwards: true,
-                aggression: 0.9,
-                bluff: 0.15,
-                bluff_raise: 0.1,
+                aggression: 1.0,
+                bluff: 0.35,
+                bluff_raise: 0.18,
                 bet_size: 0.75,
                 ..base
             },
@@ -598,9 +606,9 @@ impl Personality {
                 ..base
             },
             Self::NikAirbag => Style {
-                vpip: 0.55,
-                pfr: 0.41,
-                three_bet: 0.21,
+                vpip: 0.45,
+                pfr: 0.34,
+                three_bet: 0.17,
                 four_bet: 0.1,
                 defend: 0.85,
                 position_bonus: 0.2,
@@ -618,48 +626,49 @@ impl Personality {
                 ..base
             },
             Self::Bungleman => Style {
-                vpip: 0.25,
-                pfr: 0.17,
-                three_bet: 0.1,
-                four_bet: 0.05,
-                defend: 0.8,
-                any_suited: true,
-                value_margin: 0.08,
-                aggression: 0.7,
-                trap: 0.35,
-                bluff: 0.45,
-                bluff_raise: 0.2,
-                call_factor: 0.85,
-                caution: 0.05,
-                bet_size: 1.0,
-                heater: 0.2,
-                tilt: 0.2,
+                // Close to a solid regular, with a few wild moves: traps
+                // and the odd big bluff.
+                vpip: 0.2,
+                pfr: 0.15,
+                three_bet: 0.07,
+                four_bet: 0.03,
+                defend: 0.65,
+                value_margin: 0.1,
+                aggression: 0.75,
+                trap: 0.25,
+                bluff: 0.3,
+                bluff_raise: 0.1,
+                call_factor: 0.95,
+                caution: 0.1,
+                bet_size: 0.85,
+                heater: 0.1,
+                tilt: 0.1,
                 ..base
             },
             Self::TomCollins => Style {
                 // Raises nearly every unopened or limped pot: these widen to
                 // about 70% six-handed or on the button.
-                vpip: 0.57,
-                pfr: 0.55,
+                vpip: 0.5,
+                pfr: 0.46,
                 // Facing a raise he's careful: re-raises only his best hands
                 // and calls with few more.
                 three_bet: 0.05,
                 four_bet: 0.02,
-                defend: 0.3,
+                defend: 0.4,
                 position_bonus: 0.25,
                 open_size: 3.0,
-                // Checked to, he bets: value hands always, and most of his
-                // air too, big.
+                // Checked to, he bets: value hands nearly always, and a lot
+                // of his air too, big.
                 value_margin: 0.05,
-                aggression: 1.0,
-                bluff: 0.65,
-                bet_size: 1.1,
+                aggression: 0.95,
+                bluff: 0.4,
+                bet_size: 1.0,
                 // Raised after the flop, he gets out of the way unless he's
                 // strong: never bluff-raises, scared of bets, no sticky pairs.
                 bluff_raise: 0.0,
-                call_factor: 1.3,
-                pair_call_factor: 1.1,
-                caution: 0.45,
+                call_factor: 1.15,
+                pair_call_factor: 1.05,
+                caution: 0.3,
                 ..base
             },
             Self::TheMathematician => Style {
