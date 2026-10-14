@@ -792,6 +792,31 @@ const ALWAYS_CALL_ODDS: f64 = 0.1;
 /// preflop it calls whenever it's priced in against the strongest hands.
 const COMMITTED_SHARE: f64 = 0.25;
 
+// The spew guard: what keeps even the wildest Regular from throwing chips
+// away where it costs most. Measured against GtoBot heads-up (ducy-gto's
+// `leaks` example), every Regular lost most getting its stack in before the
+// flop with weak hands, and the wild ones building huge pots after it with
+// nothing or one pair.
+
+/// Before the flop, a call or raise that puts in this many big blinds or
+/// more, or [`STACK_OFF_SHARE`] of its stack, is a stack-off decision...
+const STACK_OFF_BB: f64 = 40.0;
+const STACK_OFF_SHARE: f64 = 0.25;
+/// ...made only with the top share of hands (for a full table, widened for
+/// shorter ones like the other ranges: about 15% heads-up), and up to
+/// [`STACK_OFF_LOOSE`] more for the loosest players.
+const STACK_OFF_RANGE: f64 = 0.035;
+const STACK_OFF_LOOSE: f64 = 0.015;
+
+/// After the flop, a pot is big once the effective stack behind is less
+/// than this many pots. There bluffs and bluff raises come
+/// [`BIG_POT_BLUFF`] times as often, value bets want [`BIG_POT_VALUE`] more
+/// edge, and every hand is judged against what the bettors probably hold,
+/// even by players who otherwise judge it against random hands.
+const BIG_POT_SPR: f64 = 1.5;
+const BIG_POT_BLUFF: f64 = 0.3;
+const BIG_POT_VALUE: f64 = 0.05;
+
 /// Pot odds at or below which a bot after the flop wants no more equity than
 /// the bare odds, however cautious its style.
 const PRICED_IN_ODDS: f64 = 0.2;
@@ -1049,6 +1074,26 @@ impl PersonalityBot {
         let only_pretty = pretty && !favorite && top > vpip;
 
         let big_blind = obs.rules.big_blind;
+        // The spew guard: getting the stack in takes a hand in the top
+        // `stack_off` share, whatever the style's ranges say.
+        let me = &obs.seats[obs.seat];
+        let start_stack = (me.contributed + me.stack) as f64;
+        let loose = ((style.vpip - 0.2) / 0.35).clamp(0.0, 1.0);
+        let stack_off = scale_for_table(STACK_OFF_RANGE + STACK_OFF_LOOSE * loose, n);
+        let guarded = |to: u64| {
+            top > stack_off
+                && (to as f64 >= STACK_OFF_BB * big_blind as f64
+                    || to as f64 >= STACK_OFF_SHARE * start_stack)
+        };
+        let call_to = me.contributed + legal.call.unwrap_or(0);
+        let raise = |legal: &LegalActions, to: u64| {
+            if guarded(to) {
+                None
+            } else {
+                raise_to(legal, to)
+            }
+        };
+        let call_ok = legal.call.is_none() || !guarded(call_to);
         let raises = obs
             .history
             .iter()
@@ -1069,7 +1114,7 @@ impl PersonalityBot {
             };
         }
 
-        if only_pretty {
+        if only_pretty && call_ok {
             return passive(legal);
         }
 
@@ -1077,32 +1122,32 @@ impl PersonalityBot {
             0 => {
                 if top <= pfr {
                     let to = (style.open_size * big_blind as f64).round() as u64;
-                    if let Some(action) = raise_to(legal, to) {
+                    if let Some(action) = raise(legal, to) {
                         return action;
                     }
                 }
-                if top <= vpip {
+                if top <= vpip && call_ok {
                     return passive(legal);
                 }
             }
             1 => {
                 if top <= three_bet {
-                    if let Some(action) = raise_to(legal, obs.current_bet * 3) {
+                    if let Some(action) = raise(legal, obs.current_bet * 3) {
                         return action;
                     }
                 }
-                if top <= vpip * style.defend {
+                if top <= vpip * style.defend && call_ok {
                     return passive(legal);
                 }
             }
             _ => {
                 if top <= four_bet {
                     let to = (obs.current_bet as f64 * 2.5).round() as u64;
-                    if let Some(action) = raise_to(legal, to) {
+                    if let Some(action) = raise(legal, to) {
                         return action;
                     }
                 }
-                if top <= four_bet * 2.5 {
+                if top <= four_bet * 2.5 && call_ok {
                     return passive(legal);
                 }
             }
@@ -1155,7 +1200,10 @@ impl PersonalityBot {
     fn postflop(&mut self, obs: &Observation, style: &Style) -> Action {
         let legal = &obs.legal;
         let players = obs.seats.iter().filter(|s| !s.folded).count().max(1);
-        let (equity, caution) = if style.ranges {
+        // The spew guard: in a big pot (little behind for its size), every
+        // hand is judged against what the others probably hold.
+        let big_pot = (effective_stack(obs) as f64) < BIG_POT_SPR * obs.pot as f64;
+        let (equity, caution) = if style.ranges || big_pot {
             (
                 range_equity(obs, &self.model, style.samples, &mut self.rng),
                 style.caution * RANGE_CAUTION,
@@ -1179,6 +1227,12 @@ impl PersonalityBot {
         } else {
             (style.bluff, style.bluff_raise)
         };
+        // Big pots get fewer bluffs and want more for value (the spew guard).
+        let (bluff, bluff_raise) = if big_pot {
+            (bluff * BIG_POT_BLUFF, bluff_raise * BIG_POT_BLUFF)
+        } else {
+            (bluff, bluff_raise)
+        };
         // River betting is polarized (RIVER_VALUE_EXTRA): strong hands bet for
         // value, hands with no showdown value bluff, and the ones between
         // check.
@@ -1187,7 +1241,7 @@ impl PersonalityBot {
             style.value_margin + RIVER_VALUE_EXTRA
         } else {
             style.value_margin
-        };
+        } + if big_pot { BIG_POT_VALUE } else { 0.0 };
         let bluff_hand = if river {
             equity < RIVER_BLUFF_SHARE / players as f64
         } else {
