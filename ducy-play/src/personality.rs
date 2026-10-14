@@ -429,7 +429,7 @@ impl Personality {
                 // Folds to pressure without a clear edge.
                 call_factor: 1.3,
                 caution: 0.3,
-                bet_size: 0.5,
+                bet_size: 0.52,
                 open_size: 3.0,
                 ..base
             },
@@ -456,18 +456,18 @@ impl Personality {
                 // of them, and calls a re-raise with almost anything.
                 vpip: 0.55,
                 pfr: 0.2,
-                three_bet: 0.08,
-                four_bet: 0.06,
-                defend: 0.9,
+                three_bet: 0.07,
+                four_bet: 0.05,
+                defend: 0.875,
                 position_bonus: 0.15,
-                // Any piece of the board is worth betting, and big; draws
-                // get raised.
-                value_margin: 0.04,
+                // Any decent piece of the board is worth betting, and big;
+                // draws get raised. (Tuned, #206.)
+                value_margin: 0.07,
                 aggression: 0.85,
                 bluff: 0.2,
                 bluff_raise: 0.15,
-                // Doesn't fold once the money's going in.
-                call_factor: 0.55,
+                // Hates to fold once the money's going in.
+                call_factor: 0.65,
                 pair_call_factor: 0.6,
                 caution: 0.0,
                 bet_size: 1.0,
@@ -493,13 +493,13 @@ impl Personality {
                 three_bet: 0.12,
                 four_bet: 0.08,
                 defend: 0.8,
-                value_margin: 0.06,
+                value_margin: 0.045,
                 aggression: 0.95,
                 bluff: 0.55,
                 bluff_raise: 0.25,
                 // Hero calls.
                 call_factor: 0.8,
-                caution: 0.02,
+                caution: 0.045,
                 bet_size: 1.1,
                 open_size: 3.0,
                 // Bolder on a heater, a little tilty after big losses.
@@ -529,13 +529,17 @@ impl Personality {
                 pfr: 0.05,
                 three_bet: 0.013,
                 defend: 0.85,
-                position_bonus: 0.15,
+                // Tuned (#206).
+                position_bonus: 0.05,
+                open_size: 3.0,
                 value_margin: 0.15,
                 aggression: 0.4,
                 bluff: 0.05,
+                bluff_raise: 0.025,
                 call_factor: 0.7,
-                caution: 0.05,
-                bet_size: 0.6,
+                pair_call_factor: 1.025,
+                caution: 0.063,
+                bet_size: 0.769,
                 heater: 0.9,
                 recovery: 0.1,
                 ..base
@@ -550,13 +554,14 @@ impl Personality {
                 position_bonus: 0.15,
                 open_size: 3.25,
                 value_margin: 0.2,
-                aggression: 0.35,
+                aggression: 0.45,
+                check_raise: 0.025,
                 bluff: 0.03,
                 bluff_raise: 0.0,
                 call_factor: 0.8,
                 pair_call_factor: 0.15,
                 caution: 0.05,
-                bet_size: 0.5,
+                bet_size: 0.594,
                 ..base
             },
             Self::GusBluffsen => Style {
@@ -613,15 +618,16 @@ impl Personality {
                 pfr: 0.34,
                 three_bet: 0.17,
                 four_bet: 0.1,
-                // Tuned (#206): a maniac who calls a little less.
-                defend: 0.75,
+                // Tuned (#206): a maniac who calls less, and a big bet
+                // makes him think a little.
+                defend: 0.6,
                 position_bonus: 0.2,
                 value_margin: 0.065,
                 aggression: 1.0,
                 bluff: 0.53,
                 bluff_raise: 0.25,
                 call_factor: 0.95,
-                caution: 0.02,
+                caution: 0.083,
                 bet_size: 1.5,
                 open_size: 3.5,
                 // The maniac never believes a bet: he judges his hand
