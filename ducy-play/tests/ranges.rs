@@ -146,6 +146,50 @@ fn checked_to_last_on_the_river_with_the_nuts_it_bets() {
 }
 
 #[test]
+fn the_river_bets_strong_hands_and_air_and_checks_the_middle() {
+    use ducy_play::{Bot, PersonalityBot, Style};
+    // Checked to on the river, last to act, on Kh 7d 2c 9c 4s: a style that
+    // bets every hand it would bet or bluff with. A set of kings bets for
+    // value and six-high bluffs, but second pair has showdown value: betting
+    // it gets called by better and folds out worse, so it checks. Without
+    // the polarized river it bets second pair too.
+    let bets = |hole: &str, polar: bool| {
+        let mut h = hand(&[hole, "8c 3d"], "Kh 7d 2c 9c 4s");
+        h.act(Action::Call).unwrap();
+        h.act(Action::Check).unwrap();
+        for _ in 0..2 {
+            h.act(Action::Check).unwrap();
+            h.act(Action::Check).unwrap();
+        }
+        h.act(Action::Check).unwrap();
+        let obs = h.observation(0).unwrap();
+        assert_eq!(obs.street, Street::River);
+        let style = Style {
+            aggression: 1.0,
+            bluff: 1.0,
+            ranges: false,
+            samples: 300,
+            polar_river: polar,
+            ..Style::default()
+        };
+        (0..10)
+            .filter(|&s| {
+                let mut bot = PersonalityBot::new("river", style, Some(s));
+                matches!(bot.act(&obs), Some(Action::Bet(_)))
+            })
+            .count()
+    };
+    assert_eq!(bets("Ks Kc", true), 10, "a set of kings checked");
+    assert_eq!(bets("6h 3h", true), 10, "six-high didn't bluff");
+    assert_eq!(bets("9h 8h", true), 0, "second pair bet");
+    assert_eq!(
+        bets("9h 8h", false),
+        10,
+        "second pair checked without the polarized river"
+    );
+}
+
+#[test]
 fn heads_up_with_the_nuts_it_raises_instead_of_calling() {
     use ducy_play::{Bot, Personality, PersonalityBot};
     // Jonny Slow, the most passive caller, holds the nut flush on the river
