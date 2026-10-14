@@ -91,6 +91,10 @@ pub struct Style {
     pub bluff: f64,
     /// Chance it raises as a bluff when bet into.
     pub bluff_raise: f64,
+    /// Plays the river polarized ([`RIVER_VALUE_EXTRA`]): bets and raises
+    /// strong hands for value and hands with no showdown value as bluffs, and
+    /// checks the ones between. Off, it bets the river like any other street.
+    pub polar_river: bool,
     /// Equity it needs to call, as a multiple of the pot odds: above 1 folds
     /// more than is correct, below 1 calls too much.
     pub call_factor: f64,
@@ -163,6 +167,7 @@ impl Default for Style {
             backwards: false,
             bluff: 0.25,
             bluff_raise: 0.05,
+            polar_river: true,
             call_factor: 1.0,
             pair_call_factor: 1.0,
             caution: 0.15,
@@ -787,6 +792,17 @@ const COMMITTED_SHARE: f64 = 0.25;
 /// the bare odds, however cautious its style.
 const PRICED_IN_ODDS: f64 = 0.2;
 
+/// On the river no card is coming, so a bet only wins when worse hands call
+/// or better hands fold. A mediocre hand that bets gets called by better and
+/// folds out worse: it loses money, so it checks for its showdown value.
+/// Betting is polarized: value bets (and raises) want this much more edge than
+/// on earlier streets, to be ahead of the hands that call...
+const RIVER_VALUE_EXTRA: f64 = 0.15;
+
+/// ...and bluffs only come from hands with little showdown value: equity
+/// below this share of an even split (a quarter, heads-up).
+const RIVER_BLUFF_SHARE: f64 = 0.5;
+
 /// Widens a range share written for [`BASELINE_PLAYERS`] to a table of
 /// `players`: `1 - (1 - share)^(9 / players)`, at most 0.95.
 ///
@@ -1173,6 +1189,20 @@ impl PersonalityBot {
         } else {
             (style.bluff, style.bluff_raise)
         };
+        // River betting is polarized (RIVER_VALUE_EXTRA): strong hands bet for
+        // value, hands with no showdown value bluff, and the ones between
+        // check. Backwards players keep their upside-down game.
+        let river = obs.street == Street::River && style.polar_river && !style.backwards;
+        let value_margin = if river {
+            style.value_margin + RIVER_VALUE_EXTRA
+        } else {
+            style.value_margin
+        };
+        let bluff_hand = if river {
+            equity < RIVER_BLUFF_SHARE / players as f64
+        } else {
+            bet_edge < 0.0
+        };
 
         match legal.call {
             None => {
@@ -1190,20 +1220,20 @@ impl PersonalityBot {
                     return Action::Check;
                 }
                 if style.check_raise > 0.0
-                    && bet_edge >= style.value_margin
+                    && bet_edge >= value_margin
                     && acts_after(obs)
                     && self.chance(style.check_raise)
                 {
                     // Check, to raise when someone behind bets.
                     return Action::Check;
                 }
-                if bet_edge >= style.value_margin && self.chance(style.aggression) {
+                if bet_edge >= value_margin && self.chance(style.aggression) {
                     if let Some(action) = bet(legal, size) {
                         return action;
                     }
                 }
                 // Bluff weak hands, mostly against one or two opponents.
-                if bet_edge < 0.0 && players <= 3 && self.chance(bluff) {
+                if bluff_hand && players <= 3 && self.chance(bluff) {
                     if let Some(action) = bet(legal, size) {
                         return action;
                     }
@@ -1223,7 +1253,7 @@ impl PersonalityBot {
                 } else {
                     style.aggression
                 };
-                if bet_edge >= style.value_margin + 0.1 && self.chance(raise_chance) {
+                if bet_edge >= value_margin + 0.1 && self.chance(raise_chance) {
                     if let Some(action) = raise_to(legal, raise_size) {
                         return action;
                     }
@@ -1231,7 +1261,7 @@ impl PersonalityBot {
                 // Checked this street and now bet into: the check-raise.
                 let check_raising = style.check_raise > 0.0 && self.checked == Some(obs.street);
                 if check_raising
-                    && bet_edge >= style.value_margin
+                    && bet_edge >= value_margin
                     && self.chance(style.aggression.max(style.check_raise))
                 {
                     if let Some(action) = raise_to(legal, raise_size) {
@@ -1243,7 +1273,7 @@ impl PersonalityBot {
                 } else {
                     bluff_raise
                 };
-                if bet_edge < 0.0 && players <= 2 && self.chance(bluff_raise) {
+                if bluff_hand && players <= 2 && self.chance(bluff_raise) {
                     if let Some(action) = raise_to(legal, raise_size) {
                         return action;
                     }
