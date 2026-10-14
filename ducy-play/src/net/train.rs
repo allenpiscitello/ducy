@@ -3,10 +3,14 @@
 //!
 //! Plain Rust, no dependencies: backpropagation through the ReLU layers,
 //! Adam, and minibatches. The loss is cross-entropy over the possible
-//! action classes only (the same masked softmax `NetBot` plays from), each
-//! decision weighted by its class: rare classes such as overbets count for
-//! more, so the network doesn't learn to ignore them. With weight power `w`,
-//! a class seen `n` times weighs `(mean / n)^w`, scaled to average 1.
+//! action classes only (the same masked softmax `NetBot` plays from).
+//!
+//! Decisions can be weighted by class, so rare classes such as overbets count
+//! for more: with weight power `w`, a class seen `n` times weighs
+//! `(mean / n)^w`, scaled to average 1. It's off by default. Weighting picks
+//! the rare classes out better but shifts the network towards them, so the
+//! copies play too aggressively: on the first dataset, `w = 0.25` put 8 of
+//! the 19 personalities out of trait tolerance, against 1 of 19 unweighted.
 
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -32,7 +36,7 @@ impl Default for TrainConfig {
         Self {
             batch: 256,
             lr: 1e-3,
-            class_weight_power: 0.5,
+            class_weight_power: 0.0,
             seed: 1,
         }
     }

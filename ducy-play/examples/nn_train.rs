@@ -12,7 +12,7 @@
 //! hands (`traits::measure`), its drift from the rule-based bot's targets
 //! (under 1.0 is within tolerance on average).
 //!
-//! Options: `--hidden 64,64`, `--batch 256`, `--lr 0.001`, `--cw 0.5` (how
+//! Options: `--hidden 64,64`, `--batch 256`, `--lr 0.001`, `--cw 0` (how
 //! much rare classes are weighted up), `--seed 1`.
 
 use std::{sync::Arc, time::Instant};
