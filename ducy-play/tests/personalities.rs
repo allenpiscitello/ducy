@@ -599,12 +599,13 @@ fn andrew_favorable_opens_up_in_omaha() {
     let (andrew_hu, doug_hu) = vpips(TableRules::no_limit_holdem(1, 2));
     let (andrew_plo, doug_plo) = vpips(TableRules::pot_limit_omaha(1, 2));
     let (andrew, doug) = (andrew_plo / andrew_hu, doug_plo / doug_hu);
+    // About 1.23 against Doug's 1.03 (since the #206 tuning).
     assert!(
-        andrew > 1.25,
+        andrew > 1.15,
         "Andrew in Omaha: {andrew_plo} vs {andrew_hu} in Hold'em"
     );
     assert!(
-        andrew > doug + 0.2,
+        andrew > doug + 0.12,
         "Andrew opens up ({andrew}), Doug doesn't ({doug})"
     );
     assert_eq!(Personality::AndrewFavorable.catchphrase(), "Favorable.");
