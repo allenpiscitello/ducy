@@ -359,7 +359,17 @@ impl Hand {
         deal: Deal,
         posts: &[Post],
     ) -> Result<Self, PlayError> {
-        let mut hand = Self::with_dealer(rules, stacks, button, &deal, posts)?;
+        // A double board's second board is the five cards after the first.
+        let second = if rules.double_board {
+            let rest = deal.rest();
+            if rest.len() < 5 {
+                return Err(PlayError::NotEnoughCards);
+            }
+            Some(rest[..5].to_vec())
+        } else {
+            None
+        };
+        let mut hand = Self::start(rules, stacks, button, &deal, posts, second)?;
         hand.deal = Some(deal);
         Ok(hand)
     }
@@ -367,12 +377,29 @@ impl Hand {
     /// Like [`Hand::with_posts`], with the cards from any [`Dealer`]. With a
     /// dealer that hides cards from the engine, the hand stops to wait for
     /// them when they're needed: see [`Hand::awaiting`].
+    /// A double board ([`TableRules::double_board`]) needs a [`Deal`] for
+    /// its second board, so it can't start here.
     pub fn with_dealer(
         rules: TableRules,
         stacks: &[u64],
         button: usize,
         dealer: &dyn Dealer,
         posts: &[Post],
+    ) -> Result<Self, PlayError> {
+        if rules.double_board {
+            return Err(PlayError::InvalidSetup);
+        }
+        Self::start(rules, stacks, button, dealer, posts, None)
+    }
+
+    /// Starts a hand; `second` is a double board's second board.
+    fn start(
+        rules: TableRules,
+        stacks: &[u64],
+        button: usize,
+        dealer: &dyn Dealer,
+        posts: &[Post],
+        second: Option<Vec<Card>>,
     ) -> Result<Self, PlayError> {
         rules.validate()?;
         let n = stacks.len();
@@ -438,7 +465,19 @@ impl Hand {
             events: Vec::new(),
             result: None,
         };
+        // A double board is played like running it twice from the start:
+        // each pot split between the two boards.
+        if let Some(second) = second {
+            hand.runs = 2;
+            hand.second_board = second;
+        }
         hand.post_forced_bets();
+        // A bomb pot has no blinds to make up, and no preflop betting: it
+        // starts on the flop.
+        if rules.bomb_pot {
+            hand.finish_street()?;
+            return Ok(hand);
+        }
         for p in posts {
             if p.player >= n || p.live > rules.big_blind {
                 return Err(PlayError::InvalidSetup);
@@ -488,6 +527,9 @@ impl Hand {
                 s.contributed += amount;
                 self.events.push(Event::Ante { seat, amount });
             }
+        }
+        if self.rules.bomb_pot {
+            return;
         }
         let (sb, bb) = (self.small_blind_seat(), self.big_blind_seat());
         let amount = self.put_in(sb, self.rules.small_blind);
@@ -721,6 +763,12 @@ impl Hand {
             street: next,
             cards,
         });
+        // A double board deals its second board alongside the first.
+        if self.rules.double_board {
+            self.events.push(Event::SecondBoard {
+                cards: self.second_board[shown..next.board_cards()].to_vec(),
+            });
+        }
         self.current_bet = 0;
         self.last_raise = self.rules.big_blind;
         for s in &mut self.seats {
@@ -755,6 +803,10 @@ impl Hand {
     /// The second run's board, when running it twice, as far as it's been
     /// dealt (all five cards once the hand reaches showdown).
     pub fn second_board(&self) -> &[Card] {
+        // A double board: as far as the streets have been dealt.
+        if self.rules.double_board {
+            return &self.second_board[..self.street.board_cards()];
+        }
         let shown = self
             .events
             .iter()

@@ -53,6 +53,17 @@ pub struct TableRules {
     /// Ante posted by every player before the blinds. It goes into the pot
     /// but doesn't count toward calling.
     pub ante: u64,
+    /// A bomb pot: everyone posts the ante and nothing else, there's no
+    /// preflop betting, and the hand starts on the flop. The big blind is
+    /// still the minimum bet. Needs an ante.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub bomb_pot: bool,
+    /// Two boards from the flop on (double board), dealt from the cards after
+    /// the first: each pot is split between the best hand on each board,
+    /// as when running it twice. Needs a dealer that shows the engine every
+    /// card (a [`crate::Deal`]).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub double_board: bool,
 }
 
 impl TableRules {
@@ -64,6 +75,8 @@ impl TableRules {
             small_blind,
             big_blind,
             ante: 0,
+            bomb_pot: false,
+            double_board: false,
         }
     }
 
@@ -75,7 +88,18 @@ impl TableRules {
             small_blind,
             big_blind,
             ante: 0,
+            bomb_pot: false,
+            double_board: false,
         }
+    }
+
+    /// The same rules as a bomb pot (see [`TableRules::bomb_pot`]) with this
+    /// ante, on two boards when `double_board`.
+    pub fn bomb_pot(mut self, ante: u64, double_board: bool) -> Self {
+        self.ante = ante;
+        self.bomb_pot = true;
+        self.double_board = double_board;
+        self
     }
 
     /// The same rules with an ante.
@@ -99,6 +123,9 @@ impl TableRules {
     pub(crate) fn validate(&self) -> Result<(), PlayError> {
         if self.small_blind == 0 || self.big_blind == 0 || self.small_blind > self.big_blind {
             return Err(PlayError::InvalidBlinds);
+        }
+        if self.bomb_pot && self.ante == 0 {
+            return Err(PlayError::InvalidSetup);
         }
         if let Variant::Omaha { hole_cards } = self.variant {
             if !(4..=6).contains(&hole_cards) {

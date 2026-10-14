@@ -289,6 +289,8 @@ impl Tournament {
             small_blind: level.small_blind,
             big_blind: level.big_blind,
             ante: level.ante,
+            bomb_pot: false,
+            double_board: false,
         }
     }
 
