@@ -5,6 +5,7 @@
 pub mod actions;
 mod bot;
 mod mlp;
+pub mod train;
 
 pub use actions::{ActionClass, NUM_CLASSES};
 pub use bot::NetBot;
