@@ -535,13 +535,16 @@ fn action(kind: &str, amount: u64) -> Result<Action, JsError> {
 ///
 /// Heads-up no-limit Hold'em against "gto", every finished hand is kept for
 /// review: `reviewLastHand` grades the person's decisions in the last one,
-/// and `reviewSession` all of them since the last `clearReviews`.
+/// and `reviewSession` all of them since the last `clearReviews`. With
+/// `setReviewAll`, hands against any bot heads-up are kept too.
 #[wasm_bindgen]
 pub struct BotTable {
     table: Table,
     reviews: ReviewLog,
     /// The last hand number recorded for review.
     recorded: u64,
+    /// Keep heads-up hands for review whoever the opponent is.
+    review_all: bool,
     /// Buckets for reviewing decisions as they're made, kept across calls.
     decision_cache: BucketCache,
 }
@@ -610,6 +613,7 @@ impl BotTable {
             table,
             reviews: ReviewLog::default(),
             recorded: 0,
+            review_all: false,
             decision_cache: BucketCache::default(),
         })
     }
@@ -766,7 +770,18 @@ impl BotTable {
         self.table.set_top_up(on);
     }
 
-    /// Hands kept for review (heads-up no-limit Hold'em against "gto").
+    /// Whether heads-up hands against any bot are kept for review, not just
+    /// those against "gto" (off by default). They're graded against the GTO
+    /// bot's strategy all the same, e.g. to show a ladder player their
+    /// costliest decisions against a Regular. Reviewing still needs
+    /// `loadGto`.
+    #[wasm_bindgen(js_name = setReviewAll)]
+    pub fn set_review_all(&mut self, on: bool) {
+        self.review_all = on;
+    }
+
+    /// Hands kept for review (heads-up no-limit Hold'em against "gto", or
+    /// any bot with `setReviewAll`).
     #[wasm_bindgen(js_name = reviewableHands)]
     pub fn reviewable_hands(&self) -> usize {
         self.reviews.len()
@@ -852,7 +867,8 @@ impl BotTable {
     }
 
     /// Keeps a just-finished hand for review when the person played it
-    /// heads-up against the GTO bot.
+    /// heads-up against the GTO bot, or against any bot with `review_all`
+    /// (the review log keeps only heads-up no-limit Hold'em).
     fn keep_for_review(&mut self) {
         let number = self.table.hand_number();
         let Some(hand) = self.table.hand() else {
@@ -862,7 +878,7 @@ impl BotTable {
             return;
         }
         self.recorded = number;
-        if self.against_gto()
+        if (self.against_gto() || (self.review_all && self.table.num_seats() == 2))
             && let Some(summary) = hand.summary(0)
         {
             self.reviews.record(&summary);

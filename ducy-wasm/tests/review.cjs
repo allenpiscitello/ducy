@@ -157,4 +157,21 @@ assert.equal(other.reviewableHands(), 0);
 assert.equal(other.reviewLastHand(), null);
 assert.equal(other.reviewLastDecision(), null);
 
+// Unless asked to: then they're kept, and graded against the GTO bot's
+// strategy, at any depth (a ladder game's stacks change hand to hand).
+other.setReviewAll(true);
+other.setStack(0, 120n);
+playHand(other);
+assert.equal(other.reviewableHands(), 1);
+const vsRegular = other.reviewLastHand();
+assert.ok(vsRegular.decisions.length > 0, "the person made decisions");
+for (const d of vsRegular.decisions) assert.ok(d.bb_lost >= 0);
+// Live feedback stays with the GTO bot.
+assert.equal(other.reviewLastDecision(), null);
+// Only heads-up: a fuller table keeps nothing.
+const ring = new ducy.BotTable(["doug_poker", "jen_silly"], 200n, 1n, 2n, 7n, undefined);
+ring.setReviewAll(true);
+playHand(ring);
+assert.equal(ring.reviewableHands(), 0);
+
 console.log("ok");
