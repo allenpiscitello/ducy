@@ -511,6 +511,16 @@ impl TableHost {
         Ok(self.changed(now))
     }
 
+    /// A bomb pot every few hands, or none (see [`Table::set_bomb_pots`]).
+    pub fn set_bomb_pots(
+        &mut self,
+        bomb_pots: Option<crate::BombPots>,
+        now: u64,
+    ) -> Result<Vec<Outgoing>, PlayError> {
+        self.table.set_bomb_pots(bomb_pots)?;
+        Ok(self.changed(now))
+    }
+
     /// The current state number; it goes up whenever anything changes.
     pub fn seq(&self) -> u64 {
         self.seq

@@ -35,3 +35,26 @@ for (let hand = 0; hand < 30; hand++) {
 }
 assert.ok(showdowns > 0, 'some hands went to showdown');
 console.log(`bomb-pot: ok (${showdowns} showdowns in 30 hands)`);
+
+// A regular Omaha table with a bomb pot every 4th hand ($5 ante, two boards).
+{
+  const t = new w.BotTable(['doug_poker', 'jen_silly'], 50000n, 200n, 500n, 3n, 'plo4');
+  t.setBombPots(4n, 500n, true);
+  for (let n = 1; n <= 8; n++) {
+    let s = t.newHand();
+    const bomb = n % 4 === 0;
+    assert.equal(s.bomb_pot, bomb, `hand ${n}`);
+    assert.equal(s.events.some(e => e.type === 'big_blind'), !bomb, `hand ${n}: blinds`);
+    if (bomb) assert.equal(s.second_board.length, 3, 'both flops');
+    for (let guard = 0; guard < 200 && !s.complete; guard++) {
+      if (t.botToAct()) s = t.advance();
+      else if (s.legal) s = t.act(s.legal.can_check ? 'check' : 'call', 0n);
+      else break;
+    }
+    assert.equal(s.complete, true);
+  }
+  t.setBombPots(0n, 0n, false);
+  assert.equal(t.newHand().bomb_pot, false, 'turned off');
+  assert.throws(() => t.setBombPots(25n, 0n, true), 'an ante is needed');
+}
+console.log('bomb-pot: every few hands ok');

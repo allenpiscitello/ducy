@@ -101,7 +101,7 @@ pub use snapshot::{
     HandSnapshot, HostSnapshot, SNAPSHOT_VERSION, TOURNAMENT_SNAPSHOT_VERSION, TableSnapshot,
     TournamentHostSnapshot, TournamentSnapshot,
 };
-pub use table::{SeatState, Table, TableSeat, TableView};
+pub use table::{BombPots, SeatState, Table, TableSeat, TableView};
 pub use tournament::{
     Entrant, Finish, HandReport, Level, Move, SeatRef, Standing, Tournament, TournamentConfig,
 };
