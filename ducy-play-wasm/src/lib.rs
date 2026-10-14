@@ -71,6 +71,8 @@ impl HandConfig {
             small_blind: self.small_blind,
             big_blind: self.big_blind,
             ante: self.ante,
+            bomb_pot: false,
+            double_board: false,
         })
     }
 

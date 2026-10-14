@@ -423,6 +423,8 @@ fn a_hosted_table_rotates_games_between_hands_and_tells_everyone() {
         small_blind: 2,
         big_blind: 5,
         ante: 1,
+        bomb_pot: false,
+        double_board: false,
     };
     h.new_hand(0).unwrap();
     assert_eq!(

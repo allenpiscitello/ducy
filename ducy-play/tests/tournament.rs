@@ -420,6 +420,8 @@ fn table_rules_change_between_hands_only() {
         small_blind: 5,
         big_blind: 10,
         ante: 0,
+        bomb_pot: false,
+        double_board: false,
     };
     assert_eq!(
         table.set_rules(plo),

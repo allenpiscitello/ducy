@@ -202,6 +202,11 @@ pub(crate) fn rules_for(
             .with_variant(Variant::Omaha {
                 hole_cards: g[3..].parse().unwrap_or(4),
             }),
+        // A PLO bomb pot on two boards: everyone antes the big blind, and the
+        // hand starts on the flop.
+        "plo4-bomb" => {
+            TableRules::pot_limit_omaha(small_blind, big_blind).bomb_pot(big_blind, true)
+        }
         g => return Err(JsError::new(&format!("unknown game {g}"))),
     })
 }
@@ -573,7 +578,8 @@ impl BotTable {
     /// the person sits in seat 0. Everyone starts with `buy_in` chips, and a
     /// player who goes broke is topped back up before the next hand. `game`
     /// is "nlhe" (no-limit Hold'em, the default) or "plo4", "plo5", "plo6"
-    /// (pot-limit Omaha with that many hole cards).
+    /// (pot-limit Omaha with that many hole cards), or "plo4-bomb" (PLO bomb
+    /// pots on two boards: everyone antes the big blind, no preflop betting).
     #[wasm_bindgen(constructor)]
     pub fn new(
         bots: Vec<String>,
@@ -621,9 +627,11 @@ impl BotTable {
         big_blind: u64,
         ante: Option<u64>,
     ) -> Result<JsValue, JsError> {
+        // No ante given: the game's own (a bomb pot's), otherwise none.
+        let base = rules_for(game.as_deref(), small_blind, big_blind)?;
         let rules = TableRules {
-            ante: ante.unwrap_or(0),
-            ..rules_for(game.as_deref(), small_blind, big_blind)?
+            ante: ante.unwrap_or(base.ante),
+            ..base
         };
         self.table.set_rules(rules).map_err(err)?;
         self.state()
@@ -1241,9 +1249,11 @@ impl MultiTable {
         ante: Option<u64>,
         now: f64,
     ) -> Result<JsValue, JsError> {
+        // No ante given: the game's own (a bomb pot's), otherwise none.
+        let base = rules_for(game.as_deref(), small_blind, big_blind)?;
         let rules = TableRules {
-            ante: ante.unwrap_or(0),
-            ..rules_for(game.as_deref(), small_blind, big_blind)?
+            ante: ante.unwrap_or(base.ante),
+            ..base
         };
         let out = self.host.set_rules(rules, now as u64).map_err(err)?;
         self.result(&out, now as u64)
