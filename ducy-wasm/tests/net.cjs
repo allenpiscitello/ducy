@@ -33,8 +33,8 @@ const finish = (table, s) => {
 assert.equal(w.netLoaded(), false);
 assert.throws(() => new w.BotTable(['net:doug_poker'], 200n, 1n, 2n, 1n, undefined), /loadNet/);
 assert.throws(() => w.loadNet(new Uint8Array([1, 2, 3])), /not a ducy network file/);
-assert.throws(() => w.loadNet(netFile([10, 8, 7])), /75 inputs and 7 outputs/);
-w.loadNet(netFile([75, 16, 7]));
+assert.throws(() => w.loadNet(netFile([10, 8, 7])), /74 inputs and 7 outputs/);
+w.loadNet(netFile([74, 16, 7]));
 assert.equal(w.netLoaded(), true);
 assert.throws(() => new w.BotTable(['net:nobody'], 200n, 1n, 2n, 1n, undefined), /unknown bot/);
 
