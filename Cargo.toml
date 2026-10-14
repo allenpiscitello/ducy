@@ -40,6 +40,15 @@ serde_json = "1"
 [profile.dev.package.curve25519-dalek]
 opt-level = 3
 
+# Tests deal thousands of hands, train abstractions and solve games, which
+# runs 10-50 times slower unoptimized (CI's tests took over half an hour).
+# `cargo test` builds optimized; overflow checks and debug assertions stay on
+# (inherited from dev), so the tests still catch what they did, and line
+# tables keep backtraces readable.
+[profile.test]
+opt-level = 2
+debug = "line-tables-only"
+
 [[bench]]
 name = "equity"
 harness = false
