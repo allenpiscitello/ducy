@@ -35,12 +35,12 @@ impl std::fmt::Display for NetError {
 impl std::error::Error for NetError {}
 
 #[derive(Clone, Debug, PartialEq)]
-struct Layer {
-    inputs: usize,
-    outputs: usize,
+pub(super) struct Layer {
+    pub(super) inputs: usize,
+    pub(super) outputs: usize,
     /// `outputs × inputs`, row by row.
-    weights: Vec<f32>,
-    biases: Vec<f32>,
+    pub(super) weights: Vec<f32>,
+    pub(super) biases: Vec<f32>,
 }
 
 impl Layer {
@@ -59,7 +59,7 @@ impl Layer {
 /// A network: layer sizes from input to output, ReLU on every hidden layer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Mlp {
-    layers: Vec<Layer>,
+    pub(super) layers: Vec<Layer>,
 }
 
 impl Mlp {
