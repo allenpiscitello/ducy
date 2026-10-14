@@ -604,6 +604,40 @@ fn andrew_favorable_opens_up_in_omaha() {
 }
 
 #[test]
+fn omaha_bots_bluff_with_the_nut_flush_blocker() {
+    // How often Doug Poker, in the big blind with ace high, bets the turn
+    // when it's checked through.
+    let plo = TableRules::pot_limit_omaha(1, 2);
+    let bets = |hole: &str, board: &str| {
+        let mut doug = quick(Personality::DougPoker, 5);
+        let mut hand = exact(plo.variant, plo, &["8h 8c 6d 3h", hole], board);
+        to_flop(&mut hand);
+        hand.act(Action::Check).unwrap();
+        hand.act(Action::Check).unwrap();
+        assert_eq!(hand.street(), Street::Turn);
+        let obs = hand.observation(1).unwrap();
+        (0..400)
+            .filter(|_| matches!(doug.act(&obs), Some(Action::Bet(_))))
+            .count()
+    };
+    let unpaired = "Ks 9s 4s 7d 2c";
+    let blocker = bets("As Qh Jd 5c", unpaired);
+    let no_blocker = bets("Ah Qs Jd 5c", unpaired);
+    // A paired board leaves full houses to fear: no extra bluffs.
+    let paired = "Ks 9s 4s 9d 2c";
+    let paired_blocker = bets("As Qh Jd 5c", paired);
+    let paired_no_blocker = bets("Ah Qs Jd 5c", paired);
+    assert!(
+        blocker as f64 > 1.6 * no_blocker as f64,
+        "{blocker} with the ace of spades, {no_blocker} without"
+    );
+    assert!(
+        (paired_blocker as f64) < 1.3 * paired_no_blocker as f64 + 10.0,
+        "paired board: {paired_blocker} with the ace, {paired_no_blocker} without"
+    );
+}
+
+#[test]
 fn tommy_sweeden_check_raises_and_steams_after_losing() {
     // Against two players who bet when checked to: Tommy check-raises far
     // more often than Doug Poker, sitting at the same table.

@@ -1163,6 +1163,16 @@ impl PersonalityBot {
         };
         let monster = !style.backwards && edge >= style.value_margin + 0.2;
         let pot = obs.pot as f64;
+        // Holding the ace of the flush on an unpaired Omaha board: nobody can
+        // have the nut flush, so it's the best spot there is to bluff.
+        let (bluff, bluff_raise) = if nut_flush_blocker(obs) {
+            (
+                blocker_bluff(style.bluff).min(0.9),
+                blocker_bluff(style.bluff_raise).min(0.5),
+            )
+        } else {
+            (style.bluff, style.bluff_raise)
+        };
 
         match legal.call {
             None => {
@@ -1193,7 +1203,7 @@ impl PersonalityBot {
                     }
                 }
                 // Bluff weak hands, mostly against one or two opponents.
-                if bet_edge < 0.0 && players <= 3 && self.chance(style.bluff) {
+                if bet_edge < 0.0 && players <= 3 && self.chance(bluff) {
                     if let Some(action) = bet(legal, size) {
                         return action;
                     }
@@ -1229,9 +1239,9 @@ impl PersonalityBot {
                     }
                 }
                 let bluff_raise = if check_raising {
-                    style.bluff_raise + 0.3 * style.check_raise
+                    bluff_raise + 0.3 * style.check_raise
                 } else {
-                    style.bluff_raise
+                    bluff_raise
                 };
                 if bet_edge < 0.0 && players <= 2 && self.chance(bluff_raise) {
                     if let Some(action) = raise_to(legal, raise_size) {
@@ -1321,6 +1331,40 @@ fn nuts_on_river(obs: &Observation) -> bool {
     }
     let hole: Vec<_> = obs.hole_cards.iter(false).collect();
     has_nuts(obs.rules.variant, &hole, &obs.board)
+}
+
+/// Omaha, a board with three or more of one suit and no pair (so no full
+/// house or quads to fear), and the ace of that suit as its only card of the
+/// suit: no made flush, but nobody else can hold the nut flush.
+fn nut_flush_blocker(obs: &Observation) -> bool {
+    if !matches!(obs.rules.variant, Variant::Omaha { .. }) {
+        return false;
+    }
+    let mut suits = [0u8; 4];
+    let mut ranks = [false; 13];
+    for card in &obs.board {
+        suits[card.suit() as usize] += 1;
+        if std::mem::replace(&mut ranks[card.rank() as usize], true) {
+            return false;
+        }
+    }
+    let Some(suit) = (0..4).find(|&s| suits[s] >= 3) else {
+        return false;
+    };
+    let mine: Vec<_> = obs
+        .hole_cards
+        .iter(false)
+        .filter(|c| c.suit() as usize == suit)
+        .collect();
+    matches!(mine.as_slice(), [c] if c.rank() == Rank::Ace)
+}
+
+/// The chance to bluff with the nut-flush blocker: as if it had three
+/// tries, so a 25% bluffer goes to 58% and one who never bluffs still
+/// rarely does. Against calling stations an exploiting bot's bluffs are
+/// already zero, and stay that.
+fn blocker_bluff(chance: f64) -> f64 {
+    1.0 - (1.0 - chance).powi(3)
 }
 
 fn passive(legal: &LegalActions) -> Action {
