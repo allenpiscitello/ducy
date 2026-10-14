@@ -305,7 +305,7 @@ pub struct Model {
 
 /// The fitted model.
 pub const MODEL: Model = Model {
-    elim: 0.9,
+    elim: 0.6,
     power: 0.7,
 };
 
