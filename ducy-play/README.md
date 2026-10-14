@@ -100,7 +100,7 @@ PFR = hands raised preflop). Their range traits are written for a full
 | **Danny Smallball** | Many hands, small pots, 1/3-pot bets, sticky calls in position. | 36% / 22% | 27% |
 | **Chris Moneybags** | Lucky amateur: loose-passive, gets bolder with every pot he wins. | 42% / 7% | 35% |
 | **Robin Jane Lewd** | Loose-passive hero caller, and never folds a pair. (Formerly Uncle Gary; the old id `uncle_gary` still works.) | 47% / 3% | 18% |
-| **Gus Bluffsen** | Fearless bluffer: plays plenty of hands, bets his air and checks his monsters. | 39% / 30% | 46% |
+| **Gus Bluffsen** | Fearless bluffer: plays plenty of hands, bets his good hands and a lot of his air. | 39% / 30% | 46% |
 | **Jen Silly** | Plays any suited hand and any ace, because they're pretty. (Formerly Lady Luck Linda; the old id `lady_luck_linda` still works.) | 37% / 6% | 33% |
 | **Michael Miserable** | Disciplined, relentless grinder who never looks happy about it. | 23% / 18% | 31% |
 | **Brad Owned** | Fit-or-fold recreational: sees lots of flops, bets what he hits, gives up when he misses. Always plays pocket jacks. | 33% / 5% | 67% |
@@ -181,7 +181,6 @@ and `from_name()` make it easy to list them in an app.
 | `value_margin`, `aggression` | How strong a hand must be to bet for value, and how often it then bets rather than checks or calls. |
 | `trap` | Chance it slow-plays a monster: checks to check-raise. |
 | `check_raise` | Chance it checks any value hand to check-raise when someone is still to act behind it; having checked, it raises its value hands when bet into, and heads-up bluff-raises more often. |
-| `backwards` | Bets weak hands and checks strong ones (calls still use real strength). |
 | `bluff`, `bluff_raise` | How often it bets or raises with a weak hand. |
 | `call_factor`, `caution`, `pair_call_factor` | How much equity it wants to call: a multiple of the pot odds, extra per pot-sized bet faced, and a multiplier when it holds any pair. |
 | `bet_size` | Bets as a fraction of the pot (above 1 overbets in no-limit). |

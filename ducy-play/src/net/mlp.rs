@@ -5,7 +5,7 @@
 //! The weight file is versioned: the magic `DUCYNET\x01`, the number of
 //! layer sizes and the sizes themselves (u32 each), then each layer's weights
 //! (output-major) and biases as little-endian f32. Two hidden layers of 64
-//! over the 75 decision features come to about 9,700 weights, 39 KB.
+//! over the 74 decision features come to about 9,700 weights, 39 KB.
 
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 

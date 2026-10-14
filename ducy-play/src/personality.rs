@@ -83,10 +83,6 @@ pub struct Style {
     /// it raises its value hands (as often as it would have bet them), and
     /// heads-up sometimes a weak one as a bluff.
     pub check_raise: f64,
-    /// Bets weak hands and checks strong ones: the bet-or-check decision is
-    /// made as if its hand strength were flipped. Calling still uses its
-    /// real strength.
-    pub backwards: bool,
     /// Chance it bets a weak hand as a bluff when checked to.
     pub bluff: f64,
     /// Chance it raises as a bluff when bet into.
@@ -164,7 +160,6 @@ impl Default for Style {
             aggression: 0.75,
             trap: 0.0,
             check_raise: 0.0,
-            backwards: false,
             bluff: 0.25,
             bluff_raise: 0.05,
             polar_river: true,
@@ -213,7 +208,7 @@ pub enum Personality {
     /// Loose-passive hero caller: plays lots of hands, rarely raises, and
     /// never folds a pair, to keep you honest. (Uncle Gary until 2026-10.)
     RobinJaneLewd,
-    /// Fearless bluffer who bets his air and checks his monsters.
+    /// Fearless bluffer: bets his good hands and a lot of his air.
     GusBluffsen,
     /// Plays any suited hand and any ace, because they're pretty. (Lady Luck
     /// Linda until 2026-10.)
@@ -340,7 +335,7 @@ impl Personality {
             Self::RobinJaneLewd => {
                 "Hero caller: plays lots of hands, calls with any pair to keep you honest."
             }
-            Self::GusBluffsen => "Fearless bluffer: bets his air, checks his monsters.",
+            Self::GusBluffsen => "Fearless bluffer: bets his good hands and a lot of his air.",
             Self::JenSilly => "Plays any suited hand and any ace, because they're pretty.",
             Self::MichaelMiserable => {
                 "Disciplined, relentless grinder who never looks happy about it."
@@ -546,15 +541,18 @@ impl Personality {
                 ..base
             },
             Self::RobinJaneLewd => Style {
-                vpip: 0.37,
+                // Tuned (#206).
+                vpip: 0.363,
                 pfr: 0.03,
                 three_bet: 0.007,
-                four_bet: 0.003,
-                defend: 0.9,
+                four_bet: 0.013,
+                defend: 0.95,
                 position_bonus: 0.15,
+                open_size: 3.25,
                 value_margin: 0.2,
-                aggression: 0.3,
+                aggression: 0.35,
                 bluff: 0.03,
+                bluff_raise: 0.0,
                 call_factor: 0.8,
                 pair_call_factor: 0.15,
                 caution: 0.05,
@@ -565,9 +563,9 @@ impl Personality {
                 vpip: 0.31,
                 pfr: 0.23,
                 three_bet: 0.08,
-                backwards: true,
+                // Bets his good hands, and a lot of his air too.
                 aggression: 1.0,
-                bluff: 0.35,
+                bluff: 0.55,
                 bluff_raise: 0.18,
                 bet_size: 0.75,
                 ..base
@@ -615,13 +613,14 @@ impl Personality {
                 pfr: 0.34,
                 three_bet: 0.17,
                 four_bet: 0.1,
-                defend: 0.85,
+                // Tuned (#206): a maniac who calls a little less.
+                defend: 0.75,
                 position_bonus: 0.2,
-                value_margin: 0.05,
+                value_margin: 0.065,
                 aggression: 1.0,
-                bluff: 0.6,
-                bluff_raise: 0.3,
-                call_factor: 0.85,
+                bluff: 0.53,
+                bluff_raise: 0.25,
+                call_factor: 0.95,
                 caution: 0.02,
                 bet_size: 1.5,
                 open_size: 3.5,
@@ -686,17 +685,16 @@ impl Personality {
                 defend: 0.5,
                 position_bonus: 0.55,
                 open_size: 3.0,
-                // Value bets reliably, sized to make the bluffing ratio work:
-                // at 3/4 pot a caller needs 30%, so about one bluff to every
-                // two value bets keeps them indifferent.
-                value_margin: 0.1,
-                aggression: 0.85,
+                // Value bets thin and reliably, with a bluff for about every
+                // three value bets (tuned, #206).
+                value_margin: 0.055,
+                aggression: 0.875,
                 trap: 0.05,
-                bluff: 0.3,
-                bluff_raise: 0.05,
+                bluff: 0.23,
+                bluff_raise: 0.0,
                 bet_size: 0.75,
-                // Calls by the pot odds alone: no hero calls, no scared folds.
-                call_factor: 1.0,
+                // Calls by the pot odds, with a small margin: no hero calls.
+                call_factor: 1.1,
                 pair_call_factor: 1.0,
                 caution: 0.1,
                 // No moods: the numbers don't care how the last hand went.
@@ -1163,21 +1161,7 @@ impl PersonalityBot {
             )
         };
         let edge = equity - 1.0 / players as f64;
-        // What the bet-or-check decision sees: flipped for backwards players.
-        // Their flip was made for equity against random hands, which runs
-        // higher than against a range: judged by the range, far more hands
-        // look weak, and they'd bet nearly everything. So they keep it.
-        let bet_edge = if style.backwards {
-            let base = if style.ranges {
-                observation_equity(obs, style.samples, &mut self.rng)
-            } else {
-                equity
-            };
-            1.0 / players as f64 - base
-        } else {
-            edge
-        };
-        let monster = !style.backwards && edge >= style.value_margin + 0.2;
+        let monster = edge >= style.value_margin + 0.2;
         let pot = obs.pot as f64;
         // Holding the ace of the flush on an unpaired Omaha board: nobody can
         // have the nut flush, so it's the best spot there is to bluff.
@@ -1191,8 +1175,8 @@ impl PersonalityBot {
         };
         // River betting is polarized (RIVER_VALUE_EXTRA): strong hands bet for
         // value, hands with no showdown value bluff, and the ones between
-        // check. Backwards players keep their upside-down game.
-        let river = obs.street == Street::River && style.polar_river && !style.backwards;
+        // check.
+        let river = obs.street == Street::River && style.polar_river;
         let value_margin = if river {
             style.value_margin + RIVER_VALUE_EXTRA
         } else {
@@ -1201,7 +1185,7 @@ impl PersonalityBot {
         let bluff_hand = if river {
             equity < RIVER_BLUFF_SHARE / players as f64
         } else {
-            bet_edge < 0.0
+            edge < 0.0
         };
 
         match legal.call {
@@ -1220,14 +1204,14 @@ impl PersonalityBot {
                     return Action::Check;
                 }
                 if style.check_raise > 0.0
-                    && bet_edge >= value_margin
+                    && edge >= value_margin
                     && acts_after(obs)
                     && self.chance(style.check_raise)
                 {
                     // Check, to raise when someone behind bets.
                     return Action::Check;
                 }
-                if bet_edge >= value_margin && self.chance(style.aggression) {
+                if edge >= value_margin && self.chance(style.aggression) {
                     if let Some(action) = bet(legal, size) {
                         return action;
                     }
@@ -1253,7 +1237,7 @@ impl PersonalityBot {
                 } else {
                     style.aggression
                 };
-                if bet_edge >= value_margin + 0.1 && self.chance(raise_chance) {
+                if edge >= value_margin + 0.1 && self.chance(raise_chance) {
                     if let Some(action) = raise_to(legal, raise_size) {
                         return action;
                     }
@@ -1261,7 +1245,7 @@ impl PersonalityBot {
                 // Checked this street and now bet into: the check-raise.
                 let check_raising = style.check_raise > 0.0 && self.checked == Some(obs.street);
                 if check_raising
-                    && bet_edge >= value_margin
+                    && edge >= value_margin
                     && self.chance(style.aggression.max(style.check_raise))
                 {
                     if let Some(action) = raise_to(legal, raise_size) {

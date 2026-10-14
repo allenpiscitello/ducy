@@ -373,24 +373,31 @@ fn trappers_check_monsters_then_raise() {
 }
 
 #[test]
-fn gus_bluffsen_bets_air_and_checks_monsters() {
-    let mut daddy = with(Personality::GusBluffsen, |s| {
-        s.bluff = 0.0;
-        s.aggression = 1.0;
-    });
+fn gus_bluffsen_bets_monsters_and_much_of_his_air() {
     let mut monster = nlhe(&["Kc Qd", "As Ah"], "Ad Ac 7h 2s 3d");
     to_flop(&mut monster);
-    assert_eq!(
-        daddy.act(&monster.observation(1).unwrap()),
-        Some(Action::Check)
-    );
-
-    let mut air = nlhe(&["As Ah", "7c 2d"], "Kd Qc Jh 9s 8d");
-    to_flop(&mut air);
+    let mut gus = with(Personality::GusBluffsen, |_| {});
     assert!(matches!(
-        daddy.act(&air.observation(1).unwrap()),
+        gus.act(&monster.observation(1).unwrap()),
         Some(Action::Bet(_))
     ));
+
+    // Checked to with nothing, he fires far more often than a solid player.
+    let mut air = nlhe(&["As Ah", "7c 2d"], "Kd Qc Jh 9s 8d");
+    to_flop(&mut air);
+    let obs = air.observation(1).unwrap();
+    let bets = |p: Personality| {
+        (0..200)
+            .filter(|&seed| {
+                let mut style = p.style();
+                style.samples = 100;
+                let mut bot = PersonalityBot::new(p.name(), style, Some(seed));
+                matches!(bot.act(&obs), Some(Action::Bet(_)))
+            })
+            .count()
+    };
+    let (gus, doug) = (bets(Personality::GusBluffsen), bets(Personality::DougPoker));
+    assert!(gus >= 80 && gus > doug * 3 / 2, "Gus {gus}, Doug {doug}");
 }
 
 #[test]

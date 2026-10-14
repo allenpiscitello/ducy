@@ -162,7 +162,7 @@ pub const OPP_HANDS: usize = 46;
 
 /// Style features: indices `STYLE.start..STYLE.end`, in the order of
 /// [`style_features`].
-pub const STYLE: std::ops::Range<usize> = 47..75;
+pub const STYLE: std::ops::Range<usize> = 47..74;
 
 /// Features per decision.
 pub const NUM_FEATURES: usize = STYLE.end;
@@ -171,7 +171,7 @@ pub const NUM_FEATURES: usize = STYLE.end;
 /// `three_bet`, `four_bet`, `defend`, `position_bonus`, `any_suited`,
 /// `any_ace`, whether `always_play` names hands, `push_fold_bb` (as
 /// `x / (x + 20)`, 1 for always), `open_size / 5`, `value_margin`,
-/// `aggression`, `trap`, `check_raise`, `backwards`, `bluff`, `bluff_raise`,
+/// `aggression`, `trap`, `check_raise`, `bluff`, `bluff_raise`,
 /// `call_factor / 2`, `pair_call_factor / 2`, `caution`, `bet_size / 2`,
 /// `tilt`, `heater`, `recovery`, `omaha`, `exploit` and `ranges`.
 pub fn style_features(s: &Style) -> [f32; STYLE.end - STYLE.start] {
@@ -197,7 +197,6 @@ pub fn style_features(s: &Style) -> [f32; STYLE.end - STYLE.start] {
         s.aggression,
         s.trap,
         s.check_raise,
-        flag(s.backwards),
         s.bluff,
         s.bluff_raise,
         s.call_factor / 2.0,
