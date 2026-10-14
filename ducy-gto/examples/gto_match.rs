@@ -11,6 +11,9 @@
 //! `--only NAME` plays one opponent: `equity`, `calling`, `self` or a
 //! personality id. `--lbr N` also runs Local Best Response for N hands: a
 //! lower bound on how much the blueprint can be exploited.
+//! `--stack N` starts both players N big blinds deep (default: the depth
+//! the blueprint was trained for, 100); GtoBot plays deeper stacks off its
+//! tree, as against Slumbot at 200.
 //! `--river-solve N` makes the measured bot solve the river in real time
 //! with N iterations per solve (the opponents, `self` included, keep playing
 //! the blueprint), and runs LBR against the river-solving bot too.
@@ -75,6 +78,7 @@ fn main() {
     let mut turn = 0usize;
     let mut plo = false;
     let mut bb = 100u64;
+    let mut stack_bb: Option<u64> = None;
     let mut rival_cards: Option<String> = None;
     let mut rival_blueprint: Option<String> = None;
     let mut it = std::env::args().skip(1);
@@ -91,6 +95,7 @@ fn main() {
             "--turn-solve" => turn = v().parse().expect("--turn-solve"),
             "--game" => plo = v().starts_with("plo"),
             "--bb" => bb = v().parse().expect("--bb"),
+            "--stack" => stack_bb = Some(v().parse().expect("--stack")),
             "--rival-cards" => rival_cards = Some(v()),
             "--rival-blueprint" => rival_blueprint = Some(v()),
             f => panic!("unknown option {f}"),
@@ -201,6 +206,7 @@ fn main() {
         ));
     }
     let rules = TableRules::no_limit_holdem(config.small_blind, config.big_blind);
+    let stack = stack_bb.map_or(config.stack, |n| n * config.big_blind);
     let per_block = (deals / BLOCKS).max(1);
     println!(
         "{:>22} {:>9} {:>10} {:>10}",
@@ -221,7 +227,7 @@ fn main() {
         let mut bots: Vec<Box<dyn Bot>> = vec![Box::new(me), make(2000)];
         for b in 0..BLOCKS {
             let m = MatchConfig::new(rules, per_block, 7919 * b as u64 + 1)
-                .with_starting_stack(config.stack)
+                .with_starting_stack(stack)
                 .duplicate();
             let r = run_match(&m, &mut bots).expect("match");
             assert_eq!(r.fallbacks[0], 0, "GtoBot made an illegal action");
