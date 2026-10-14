@@ -15,6 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # The registry and built dependencies, kept between runs.
+      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -27,7 +29,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - run: cargo install wasm-pack
+      - uses: Swatinem/rust-cache@v2
+      # A prebuilt wasm-pack instead of compiling it on every run.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - run: cd ducy-wasm && wasm-pack build --target web
       - run: cd ducy-play-wasm && wasm-pack build --target web
       - uses: actions/setup-node@v7
