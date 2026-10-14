@@ -87,6 +87,9 @@ pub struct TableSnapshot {
     /// Players all-in may run it twice.
     #[cfg_attr(feature = "serde", serde(default))]
     pub(crate) run_it_twice: bool,
+    /// A bomb pot every few hands.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) bomb_pots: Option<crate::BombPots>,
 }
 
 /// The tournament snapshot format: one with any other version is refused.

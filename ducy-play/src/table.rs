@@ -153,6 +153,23 @@ pub struct TableView {
     /// Running it twice: the second board, once it's dealt.
     #[cfg_attr(feature = "serde", serde(default))]
     pub second_board: Vec<String>,
+    /// This hand is a bomb pot ([`TableRules::bomb_pot`]), e.g. one of a
+    /// table's bomb pots every few hands ([`Table::set_bomb_pots`]); its
+    /// ante is in the hand's events, while `ante` is the table's.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub bomb_pot: bool,
+}
+
+/// Bomb pots every few hands at a table (see [`Table::set_bomb_pots`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BombPots {
+    /// Every this many hands: hand `every`, `2 × every`, … is a bomb pot.
+    pub every: u64,
+    /// The ante everyone posts in a bomb pot.
+    pub ante: u64,
+    /// Bomb pots are played on two boards.
+    pub double_board: bool,
 }
 
 /// One seat as a viewer sees it.
@@ -223,6 +240,8 @@ pub struct Table {
     last_blinds: Option<(usize, usize)>,
     /// Players all-in may choose to run the board twice (cash games).
     run_it_twice: bool,
+    /// A bomb pot every few hands, if any.
+    bomb_pots: Option<BombPots>,
 }
 
 /// Where the next hand's cards come from.
@@ -284,6 +303,7 @@ impl Table {
             run_it_twice: false,
             returning: vec![Return::Ready; n],
             last_blinds: None,
+            bomb_pots: None,
         })
     }
 
@@ -561,6 +581,36 @@ impl Table {
         self.run_it_twice
     }
 
+    /// Makes every `every`-th hand a bomb pot from the next hand on: hands
+    /// `every`, `2 × every`, … by [`Table::hand_number`]. Everyone posts the
+    /// ante and no blinds, and the hand starts on the flop (see
+    /// [`TableRules::bomb_pot`]). `None` turns them off. Refused for an
+    /// `every` or `ante` of 0.
+    pub fn set_bomb_pots(&mut self, bomb_pots: Option<BombPots>) -> Result<(), PlayError> {
+        if bomb_pots.is_some_and(|b| b.every == 0 || b.ante == 0) {
+            return Err(PlayError::InvalidSetup);
+        }
+        self.bomb_pots = bomb_pots;
+        Ok(())
+    }
+
+    /// The bomb pots, if any (see [`Table::set_bomb_pots`]).
+    pub fn bomb_pots(&self) -> Option<BombPots> {
+        self.bomb_pots
+    }
+
+    /// The rules for hand number `hand`: the table's, or a bomb pot's. Cards
+    /// `hidden` from the engine can't make a second board, so those bomb
+    /// pots are on one.
+    fn rules_for_hand(&self, hand: u64, hidden: bool) -> TableRules {
+        match self.bomb_pots {
+            Some(b) if hand % b.every == 0 => {
+                self.rules.bomb_pot(b.ante, b.double_board && !hidden)
+            }
+            _ => self.rules,
+        }
+    }
+
     /// The players' choice: run the rest of the board once or twice (see
     /// [`Hand::choose_runs`]).
     pub fn choose_runs(&mut self, runs: u8) -> Result<(), PlayError> {
@@ -666,8 +716,20 @@ impl Table {
                 }
             }
         }
+        // A bomb pot has no blinds: nobody misses or posts any, and someone
+        // waiting for the big blind goes on waiting.
+        let hidden = matches!(from, DealFrom::Hidden);
+        let rules = self.rules_for_hand(self.hand_number + 1, hidden);
+        let dealt: Vec<usize> = if rules.bomb_pot {
+            dealt.into_iter().filter(|&s| !waiting(s)).collect()
+        } else {
+            dealt
+        };
+        if dealt.len() < 2 {
+            return Err(PlayError::InvalidPlayerCount);
+        }
         // Blinds that passed people sitting out (or waiting) are owed.
-        if let Some((last_sb, last_bb)) = self.last_blinds {
+        if let Some((last_sb, last_bb)) = self.last_blinds.filter(|_| !rules.bomb_pot) {
             for s in 0..n {
                 let present = self.seats[s].human && (self.seats[s].sitting_out || waiting(s));
                 if !present || dealt.contains(&s) {
@@ -685,7 +747,7 @@ impl Table {
         // nothing more; on the small blind it counts for the missed small
         // blind, and a missed big blind makes it up to a full big blind (live).
         let mut posts = Vec::new();
-        for (i, &s) in dealt.iter().enumerate() {
+        for (i, &s) in dealt.iter().enumerate().filter(|_| !rules.bomb_pot) {
             let (missed_sb, missed_bb) = self.missed[s];
             let owes = self.returning[s] == Return::Post && (missed_sb || missed_bb);
             if owes && s == sb && missed_bb {
@@ -714,7 +776,7 @@ impl Table {
             DealFrom::Random => {
                 let seed = self.seed.map(|s| s.wrapping_add(self.hand_number * 7919));
                 Hand::with_posts(
-                    self.rules,
+                    rules,
                     &stacks,
                     button,
                     Deal::random(variant, players, seed)?,
@@ -722,14 +784,14 @@ impl Table {
                 )?
             }
             DealFrom::Seed(seed) => Hand::with_posts(
-                self.rules,
+                rules,
                 &stacks,
                 button,
                 Deal::from_seed(variant, players, seed)?,
                 &posts,
             )?,
             DealFrom::Hidden => {
-                Hand::with_dealer(self.rules, &stacks, button, &HiddenDeal { players }, &posts)?
+                Hand::with_dealer(rules, &stacks, button, &HiddenDeal { players }, &posts)?
             }
         });
         if let Some(h) = &mut self.hand {
@@ -852,6 +914,7 @@ impl Table {
                 run_choice: false,
                 runs: 0,
                 second_board: Vec::new(),
+                bomb_pot: false,
             };
         };
         let result = hand.result();
@@ -928,6 +991,7 @@ impl Table {
             run_choice: matches!(hand.awaiting(), Some(Awaiting::RunChoice(_))),
             runs: hand.runs(),
             second_board: hand.second_board().iter().map(Card::to_string).collect(),
+            bomb_pot: hand.rules().bomb_pot,
         }
     }
 
@@ -1065,6 +1129,7 @@ impl Table {
             returning: self.returning.iter().map(|r| r.name().into()).collect(),
             last_blinds: self.last_blinds,
             run_it_twice: self.run_it_twice,
+            bomb_pots: self.bomb_pots,
         }
     }
 
@@ -1134,6 +1199,7 @@ impl Table {
             returning,
             last_blinds: s.last_blinds,
             run_it_twice: s.run_it_twice,
+            bomb_pots: s.bomb_pots,
         })
     }
 }

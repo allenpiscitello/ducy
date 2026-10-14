@@ -191,6 +191,15 @@ pub fn replay_frames(
     to_js(&ducy_play::replay::replay_frames(&events, &stacks, &names))
 }
 
+/// Bomb pots every `every` hands, or none for 0.
+fn bomb_pots(every: u64, ante: u64, double_board: bool) -> Option<ducy_play::BombPots> {
+    (every > 0).then_some(ducy_play::BombPots {
+        every,
+        ante,
+        double_board,
+    })
+}
+
 pub(crate) fn rules_for(
     game: Option<&str>,
     small_blind: u64,
@@ -635,6 +644,21 @@ impl BotTable {
         };
         self.table.set_rules(rules).map_err(err)?;
         self.state()
+    }
+
+    /// Makes every `every`-th hand a bomb pot (0 turns them off): everyone
+    /// antes `ante`, no blinds, and the hand starts on the flop, on two
+    /// boards with `double_board`. From the next hand; any time.
+    #[wasm_bindgen(js_name = setBombPots)]
+    pub fn set_bomb_pots(
+        &mut self,
+        every: u64,
+        ante: u64,
+        double_board: bool,
+    ) -> Result<(), JsError> {
+        self.table
+            .set_bomb_pots(bomb_pots(every, ante, double_board))
+            .map_err(err)
     }
 
     /// Lets the next bot act if it's a bot's turn; returns the state either way.
@@ -1256,6 +1280,23 @@ impl MultiTable {
             ..base
         };
         let out = self.host.set_rules(rules, now as u64).map_err(err)?;
+        self.result(&out, now as u64)
+    }
+
+    /// A bomb pot every `every` hands (0 for none), as at a bot table
+    /// (`BotTable.setBombPots`). Everyone is sent the new view.
+    #[wasm_bindgen(js_name = setBombPots)]
+    pub fn set_bomb_pots(
+        &mut self,
+        every: u64,
+        ante: u64,
+        double_board: bool,
+        now: f64,
+    ) -> Result<JsValue, JsError> {
+        let out = self
+            .host
+            .set_bomb_pots(bomb_pots(every, ante, double_board), now as u64)
+            .map_err(err)?;
         self.result(&out, now as u64)
     }
 
