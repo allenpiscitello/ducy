@@ -40,6 +40,7 @@ pub mod omaha;
 mod profile;
 mod rng;
 pub mod sampled;
+pub mod sixmax;
 
 pub use cfr::{Cfr, Variant};
 pub use game::{Game, Turn};
