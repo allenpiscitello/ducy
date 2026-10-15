@@ -4,6 +4,8 @@
 //!
 //!     cargo run --release -p ducy-gto --example leaks -- \
 //!         --cards abstraction.bin --blueprint blueprint.bin --who nik_airbag --deals 5000
+//!
+//! `--stack N` starts both players N big blinds deep (default 100).
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -83,7 +85,9 @@ fn bucket(hand: &Hand, hero: usize, bb: u64, floor: u32) -> String {
         }
     }
     let total = pot + bet[0] + bet[1];
-    let size = if total >= 100 * bb {
+    let size = if total >= 250 * bb {
+        "pot 250bb+"
+    } else if total >= 100 * bb {
         "pot 100bb+"
     } else if total >= 30 * bb {
         "pot 30-100bb"
@@ -126,6 +130,7 @@ fn main() {
     let mut blueprint_path = String::new();
     let mut deals = 5_000usize;
     let mut who = Personality::NikAirbag;
+    let mut stack_bb: Option<u64> = None;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut v = || it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
@@ -134,6 +139,7 @@ fn main() {
             "--blueprint" => blueprint_path = v(),
             "--deals" => deals = v().parse().expect("--deals"),
             "--who" => who = Personality::from_name(&v()).expect("unknown personality"),
+            "--stack" => stack_bb = Some(v().parse().expect("--stack")),
             f => panic!("unknown option {f}"),
         }
     }
@@ -155,6 +161,7 @@ fn main() {
     let rules = TableRules::no_limit_holdem(config.small_blind, config.big_blind);
     let bb = config.big_blind;
     let floor = two_pair_floor();
+    let stack = stack_bb.map_or(config.stack, |n| n * bb);
 
     // bucket → (hands, chips)
     let mut by: BTreeMap<String, (usize, i64)> = BTreeMap::new();
@@ -171,8 +178,7 @@ fn main() {
                 d as u64 * 2 + hero as u64,
             );
             let mut me = who.bot(Some(d as u64 * 2 + hero as u64 + 99));
-            let mut hand =
-                Hand::new(rules, &[config.stack, config.stack], d % 2, deal.clone()).expect("hand");
+            let mut hand = Hand::new(rules, &[stack, stack], d % 2, deal.clone()).expect("hand");
             let mut seated: Vec<&mut dyn Bot> = if hero == 0 {
                 vec![&mut me, &mut gto]
             } else {
