@@ -87,7 +87,7 @@ pub struct Style {
     pub bluff: f64,
     /// Chance it raises as a bluff when bet into.
     pub bluff_raise: f64,
-    /// Plays the river polarized ([`RIVER_VALUE_EXTRA`]): bets and raises
+    /// Plays the river polarized (`RIVER_VALUE_EXTRA`): bets and raises
     /// strong hands for value and hands with no showdown value as bluffs, and
     /// checks the ones between. Off, it bets the river like any other street.
     pub polar_river: bool,

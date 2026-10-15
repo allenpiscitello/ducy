@@ -16,7 +16,7 @@ rounds, side pots and the showdown.
 
 ```toml
 [dependencies]
-ducy-play = "0.1"
+ducy-play = "0.2"
 ```
 
 Features: `process` (default) adds `ProcessBot` and `serde`; `serde` alone
