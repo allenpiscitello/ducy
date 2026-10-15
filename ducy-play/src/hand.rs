@@ -591,12 +591,18 @@ impl Hand {
             .enumerate()
             .any(|(i, o)| i != seat && o.can_act());
 
+        // Bets and raises are whole chips (TableRules::chip), all-in aside.
         let aggression = if s.can_raise && s.stack > to_call && others_can_act {
             let max_to = match self.rules.structure {
                 BettingStructure::NoLimit => all_in_to,
                 BettingStructure::PotLimit => {
                     let pot: u64 = self.seats.iter().map(|o| o.contributed).sum();
-                    all_in_to.min(self.current_bet + pot + to_call)
+                    let cap = self.current_bet + pot + to_call;
+                    if cap >= all_in_to {
+                        all_in_to
+                    } else {
+                        self.rules.chip_down(cap)
+                    }
                 }
             };
             let full = if self.current_bet == 0 {
@@ -605,7 +611,7 @@ impl Hand {
                 self.current_bet + self.last_raise
             };
             Some(RaiseRange {
-                min_to: full.min(max_to),
+                min_to: self.rules.chip_up(full).min(max_to),
                 max_to,
             })
         } else {
@@ -669,13 +675,13 @@ impl Hand {
             }
             Action::Bet(to) => {
                 let range = legal.bet.ok_or(PlayError::IllegalAction)?;
-                self.raise_to(seat, to, range)?;
+                let to = self.raise_to(seat, to, range)?;
                 let all_in = self.seats[seat].all_in();
                 self.events.push(Event::Bet { seat, to, all_in });
             }
             Action::Raise(to) => {
                 let range = legal.raise.ok_or(PlayError::IllegalAction)?;
-                self.raise_to(seat, to, range)?;
+                let to = self.raise_to(seat, to, range)?;
                 let all_in = self.seats[seat].all_in();
                 self.events.push(Event::Raise { seat, to, all_in });
             }
@@ -685,10 +691,31 @@ impl Hand {
         self.advance(seat)
     }
 
-    fn raise_to(&mut self, seat: usize, to: u64, range: RaiseRange) -> Result<(), PlayError> {
+    /// Bets or raises to `to` (rounded to whole chips) and returns the amount
+    /// it went to.
+    fn raise_to(&mut self, seat: usize, to: u64, range: RaiseRange) -> Result<u64, PlayError> {
+        let all_in_to = self.seats[seat].street_bet + self.seats[seat].stack;
         if to < range.min_to || to > range.max_to {
             return Err(PlayError::IllegalAction);
         }
+        // Whole chips only, unless it's every chip the player has: an amount
+        // between chips goes to the nearest whole chip in the legal range
+        // (so bots that size bets as a share of the pot still play).
+        let chip = self.rules.chip.max(1);
+        let to = if to == all_in_to || to % chip == 0 {
+            to
+        } else {
+            let near = (to + chip / 2) / chip * chip;
+            if near > range.max_to {
+                if range.max_to == all_in_to {
+                    self.rules.chip_down(range.max_to).max(range.min_to)
+                } else {
+                    range.max_to
+                }
+            } else {
+                near.max(range.min_to)
+            }
+        };
         let increase = to - self.current_bet;
         // A bet counts as a raise from zero; last_raise starts at the big blind.
         let full = increase >= self.last_raise;
@@ -710,7 +737,7 @@ impl Hand {
             }
             other.acted = false;
         }
-        Ok(())
+        Ok(to)
     }
 
     fn advance(&mut self, last: usize) -> Result<(), PlayError> {
@@ -981,15 +1008,16 @@ impl Hand {
             let awards = if winners.is_empty() {
                 Vec::new()
             } else if contested && showdown && self.runs == 2 {
-                // Run twice: half the pot on each board, the odd chip to the first.
+                // Run twice: half the pot on each board in whole chips, the
+                // odd chip to the first.
                 let second: [Card; 5] = self.second_board.clone().try_into().expect("five cards");
                 let (winners2, _) = best_hands(self.rules.variant, &hole, &second, &eligible)?;
-                let half = amount / 2;
-                let mut awards = split(amount - half, &winners, self.button, n);
-                awards.extend(split(half, &winners2, self.button, n));
+                let half = self.rules.chip_down(amount / 2);
+                let mut awards = split(amount - half, &winners, self.button, n, self.rules.chip);
+                awards.extend(split(half, &winners2, self.button, n, self.rules.chip));
                 awards
             } else {
-                split(amount, &winners, self.button, n)
+                split(amount, &winners, self.button, n, self.rules.chip)
             };
             for award in &awards {
                 payouts[award.seat] += award.amount;

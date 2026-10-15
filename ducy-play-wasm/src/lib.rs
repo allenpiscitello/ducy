@@ -34,6 +34,10 @@ struct HandConfig {
     big_blind: u64,
     #[serde(default)]
     ante: u64,
+    /// The smallest chip: bets and raises are whole numbers of it (1 by
+    /// default, any amount).
+    #[serde(default)]
+    chip: Option<u64>,
     /// One stack per seat, in seat order.
     stacks: Vec<u64>,
     /// The button's seat.
@@ -73,6 +77,7 @@ impl HandConfig {
             ante: self.ante,
             bomb_pot: false,
             double_board: false,
+            chip: self.chip.unwrap_or(1),
         })
     }
 
