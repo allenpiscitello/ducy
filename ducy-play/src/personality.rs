@@ -808,12 +808,26 @@ const STACK_OFF_SHARE: f64 = 0.25;
 const STACK_OFF_RANGE: f64 = 0.035;
 const STACK_OFF_LOOSE: f64 = 0.015;
 
+/// The depth, in big blinds of effective stack at the start of the hand,
+/// the stack-off range is written for. Deeper, getting it all in risks more
+/// and the range shrinks in proportion: half as wide at 200 BB.
+const STANDARD_DEPTH_BB: f64 = 100.0;
+
 /// After the flop, a pot is big once the effective stack behind is less
-/// than this many pots. There bluffs and bluff raises come
+/// than this many pots, or once it holds [`BIG_POT_BB`] big blinds however
+/// deep the stacks (deep, a pot can hold a whole 100 BB stack and still be
+/// small next to what's behind). There bluffs and bluff raises come
 /// [`BIG_POT_BLUFF`] times as often, value bets want [`BIG_POT_VALUE`] more
 /// edge, and every hand is judged against what the bettors probably hold,
 /// even by players who otherwise judge it against random hands.
 const BIG_POT_SPR: f64 = 1.5;
+const BIG_POT_BB: f64 = 40.0;
+/// Past [`BIG_POT_BB`], bluffs get rarer still (and value bets want more)
+/// in proportion to the pot: a pot of 100 BB sees 0.4 times the big-pot
+/// bluffs. And with stacks deeper than [`STANDARD_DEPTH_BB`], calls in a big
+/// pot take at least this much caution against the bet's size, however
+/// trusting the style: a big bet into a big pot is rarely a bluff.
+const BIG_POT_CAUTION: f64 = 0.1;
 const BIG_POT_BLUFF: f64 = 0.3;
 const BIG_POT_VALUE: f64 = 0.05;
 
@@ -1079,7 +1093,8 @@ impl PersonalityBot {
         let me = &obs.seats[obs.seat];
         let start_stack = (me.contributed + me.stack) as f64;
         let loose = ((style.vpip - 0.2) / 0.35).clamp(0.0, 1.0);
-        let stack_off = scale_for_table(STACK_OFF_RANGE + STACK_OFF_LOOSE * loose, n);
+        let depth = (STANDARD_DEPTH_BB / start_depth_bb(obs)).min(1.0);
+        let stack_off = scale_for_table(STACK_OFF_RANGE + STACK_OFF_LOOSE * loose, n) * depth;
         let guarded = |to: u64| {
             top > stack_off
                 && (to as f64 >= STACK_OFF_BB * big_blind as f64
@@ -1201,12 +1216,28 @@ impl PersonalityBot {
         let legal = &obs.legal;
         let players = obs.seats.iter().filter(|s| !s.folded).count().max(1);
         // The spew guard: in a big pot (little behind for its size), every
-        // hand is judged against what the others probably hold.
-        let big_pot = (effective_stack(obs) as f64) < BIG_POT_SPR * obs.pot as f64;
+        // hand is judged against what the others probably hold. First to
+        // bet, a pot its own bet and a call would make big counts already (an
+        // overbet into 30 BB builds a 120 BB pot). Facing a bet, the pot's
+        // size in big blinds only counts deeper than STANDARD_DEPTH_BB: up to
+        // there the stack behind already says it, and the trusting styles
+        // keep calling.
+        let deep_stacks = start_depth_bb(obs) > STANDARD_DEPTH_BB;
+        let reach = if obs.legal.call.is_none() {
+            Some(1.0 + 2.0 * style.bet_size)
+        } else {
+            deep_stacks.then_some(1.0)
+        };
+        let big_pot = (effective_stack(obs) as f64) < BIG_POT_SPR * obs.pot as f64
+            || reach.is_some_and(|r| obs.pot as f64 * r >= BIG_POT_BB * obs.rules.big_blind as f64);
         let (equity, caution) = if style.ranges || big_pot {
             (
                 range_equity(obs, &self.model, style.samples, &mut self.rng),
-                style.caution * RANGE_CAUTION,
+                if big_pot && deep_stacks {
+                    (style.caution * RANGE_CAUTION).max(BIG_POT_CAUTION)
+                } else {
+                    style.caution * RANGE_CAUTION
+                },
             )
         } else {
             (
@@ -1228,8 +1259,18 @@ impl PersonalityBot {
             (style.bluff, style.bluff_raise)
         };
         // Big pots get fewer bluffs and want more for value (the spew guard).
+        let deep = (BIG_POT_BB * obs.rules.big_blind as f64 / pot).min(1.0);
+        // Value bets want more edge the bigger the pot, up to three times
+        // BIG_POT_VALUE, and bets there are at most the pot: no overbets.
+        let big_value = (BIG_POT_VALUE / deep).min(3.0 * BIG_POT_VALUE);
+        let bet_size = if big_pot {
+            style.bet_size.min(1.0)
+        } else {
+            style.bet_size
+        };
         let (bluff, bluff_raise) = if big_pot {
-            (bluff * BIG_POT_BLUFF, bluff_raise * BIG_POT_BLUFF)
+            let k = BIG_POT_BLUFF * deep;
+            (bluff * k, bluff_raise * k)
         } else {
             (bluff, bluff_raise)
         };
@@ -1241,7 +1282,7 @@ impl PersonalityBot {
             style.value_margin + RIVER_VALUE_EXTRA
         } else {
             style.value_margin
-        } + if big_pot { BIG_POT_VALUE } else { 0.0 };
+        } + if big_pot { big_value } else { 0.0 };
         let bluff_hand = if river {
             equity < RIVER_BLUFF_SHARE / players as f64
         } else {
@@ -1250,7 +1291,7 @@ impl PersonalityBot {
 
         match legal.call {
             None => {
-                let size = (pot * style.bet_size).round() as u64;
+                let size = (pot * bet_size).round() as u64;
                 // The nuts on the river, last to act: checking would go to
                 // showdown without a bet, so bet. (With someone still to act
                 // behind, it may check to let them bet.)
@@ -1285,8 +1326,7 @@ impl PersonalityBot {
                 Action::Check
             }
             Some(call) => {
-                let raise_size =
-                    obs.current_bet + ((pot + call as f64) * style.bet_size).round() as u64;
+                let raise_size = obs.current_bet + ((pot + call as f64) * bet_size).round() as u64;
                 // The nuts on the river: never just call to showdown, raise
                 // something (calling only when raising isn't allowed).
                 if nuts_on_river(obs) {
@@ -1297,7 +1337,19 @@ impl PersonalityBot {
                 } else {
                     style.aggression
                 };
-                if edge >= value_margin + 0.1 && self.chance(raise_chance) {
+                // Facing a raise (not just a bet), raising again builds the
+                // pot fastest of all: that takes a monster, and is never a
+                // bluff (the spew guard), once that raise would make the pot
+                // big.
+                let reraise = street_raises(obs) > 0
+                    && pot * (1.0 + 2.0 * style.bet_size)
+                        >= BIG_POT_BB * obs.rules.big_blind as f64;
+                let raise_edge = if reraise {
+                    style.value_margin + 0.2
+                } else {
+                    value_margin + 0.1
+                };
+                if edge >= raise_edge && self.chance(raise_chance) {
                     if let Some(action) = raise_to(legal, raise_size) {
                         return action;
                     }
@@ -1305,6 +1357,7 @@ impl PersonalityBot {
                 // Checked this street and now bet into: the check-raise.
                 let check_raising = style.check_raise > 0.0 && self.checked == Some(obs.street);
                 if check_raising
+                    && !reraise
                     && edge >= value_margin
                     && self.chance(style.aggression.max(style.check_raise))
                 {
@@ -1317,7 +1370,7 @@ impl PersonalityBot {
                 } else {
                     bluff_raise
                 };
-                if bluff_hand && players <= 2 && self.chance(bluff_raise) {
+                if bluff_hand && players <= 2 && !reraise && self.chance(bluff_raise) {
                     if let Some(action) = raise_to(legal, raise_size) {
                         return action;
                     }
@@ -1447,6 +1500,32 @@ fn passive(legal: &LegalActions) -> Action {
     } else {
         Action::Call
     }
+}
+
+/// Raises (not counting the first bet) on the street so far.
+fn street_raises(obs: &Observation) -> usize {
+    obs.history
+        .iter()
+        .rev()
+        .take_while(|e| !matches!(e, Event::Board { .. }))
+        .filter(|e| matches!(e, Event::Raise { .. }))
+        .count()
+}
+
+/// The effective stack at the start of the hand, in big blinds: its own
+/// starting stack or the biggest other one, whichever is smaller.
+fn start_depth_bb(obs: &Observation) -> f64 {
+    let start = |v: &crate::bot::SeatView| v.stack + v.contributed;
+    let own = start(&obs.seats[obs.seat]);
+    let biggest = obs
+        .seats
+        .iter()
+        .enumerate()
+        .filter(|&(s, _)| s != obs.seat)
+        .map(|(_, v)| start(v))
+        .max()
+        .unwrap_or(own);
+    own.min(biggest) as f64 / obs.rules.big_blind.max(1) as f64
 }
 
 /// Chips behind for the acting seat that can actually be won or lost: its

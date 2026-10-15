@@ -474,9 +474,15 @@ fn a_bot_priced_into_a_pot_calls_instead_of_folding() {
 }
 
 /// Seat 0 with `hole` after a 100-chip raise and call, checked to the river,
-/// where seat 1 bets `bet` into the 200 pot.
+/// where seat 1 bets `bet` into the 200 pot. Blinds of 5/10 keep it a
+/// 20 BB pot, short of the spew guard's big pots.
 fn river_bet(hole: &str, bet: u64) -> ducy_play::Observation {
-    let mut hand = nlhe(&[hole, "As Ah"], "2c 7d 9h Jc 3s");
+    let mut hand = exact(
+        Variant::Holdem,
+        TableRules::no_limit_holdem(5, 10),
+        &[hole, "As Ah"],
+        "2c 7d 9h Jc 3s",
+    );
     hand.act(Action::Raise(100)).unwrap();
     hand.act(Action::Call).unwrap();
     for _ in 0..2 {
