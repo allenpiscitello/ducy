@@ -14,6 +14,12 @@
 //! `--stack N` starts both players N big blinds deep (default: the depth
 //! the blueprint was trained for, 100); GtoBot plays deeper stacks off its
 //! tree, as against Slumbot at 200.
+//! `--depth BB:FILE` (repeatable) adds a blueprint trained BB big blinds
+//! deep (`train_blueprint --bb BB`): the measured bot is then a
+//! `DepthGtoBot`, playing each hand with whichever blueprint, `--blueprint`'s
+//! 100 BB one included, was trained nearest that hand's depth. The `self`
+//! opponent keeps playing `--blueprint` alone, so `--only self --stack 25
+//! --depth 25:bp25.bin` measures what the 25 BB blueprint gains at 25 BB.
 //! `--river-solve N` makes the measured bot solve the river in real time
 //! with N iterations per solve (the opponents, `self` included, keep playing
 //! the blueprint), and runs LBR against the river-solving bot too.
@@ -48,6 +54,7 @@ use ducy_gto::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
         bot::{GtoBot, RiverSolving, TurnSolving},
+        depths::{DepthGtoBot, depth_config},
         hunl::{BettingTree, Hunl, HunlConfig},
         lbr::{LbrResult, lbr_hands_solving},
     },
@@ -79,6 +86,7 @@ fn main() {
     let mut plo = false;
     let mut bb = 100u64;
     let mut stack_bb: Option<u64> = None;
+    let mut depths: Vec<(u64, String)> = Vec::new();
     let mut rival_cards: Option<String> = None;
     let mut rival_blueprint: Option<String> = None;
     let mut it = std::env::args().skip(1);
@@ -96,6 +104,11 @@ fn main() {
             "--game" => plo = v().starts_with("plo"),
             "--bb" => bb = v().parse().expect("--bb"),
             "--stack" => stack_bb = Some(v().parse().expect("--stack")),
+            "--depth" => {
+                let s = v();
+                let (bb, file) = s.split_once(':').expect("--depth BB:FILE");
+                depths.push((bb.parse().expect("--depth BB"), file.to_string()));
+            }
             "--rival-cards" => rival_cards = Some(v()),
             "--rival-blueprint" => rival_blueprint = Some(v()),
             f => panic!("unknown option {f}"),
@@ -207,6 +220,16 @@ fn main() {
     }
     let rules = TableRules::no_limit_holdem(config.small_blind, config.big_blind);
     let stack = stack_bb.map_or(config.stack, |n| n * config.big_blind);
+    let depth_bytes: Vec<(u64, Vec<u8>)> = depths
+        .iter()
+        .map(|(d, f)| (*d, std::fs::read(f).expect("read --depth FILE")))
+        .collect();
+    if !depths.is_empty() {
+        let mut on_offer: Vec<u64> = depths.iter().map(|(d, _)| *d).collect();
+        on_offer.push(config.stack / config.big_blind);
+        on_offer.sort();
+        println!("measured bot: the blueprint nearest each hand's depth, of {on_offer:?} BB");
+    }
     let per_block = (deals / BLOCKS).max(1);
     println!(
         "{:>22} {:>9} {:>10} {:>10}",
@@ -220,11 +243,26 @@ fn main() {
         let mut rates = Vec::with_capacity(BLOCKS);
         let mut hands = 0;
         // One bot pair for the whole match, so adaptive opponents keep learning.
-        let mut me = gto(1000).with_river_solving(RiverSolving::new(river));
-        if turn > 0 {
-            me = me.with_turn_solving(TurnSolving::new(turn));
-        }
-        let mut bots: Vec<Box<dyn Bot>> = vec![Box::new(me), make(2000)];
+        let solving = |b: GtoBot| {
+            let b = b.with_river_solving(RiverSolving::new(river));
+            if turn > 0 {
+                b.with_turn_solving(TurnSolving::new(turn))
+            } else {
+                b
+            }
+        };
+        let me: Box<dyn Bot> = if depth_bytes.is_empty() {
+            Box::new(solving(gto(1000)))
+        } else {
+            let mut bots = vec![(config.stack / config.big_blind, solving(gto(1000)))];
+            for (i, (d, bytes)) in depth_bytes.iter().enumerate() {
+                let b = GtoBot::new(depth_config(*d), cards.clone(), bytes, 1001 + i as u64)
+                    .expect("a blueprint trained at its --depth");
+                bots.push((*d, solving(b)));
+            }
+            Box::new(DepthGtoBot::new(bots))
+        };
+        let mut bots: Vec<Box<dyn Bot>> = vec![me, make(2000)];
         for b in 0..BLOCKS {
             let m = MatchConfig::new(rules, per_block, 7919 * b as u64 + 1)
                 .with_starting_stack(stack)
