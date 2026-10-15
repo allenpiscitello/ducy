@@ -239,11 +239,16 @@ pub enum Personality {
     /// raises a fair range, bets his good hands, and above all loves to
     /// check-raise. Losing a pot gets to him, and he steams for a while.
     TommySweeden,
+    /// The live-poker coach: a solid, exploitative grinder who sizes up
+    /// against calling stations, steals from rocks and never bluffs a
+    /// station. His leak: a big bet late in the hand is always the nuts to
+    /// him, so he folds too much to river aggression.
+    BartHandsome,
 }
 
 impl Personality {
     /// Every personality.
-    pub const ALL: [Personality; 19] = [
+    pub const ALL: [Personality; 20] = [
         Self::DougPoker,
         Self::JonnySlow,
         Self::MisterCheating,
@@ -263,6 +268,7 @@ impl Personality {
         Self::TheMathematician,
         Self::AndrewFavorable,
         Self::TommySweeden,
+        Self::BartHandsome,
     ];
 
     /// Display name, e.g. "Doug Poker".
@@ -287,6 +293,7 @@ impl Personality {
             Self::TheMathematician => "The Mathematician",
             Self::AndrewFavorable => "Andrew Favorable",
             Self::TommySweeden => "Tommy Sweeden",
+            Self::BartHandsome => "Bart Handsome",
         }
     }
 
@@ -312,6 +319,7 @@ impl Personality {
             Self::TheMathematician => "the_mathematician",
             Self::AndrewFavorable => "andrew_favorable",
             Self::TommySweeden => "tommy_sweeden",
+            Self::BartHandsome => "bart_handsome",
         }
     }
 
@@ -357,6 +365,9 @@ impl Personality {
             Self::TommySweeden => {
                 "Aggressive but careful; loves a check-raise, and steams after a lost pot."
             }
+            Self::BartHandsome => {
+                "Live-poker coach: sizes up against stations, steals from rocks, folds to big river bets."
+            }
         }
     }
 
@@ -384,6 +395,7 @@ impl Personality {
             }
             Self::AndrewFavorable => "Favorable.",
             Self::TommySweeden => "Go ahead, bet.",
+            Self::BartHandsome => "Big bet on the river? It's always the nuts at 2/5.",
         }
     }
 
@@ -758,6 +770,34 @@ impl Personality {
                 // A lost pot gets to him, and it takes a while to wear off.
                 tilt: 0.45,
                 recovery: 0.12,
+                ..base
+            },
+            Self::BartHandsome => Style {
+                // A solid live grinder: a fair range, raised big (live
+                // sizes), and isolates limpers.
+                vpip: 0.23,
+                pfr: 0.18,
+                three_bet: 0.07,
+                four_bet: 0.025,
+                defend: 0.55,
+                position_bonus: 0.45,
+                open_size: 3.5,
+                // Value bets thinly and sizes up: they'll call.
+                value_margin: 0.08,
+                aggression: 0.85,
+                bluff: 0.2,
+                bluff_raise: 0.03,
+                bet_size: 0.9,
+                // Adjusts to each opponent: bets bigger and never bluffs a
+                // calling station, steals from a rock.
+                exploit: true,
+                exploit_after: 8,
+                // His leak: a big bet means a big hand. He folds too much to
+                // aggression, the river's above all.
+                call_factor: 1.2,
+                pair_call_factor: 1.1,
+                caution: 0.45,
+                tilt: 0.05,
                 ..base
             },
         }

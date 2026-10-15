@@ -425,6 +425,7 @@ pub fn targets(p: Personality) -> Traits {
         Personality::TheMathematician => TARGETS[16],
         Personality::AndrewFavorable => TARGETS[17],
         Personality::TommySweeden => TARGETS[18],
+        Personality::BartHandsome => TARGETS[19],
     })
 }
 
@@ -433,7 +434,7 @@ pub fn targets(p: Personality) -> Traits {
 // check_raise, wtsd. Measured shares, so some land near a math constant.
 #[rustfmt::skip]
 #[allow(clippy::approx_constant)]
-const TARGETS: [[f64; TRAITS]; 19] = [
+const TARGETS: [[f64; TRAITS]; 20] = [
     [0.2324, 0.1636, 0.0823, 0.4702, 0.4494, 0.4866, 0.5056, 0.2806, 0.5127, 0.0697, 0.4586], // Doug Poker
     [0.1198, 0.0333, 0.0207, 0.1510, 0.1191, 0.1870, 0.1752, 0.0315, 0.6068, 0.0157, 0.4901], // Jonny Slow
     [0.3961, 0.2813, 0.1650, 0.5737, 0.5474, 0.5949, 0.6219, 0.3826, 0.4887, 0.1078, 0.4430], // Mister Cheating
@@ -453,6 +454,7 @@ const TARGETS: [[f64; TRAITS]; 19] = [
     [0.2070, 0.1728, 0.0697, 0.5279, 0.5118, 0.5409, 0.5571, 0.2926, 0.5102, 0.0560, 0.4512], // The Mathematician
     [0.2668, 0.1909, 0.1034, 0.4629, 0.4269, 0.5000, 0.5032, 0.2340, 0.5569, 0.0554, 0.4433], // Andrew Favorable
     [0.2714, 0.2230, 0.1198, 0.5169, 0.4878, 0.5351, 0.5902, 0.4045, 0.5552, 0.3070, 0.4417], // Tommy Sweeden
+    [0.2880, 0.2147, 0.1110, 0.5120, 0.4875, 0.5525, 0.5297, 0.2790, 0.7524, 0.0300, 0.3902], // Bart Handsome
 ];
 
 /// The traits that are `p`'s character, held to half the usual tolerance:
@@ -479,6 +481,8 @@ pub fn signature(p: Personality) -> &'static [Trait] {
         Personality::TheMathematician => &[Vpip, Pfr],
         Personality::AndrewFavorable => &[Vpip],
         Personality::TommySweeden => &[CheckRaise],
+        // Folds too much to bets: his leak, and what to exploit.
+        Personality::BartHandsome => &[FoldToBet],
     }
 }
 
