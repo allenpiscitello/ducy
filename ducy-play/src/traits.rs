@@ -347,7 +347,7 @@ impl MeasureConfig {
 
 /// Plays `bot` in seat 0 for `config.hands` six-handed No-limit Hold'em
 /// hands (1/2 blinds, 100 big blinds each hand) against five personalities,
-/// changing every [`PER_TABLE`] hands and leaving out `like` (the
+/// changing every `PER_TABLE` hands and leaving out `like` (the
 /// personality being measured, so it never plays itself), and counts what it
 /// does.
 pub fn measure_counts(

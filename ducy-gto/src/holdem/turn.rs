@@ -15,7 +15,7 @@
 //!   blueprint's river strategy carried over to the real chips. Both
 //!   players' river play depends only on buckets, so each leaf keeps, for
 //!   every way its river ends (a fold or a showdown), each player's chance
-//!   of getting there per bucket ([`Ending`], computed once). Valuing a leaf
+//!   of getting there per bucket (`Ending`, computed once). Valuing a leaf
 //!   on a river card is then one O(n) fold or showdown per ending, as in
 //!   [`RiverHands`], with no walk of the river tree; the opponent's choices
 //!   between continuations share that valuation, since it's linear in their

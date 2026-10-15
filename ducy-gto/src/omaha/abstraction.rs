@@ -727,7 +727,7 @@ enum Preflop {
 
 /// A street's model: equity weights (and nut-potential weights, for
 /// nut-aware abstractions) and the cluster centres over (predicted equity,
-/// [`NUT_WEIGHT`] × predicted nut potential if any, `STRENGTH_WEIGHT` ×
+/// `NUT_WEIGHT` × predicted nut potential if any, `STRENGTH_WEIGHT` ×
 /// feature 1, made strength or playability).
 #[derive(Clone, Debug, PartialEq)]
 pub struct StreetModel {
