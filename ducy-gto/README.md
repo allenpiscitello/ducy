@@ -1,9 +1,23 @@
 # ducy-gto
 
 Game-theory-optimal poker strategies with counterfactual regret minimization
-(CFR), built on [ducy](../README.md). The goal is an example bot for
-[ducy-play](../ducy-play/README.md) that plays heads-up no-limit Hold'em very
-close to a Nash equilibrium. The plan is tracked in issue #84.
+(CFR), built on [ducy](https://crates.io/crates/ducy). The goal is an example
+bot for [ducy-play](https://crates.io/crates/ducy-play) that plays heads-up
+no-limit Hold'em very close to a Nash equilibrium. The plan is tracked in
+issue #84.
+
+**Experimental:** the API is still changing (6-max play, models at more
+stack depths), so expect breaking changes between 0.x releases.
+
+```toml
+[dependencies]
+ducy-gto = "0.1"
+```
+
+**Trained models aren't in the crate.** They're too big; download them from
+the [GitHub releases](https://github.com/allenpiscitello/ducy/releases), e.g.
+`gh release download gto-hunl-300m -p cards.bin -p blueprint.bin -R allenpiscitello/ducy`,
+or train your own with the `train_blueprint` example.
 
 In a two-player zero-sum game an equilibrium strategy can't lose in
 expectation to any opponent. How far a strategy is from one is its

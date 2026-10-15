@@ -6,11 +6,13 @@ rust-version = "1.85.0"
 license = "MIT"
 description = "Game-theory-optimal poker strategies with counterfactual regret minimization, built on ducy."
 repository = "https://github.com/allenpiscitello/ducy"
+documentation = "https://docs.rs/ducy-gto"
+readme = "README.md"
 categories = ["game-engines", "algorithms"]
 keywords = ["poker", "cfr", "gto", "nash", "holdem"]
-# Not on crates.io yet: the solver's API is still changing (turn solving,
-# Omaha). Publish once it settles, after ducy and ducy-play.
-publish = false
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["parallel"]
