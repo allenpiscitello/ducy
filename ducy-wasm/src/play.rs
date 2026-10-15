@@ -200,7 +200,31 @@ fn bomb_pots(every: u64, ante: u64, double_board: bool) -> Option<ducy_play::Bom
     })
 }
 
+/// The casino chips, in the page's hundredths: $1, $5, $25, $100, $500,
+/// $1,000, $5,000, $25,000.
+const CHIPS: [u64; 8] = [100, 500, 2_500, 10_000, 50_000, 100_000, 500_000, 2_500_000];
+
+/// A game's smallest chip, by default: the largest casino chip not above the
+/// small blind. So 1/2 and 2/5 bet in $1, 5/10 and 10/25 in $5, 25/50 in $25.
+/// Below a $1 small blind, any amount.
+pub(crate) fn default_chip(small_blind: u64) -> u64 {
+    CHIPS
+        .iter()
+        .rev()
+        .copied()
+        .find(|&c| c <= small_blind)
+        .unwrap_or(1)
+}
+
 pub(crate) fn rules_for(
+    game: Option<&str>,
+    small_blind: u64,
+    big_blind: u64,
+) -> Result<TableRules, JsError> {
+    Ok(rules_for_game(game, small_blind, big_blind)?.with_chip(default_chip(small_blind)))
+}
+
+fn rules_for_game(
     game: Option<&str>,
     small_blind: u64,
     big_blind: u64,
@@ -1378,5 +1402,19 @@ impl MultiTable {
     #[wasm_bindgen(js_name = isPaused)]
     pub fn is_paused(&self) -> bool {
         self.host.is_paused()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_chip;
+
+    #[test]
+    fn default_chips_by_stakes() {
+        // Small blinds in hundredths: 1/2, 2/5, 5/10, 10/25, 25/50, 50/100.
+        let chip = |sb: u64| default_chip(sb * 100) / 100;
+        assert_eq!([1, 2, 5, 10, 25, 50].map(chip), [1, 1, 5, 5, 25, 25]);
+        // Under a $1 small blind (0.25/0.50), any amount.
+        assert_eq!(default_chip(25), 1);
     }
 }

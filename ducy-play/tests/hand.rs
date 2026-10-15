@@ -213,6 +213,66 @@ fn full_all_in_raise_reopens_betting() {
 }
 
 #[test]
+fn bets_are_whole_chips() {
+    // 5/10 with $5 chips (in units of $1): 3-handed, the button to act.
+    let rules = TableRules::no_limit_holdem(5, 10).with_chip(5);
+    let d = deal(rules.variant, &["As Ah", "Kd Kh", "Qs Qh"], BOARD);
+    let mut hand = Hand::new(rules, &[1000, 1000, 333], 0, d).unwrap();
+    assert_eq!(hand.legal_actions().unwrap().raise.unwrap().min_to, 20);
+    // $23 isn't whole chips: it goes to the nearest, $25.
+    hand.act(Action::Raise(23)).unwrap();
+    assert_eq!(hand.street_bet(0), 25);
+    assert!(matches!(
+        hand.events().last(),
+        Some(Event::Raise { to: 25, .. })
+    ));
+    // The min-raise: 25 + 15 = 40, whole chips.
+    assert_eq!(hand.legal_actions().unwrap().raise.unwrap().min_to, 40);
+    hand.act(Action::Fold).unwrap();
+    // An all-in of an odd stack is fine: every chip the player has.
+    hand.act(Action::AllIn).unwrap();
+    assert_eq!(hand.street_bet(2), 333);
+}
+
+#[test]
+fn pot_limit_maximum_rounds_down_to_whole_chips() {
+    // 1/2 with $5 chips: pot 3, call 2, so the pot-sized raise is to 7,
+    // rounded down to 5 (whole chips); the min-raise to 4 rounds up to 5.
+    let rules = TableRules::pot_limit_omaha(1, 2).with_chip(5);
+    let d = deal(
+        rules.variant,
+        &["As Ah Kd Kh", "Qs Qh Jd Jh", "Ts Th 9d 9h"],
+        "2c 7d 9c Jc 3s",
+    );
+    let hand = Hand::new(rules, &[1000, 1000, 1000], 0, d).unwrap();
+    assert_eq!(
+        hand.legal_actions().unwrap().raise,
+        Some(RaiseRange {
+            min_to: 5,
+            max_to: 5
+        })
+    );
+}
+
+#[test]
+fn split_pots_go_out_in_whole_chips() {
+    // The pot from split_pot_odd_chip_goes_left_of_button, in $1 chips of
+    // 100 units: $5 between two is $3 and $2.
+    let rules = TableRules::no_limit_holdem(100, 200).with_chip(100);
+    let d = deal(
+        rules.variant,
+        &["2s 3s", "4d 4h", "2h 3h"],
+        "Tc Jd Qh Kc As",
+    );
+    let mut hand = Hand::new(rules, &[10000, 10000, 10000], 0, d).unwrap();
+    hand.act(Action::Call).unwrap();
+    hand.act(Action::Fold).unwrap();
+    hand.act(Action::Check).unwrap();
+    check_down(&mut hand);
+    assert_eq!(hand.result().unwrap().payouts, vec![200, 0, 300]);
+}
+
+#[test]
 fn pot_limit_maximums() {
     let rules = TableRules::pot_limit_omaha(1, 2);
     let d = deal(

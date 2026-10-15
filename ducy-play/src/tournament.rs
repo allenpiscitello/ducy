@@ -291,6 +291,8 @@ impl Tournament {
             ante: level.ante,
             bomb_pot: false,
             double_board: false,
+            // Tournament chips bet in any amount (no chip-ups yet).
+            chip: 1,
         }
     }
 

@@ -64,6 +64,17 @@ pub struct TableRules {
     /// card (a [`crate::Deal`]).
     #[cfg_attr(feature = "serde", serde(default))]
     pub double_board: bool,
+    /// The smallest chip in play. Every bet and raise is a whole number of
+    /// them (an all-in excepted), and a split pot's odd chips go out in this
+    /// size, one at a time from the first winner left of the button. Blinds
+    /// and antes can be any amount. 1 when every amount is allowed.
+    #[cfg_attr(feature = "serde", serde(default = "one_chip"))]
+    pub chip: u64,
+}
+
+#[cfg(feature = "serde")]
+fn one_chip() -> u64 {
+    1
 }
 
 impl TableRules {
@@ -77,6 +88,7 @@ impl TableRules {
             ante: 0,
             bomb_pot: false,
             double_board: false,
+            chip: 1,
         }
     }
 
@@ -90,7 +102,25 @@ impl TableRules {
             ante: 0,
             bomb_pot: false,
             double_board: false,
+            chip: 1,
         }
+    }
+
+    /// The same rules where every bet is a whole number of `chip` (see
+    /// [`TableRules::chip`]).
+    pub fn with_chip(mut self, chip: u64) -> Self {
+        self.chip = chip;
+        self
+    }
+
+    /// Rounds a bet or raise up to a whole number of chips.
+    pub fn chip_up(&self, amount: u64) -> u64 {
+        amount.div_ceil(self.chip.max(1)) * self.chip.max(1)
+    }
+
+    /// Rounds a bet or raise down to a whole number of chips.
+    pub fn chip_down(&self, amount: u64) -> u64 {
+        amount / self.chip.max(1) * self.chip.max(1)
     }
 
     /// The same rules as a bomb pot (see [`TableRules::bomb_pot`]) with this
@@ -121,7 +151,11 @@ impl TableRules {
     }
 
     pub(crate) fn validate(&self) -> Result<(), PlayError> {
-        if self.small_blind == 0 || self.big_blind == 0 || self.small_blind > self.big_blind {
+        if self.small_blind == 0
+            || self.big_blind == 0
+            || self.small_blind > self.big_blind
+            || self.chip == 0
+        {
             return Err(PlayError::InvalidBlinds);
         }
         if self.bomb_pot && self.ante == 0 {

@@ -126,21 +126,38 @@ fn setup(
     state.set_river(board[4]).map_err(invalid)
 }
 
-/// Splits `amount` evenly among `winners`, giving leftover chips one at a
-/// time starting with the first winner left of the button.
-pub(crate) fn split(amount: u64, winners: &[usize], button: usize, seats: usize) -> Vec<Award> {
+/// Splits `amount` evenly among `winners` in whole `chip`s, giving the odd
+/// chips one at a time starting with the first winner left of the button
+/// (the last can be smaller than a chip, when the pot isn't whole chips).
+pub(crate) fn split(
+    amount: u64,
+    winners: &[usize],
+    button: usize,
+    seats: usize,
+    chip: u64,
+) -> Vec<Award> {
+    let chip = chip.max(1);
     let mut order = winners.to_vec();
     order.sort_by_key(|&s| (s + seats - button - 1) % seats);
-    let share = amount / order.len() as u64;
-    let extra = amount % order.len() as u64;
-    order
+    let n = order.len() as u64;
+    let share = amount / n / chip * chip;
+    let mut odd = amount - share * n;
+    let mut awards: Vec<Award> = order
         .iter()
-        .enumerate()
-        .map(|(i, &seat)| Award {
+        .map(|&seat| Award {
             seat,
-            amount: share + u64::from((i as u64) < extra),
+            amount: share,
         })
-        .collect()
+        .collect();
+    let mut i = 0;
+    let winners = awards.len();
+    while odd > 0 {
+        let give = odd.min(chip);
+        awards[i % winners].amount += give;
+        odd -= give;
+        i += 1;
+    }
+    awards
 }
 
 #[cfg(test)]
@@ -177,12 +194,33 @@ mod test {
 
     #[test]
     fn test_split() {
-        assert_eq!(awards(split(10, &[1, 2], 0, 4)), vec![(1, 5), (2, 5)]);
+        assert_eq!(awards(split(10, &[1, 2], 0, 4, 1)), vec![(1, 5), (2, 5)]);
         // Leftover chips go to the winners closest to the left of the button.
-        assert_eq!(awards(split(11, &[0, 2], 1, 4)), vec![(2, 6), (0, 5)]);
+        assert_eq!(awards(split(11, &[0, 2], 1, 4, 1)), vec![(2, 6), (0, 5)]);
         assert_eq!(
-            awards(split(5, &[3, 0, 1], 3, 4)),
+            awards(split(5, &[3, 0, 1], 3, 4, 1)),
             vec![(0, 2), (1, 2), (3, 1)]
+        );
+    }
+
+    #[test]
+    fn split_in_whole_chips() {
+        // $1 chips (100 units): a $25 pot between two is $13 and $12, the
+        // odd chip to the first winner left of the button.
+        assert_eq!(
+            awards(split(2500, &[1, 2], 0, 4, 100)),
+            vec![(1, 1300), (2, 1200)]
+        );
+        // $5 chips, three winners, $40: $15, $15, $10 (whole chips each).
+        assert_eq!(
+            awards(split(40, &[0, 1, 2], 3, 4, 5)),
+            vec![(0, 15), (1, 15), (2, 10)]
+        );
+        // A pot that isn't whole chips (a short all-in): the last odd piece is
+        // what's left.
+        assert_eq!(
+            awards(split(2550, &[1, 2], 0, 4, 100)),
+            vec![(1, 1300), (2, 1250)]
         );
     }
 }

@@ -422,6 +422,7 @@ fn table_rules_change_between_hands_only() {
         ante: 0,
         bomb_pot: false,
         double_board: false,
+        chip: 1,
     };
     assert_eq!(
         table.set_rules(plo),
