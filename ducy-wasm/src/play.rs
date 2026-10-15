@@ -26,6 +26,7 @@ use ducy_gto::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
         bot::{GtoBot, RiverSolving, TurnSolving},
+        depths::{DepthGtoBot, depth_config},
         hunl::{BettingTree, Hunl, HunlConfig},
         range::BucketCache,
         review::{HandRecord, HandReview, ReviewConfig, ReviewLog, Reviewer, SessionReview},
@@ -288,8 +289,17 @@ struct GtoPlo {
     tree: Arc<BettingTree>,
 }
 
+/// A blueprint trained at another depth than the main 100 BB one, on the
+/// same card abstraction (`loadGtoDepth`).
+struct GtoDepth {
+    big_blinds: u64,
+    blueprint: Arc<Blueprint>,
+    tree: Arc<BettingTree>,
+}
+
 thread_local! {
     static GTO: RefCell<Option<Gto>> = const { RefCell::new(None) };
+    static GTO_DEPTHS: RefCell<Vec<GtoDepth>> = const { RefCell::new(Vec::new()) };
     static GTO_PLO: RefCell<Option<GtoPlo>> = const { RefCell::new(None) };
     static GTO_PLO6: RefCell<Option<GtoPlo>> = const { RefCell::new(None) };
     static SOLVING: Cell<(usize, usize)> =
@@ -338,7 +348,40 @@ pub fn load_gto(cards: &[u8], blueprint: &[u8]) -> Result<(), JsError> {
             tree,
         })
     });
+    // Other depths' blueprints went with the old abstraction.
+    GTO_DEPTHS.with(|d| d.borrow_mut().clear());
     Ok(())
+}
+
+/// Adds a blueprint trained `big_blinds` deep (`train_blueprint --bb`) on
+/// the card abstraction `loadGto` loaded. From then on the GTO bot plays each
+/// hand with whichever blueprint, the 100 BB one included, was trained
+/// nearest that hand's depth (ducy-gto's `DepthGtoBot`): at 25 BB, a 25 BB
+/// blueprint. Loading a depth again replaces it.
+#[wasm_bindgen(js_name = loadGtoDepth)]
+pub fn load_gto_depth(blueprint: &[u8], big_blinds: u64) -> Result<(), JsError> {
+    let cards = GTO.with(|g| g.borrow().as_ref().map(|g| g.cards.clone()));
+    let cards = cards.ok_or_else(|| JsError::new("call loadGto first"))?;
+    let game = Hunl::new(depth_config(big_blinds), Some(&cards));
+    let blueprint = Blueprint::load(blueprint, &game, &cards)
+        .map_err(|e| JsError::new(&format!("blueprint doesn't match {big_blinds} BB: {e:?}")))?;
+    let depth = GtoDepth {
+        big_blinds,
+        blueprint: Arc::new(blueprint),
+        tree: Arc::new(game.tree),
+    };
+    GTO_DEPTHS.with(|d| {
+        let mut d = d.borrow_mut();
+        d.retain(|x| x.big_blinds != big_blinds);
+        d.push(depth);
+    });
+    Ok(())
+}
+
+/// The depths, in big blinds, of the blueprints `loadGtoDepth` added.
+#[wasm_bindgen(js_name = gtoDepths)]
+pub fn gto_depths() -> Vec<u64> {
+    GTO_DEPTHS.with(|d| d.borrow().iter().map(|x| x.big_blinds).collect())
 }
 
 /// Whether `loadGto` has been called.
@@ -489,10 +532,43 @@ fn gto_seat(seed: u64) -> Result<TableSeat, JsError> {
         if !biases {
             turn.biases.clear();
         }
-        let bot = GtoBot::from_parts(g.cards.clone(), g.blueprint.clone(), g.tree.clone(), seed)
-            .with_turn_solving(turn)
-            .with_river_solving(RiverSolving::new(river));
-        Ok(TableSeat::with_bot("GTO", GTO_ID, Box::new(bot)))
+        let solving = |bot: GtoBot| {
+            bot.with_turn_solving(turn.clone())
+                .with_river_solving(RiverSolving::new(river))
+        };
+        let main = solving(GtoBot::from_parts(
+            g.cards.clone(),
+            g.blueprint.clone(),
+            g.tree.clone(),
+            seed,
+        ));
+        // With other depths loaded, each hand is played by the nearest.
+        let others: Vec<(u64, GtoBot)> = GTO_DEPTHS.with(|d| {
+            d.borrow()
+                .iter()
+                .enumerate()
+                .map(|(i, x)| {
+                    let bot = GtoBot::from_parts(
+                        g.cards.clone(),
+                        x.blueprint.clone(),
+                        x.tree.clone(),
+                        seed + 1 + i as u64,
+                    );
+                    (x.big_blinds, solving(bot))
+                })
+                .collect()
+        });
+        if others.is_empty() {
+            return Ok(TableSeat::with_bot("GTO", GTO_ID, Box::new(main)));
+        }
+        let main_bb = HunlConfig::default().stack / HunlConfig::default().big_blind;
+        let mut bots = vec![(main_bb, main)];
+        bots.extend(others);
+        Ok(TableSeat::with_bot(
+            "GTO",
+            GTO_ID,
+            Box::new(DepthGtoBot::new(bots)),
+        ))
     })
 }
 
