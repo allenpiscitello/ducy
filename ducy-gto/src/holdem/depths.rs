@@ -119,16 +119,22 @@ pub fn nearest(depths: &[u64], depth_bb: f64) -> usize {
     best
 }
 
-/// The effective stack at the start of the hand, in big blinds: the
-/// smallest starting stack among the seats (the blueprints are heads-up).
+/// The effective stack at the start of the hand, in big blinds: the bot's
+/// own starting stack or the biggest opponent's, whichever is smaller. That
+/// is what it can win or lose; a short stack elsewhere at the table doesn't
+/// make its hand shallower.
 pub fn hand_depth_bb(obs: &Observation) -> f64 {
-    let start = obs
+    let start = |s: &ducy_play::SeatView| s.stack + s.contributed;
+    let own = start(&obs.seats[obs.seat]);
+    let biggest = obs
         .seats
         .iter()
-        .map(|s| s.stack + s.contributed)
-        .min()
-        .unwrap_or(0);
-    start as f64 / obs.rules.big_blind.max(1) as f64
+        .enumerate()
+        .filter(|&(i, _)| i != obs.seat)
+        .map(|(_, s)| start(s))
+        .max()
+        .unwrap_or(own);
+    own.min(biggest) as f64 / obs.rules.big_blind.max(1) as f64
 }
 
 impl Bot for DepthGtoBot {
@@ -166,6 +172,28 @@ mod tests {
         assert_eq!(at(200.0), 100);
         // Exactly between by ratio: the deeper one.
         assert_eq!(at(50.0_f64.sqrt() * 100.0_f64.sqrt()), 100);
+    }
+
+    #[test]
+    fn depth_is_against_the_biggest_opponent() {
+        use ducy_play::{Deal, Hand, TableRules};
+        // Blinds 1/2: 200 BB, 20 BB and 500 BB.
+        let rules = TableRules::no_limit_holdem(1, 2);
+        let deal = Deal::random(rules.variant, 3, Some(1)).expect("deal");
+        let hand = Hand::new(rules, &[400, 40, 1000], 0, deal).expect("hand");
+        // The seat to act's view, looked at from each seat in turn.
+        let to_act = hand.legal_actions().expect("someone to act").seat;
+        let base = hand.observation(to_act).expect("observation");
+        let depth = |seat| {
+            let mut obs = base.clone();
+            obs.seat = seat;
+            hand_depth_bb(&obs)
+        };
+        // The deep stack's biggest rival is the 200 BB one: 200 BB, not 20.
+        assert_eq!(depth(2), 200.0);
+        assert_eq!(depth(0), 200.0);
+        // The short stack can only lose its 20 BB.
+        assert_eq!(depth(1), 20.0);
     }
 
     #[test]
