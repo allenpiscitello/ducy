@@ -3,7 +3,8 @@
 //!
 //! - Hold'em (`loadGto` in ducy-wasm): the quick card abstraction and an
 //!   untrained (uniform) blueprint for the default game, as `cards.bin` and
-//!   `blueprint.bin`.
+//!   `blueprint.bin`; and one for the 25 BB game on the same cards
+//!   (`loadGtoDepth`), as `blueprint-25.bin`.
 //! - PLO (`loadGtoPlo`): a small PLO abstraction and an untrained blueprint
 //!   for the lean 10 big blind game, as `plo-cards.bin` and
 //!   `plo-blueprint.bin`; the same for six hole cards as `plo6-cards.bin`
@@ -16,6 +17,7 @@ use ducy_gto::{
     holdem::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
+        depths::depth_config,
         hunl::{HuPlo, Hunl, HunlConfig},
     },
     omaha::abstraction::{PloAbstraction, PloAbstractionConfig},
@@ -30,6 +32,10 @@ fn main() {
     let dir = std::path::Path::new(&dir);
     std::fs::write(dir.join("cards.bin"), cards.save()).expect("write cards.bin");
     std::fs::write(dir.join("blueprint.bin"), blueprint.save()).expect("write blueprint.bin");
+    // A 25 BB one on the same cards, for `loadGtoDepth`.
+    let game = Hunl::new(depth_config(25), Some(&cards));
+    let blueprint = Blueprint::from_profile(&game, &cards, &Profile::new());
+    std::fs::write(dir.join("blueprint-25.bin"), blueprint.save()).expect("write blueprint-25.bin");
 
     let cards = PloAbstraction::build(
         PloAbstractionConfig {
