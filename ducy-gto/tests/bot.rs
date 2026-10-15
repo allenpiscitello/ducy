@@ -6,6 +6,7 @@ use ducy_gto::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
         bot::{GtoBot, RiverSolving, TurnSolving, pseudo_harmonic},
+        depths::{DepthGtoBot, depth_config},
         hunl::{BetMenu, Hunl, HunlConfig, Size},
     },
 };
@@ -99,6 +100,60 @@ fn other_blinds_and_stacks_still_play_legally() {
             .duplicate();
         let r = run_match(&config, &mut bots).unwrap();
         assert_eq!(r.fallbacks[0], 0, "{sb}/{bb} at {stack_bbs}bb");
+    }
+}
+
+/// An untrained blueprint `depth` big blinds deep, as `train_blueprint --bb`
+/// would make it.
+fn depth_bot(depth: u64, seed: u64) -> GtoBot {
+    let cards = Arc::new(CardAbstraction::quick(8));
+    let config = depth_config(depth);
+    let game = Hunl::new(config.clone(), Some(&cards));
+    let bp = Blueprint::from_profile(&game, &cards, &Profile::new());
+    GtoBot::new(config, cards, &bp.save(), seed).expect("matching blueprint")
+}
+
+#[test]
+fn each_depth_is_played_by_the_nearest_blueprint() {
+    // Blueprints at 10, 25 and 100 BB. Every hand goes to the one nearest
+    // its depth, which stays on its own tree against wild bets; the others
+    // are never asked.
+    for (stack_bbs, want) in [(12, 10), (30, 25), (80, 100), (200, 100)] {
+        let depths = DepthGtoBot::new(vec![
+            (10, depth_bot(10, 1)),
+            (25, depth_bot(25, 2)),
+            (100, depth_bot(100, 3)),
+        ]);
+        struct Watch(DepthGtoBot, Arc<std::sync::Mutex<Vec<u64>>>);
+        impl Bot for Watch {
+            fn act(&mut self, obs: &ducy_play::Observation) -> Option<ducy_play::Action> {
+                let a = self.0.act(obs);
+                self.1.lock().unwrap().push(self.0.playing().unwrap());
+                a
+            }
+            fn hand_over(&mut self, s: &ducy_play::HandSummary) {
+                self.0.hand_over(s);
+            }
+        }
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut bots: Vec<Box<dyn Bot>> = vec![
+            Box::new(Watch(depths, seen.clone())),
+            Box::new(RandomBot::new(Some(4))),
+        ];
+        let config = MatchConfig::new(TableRules::no_limit_holdem(1, 2), 150, 5)
+            .with_starting_stack(2 * stack_bbs)
+            .duplicate();
+        let r = run_match(&config, &mut bots).unwrap();
+        assert_eq!(r.fallbacks[0], 0, "illegal actions at {stack_bbs} BB");
+        let seen = seen.lock().unwrap();
+        assert!(!seen.is_empty());
+        // run_match resets the stacks before every hand, so every decision
+        // is the nearest blueprint's.
+        assert!(
+            seen.iter().all(|&d| d == want),
+            "{stack_bbs} BB: played by {:?}",
+            seen.iter().collect::<std::collections::BTreeSet<_>>()
+        );
     }
 }
 
