@@ -963,6 +963,62 @@ retune):
 
 On average +72.7 against the 21 bots; it beats all of them.
 
+## Six-handed preflop against the field (#245)
+
+The six-handed preflop solve (`sixmax::solver`) looks for an equilibrium,
+and against the Regulars it loses to Doug Poker, who is tuned against them.
+`sixmax::field` solves against how they actually play instead:
+
+1. **Recording the field:** `sixmax_field` plays tables of six Regulars,
+   picked at random per hand as `sixmax_match` seats them, and counts every
+   preflop decision on the six-handed tree by hand class (`FieldCounts`).
+   Actions map onto the tree by kind, as `SixMaxBot` maps them. 20 million
+   hands at 100 BB took 63 minutes on 12 cores and recorded 130 million
+   decisions.
+2. **The field's strategy:** at each decision and class, the counts plus
+   `--prior-weight` decisions' worth of the equilibrium solve's strategy,
+   so spots the Regulars rarely reach stay close to it.
+3. **Solving against it:** `PreflopSolver::against_field` keeps the five
+   other seats on the field's strategy and trains only the seat being
+   traversed, so each position becomes a best response to five players who
+   play like the field. 60 million iterations take about a minute.
+
+```sh
+cargo run --release -p ducy-gto --example sixmax_field -- \
+    --hands 20000000 --stack 100 --out field-100.bin
+cargo run --release -p ducy-gto --example sixmax_preflop -- \
+    --equity preflop-equity.bin --realize realize-100.bin --bb 100 \
+    --field field-100.bin --prior solve-100.bin --prior-weight 20 \
+    --iters 60000000 --checkpoint solve-field-100.bin
+cargo run --release -p ducy-gto --example sixmax_match -- \
+    --bots doug_poker,gto6,gto6@solve-field-100.bin --deals 200000 \
+    --solve solve-100.bin --equity preflop-equity.bin --realize realize-100.bin
+```
+
+**Results:** duplicate six-handed matches against five random Regulars,
+100 BB, Doug Poker playing after the flop for both six-handed bots, 200,000
+deals (1.2 million hands) each, bb/100 ± 95%:
+
+| Bot | Seed 1 | Seed 2 (fresh deals) | vs Doug (seed 2) |
+|---|---|---|---|
+| Doug Poker | +10.4 ± 1.4 | +10.4 ± 1.4 | |
+| Equilibrium solve | +5.2 ± 1.9 | +6.1 ± 1.9 | −4.2 ± 2.2 |
+| Field solve, prior weight 5 | +19.8 ± 2.8 | | |
+| Field solve, prior weight 20 | +20.3 ± 2.7 | +22.4 ± 2.7 | **+12.1 ± 2.9** |
+| Field solve, prior weight 80 | +19.7 ± 2.7 | | |
+
+- **It beats Doug:** the weight was picked on seed 1, so seed 2 is the
+  honest measure: +12.1 ± 2.9 bb/100 over Doug, +16.3 ± 2.7 over the
+  equilibrium solve. The prior weight hardly matters.
+- **Where it gains:** mostly in the blinds (the big blind loses 9 bb/100
+  instead of Doug's 34) and on the button.
+- **It's an exploit, not a sound strategy.** It limps AA and KK from early
+  position (the Regulars raise behind) and open-shoves AA from the button
+  (they call too wide). Part of that is the payoff model, too: multiway
+  pots score each hand by multiplying heads-up equities, which flatters a
+  big favourite. Against these Regulars it pays; against players who adapt
+  it would not, so the equilibrium solve stays the default for anyone else.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)

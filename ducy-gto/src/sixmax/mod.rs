@@ -11,10 +11,13 @@
 //! - [`solver`]: Monte Carlo CFR for more than two players, on that game.
 //! - [`chart`]: opening and defending charts from the solve.
 //! - [`bot`]: a six-handed bot playing the solve before the flop.
+//! - [`field`]: how a field of players actually plays preflop, recorded on
+//!   the tree, for solving against that field.
 
 pub mod bot;
 pub mod chart;
 pub mod equity;
+pub mod field;
 pub mod preflop;
 pub mod realize;
 pub mod solver;
