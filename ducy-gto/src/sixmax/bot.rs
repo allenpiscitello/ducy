@@ -35,13 +35,27 @@ pub struct PreflopStrategy {
 impl PreflopStrategy {
     /// The average strategy of a solve.
     pub fn from_solver(game: &PreflopGame, solver: &PreflopSolver) -> Self {
+        Self::from_fn(game, |id, class| {
+            solver
+                .strategy(id, class)
+                .iter()
+                .map(|&p| p as f32)
+                .collect()
+        })
+    }
+
+    /// A strategy from a function giving each decision id and class its
+    /// action probabilities, in the order of the node's actions.
+    pub fn from_fn(game: &PreflopGame, mut f: impl FnMut(u32, usize) -> Vec<f32>) -> Self {
         let mut offsets = vec![(0, 0); game.decisions as usize];
         let mut probs = Vec::new();
         for node in &game.nodes {
             if let Node::Decision { id, actions, .. } = node {
                 offsets[*id as usize] = (probs.len(), actions.len());
                 for class in 0..C {
-                    probs.extend(solver.strategy(*id, class).iter().map(|&p| p as f32));
+                    let p = f(*id, class);
+                    assert_eq!(p.len(), actions.len(), "one probability per action");
+                    probs.extend(p);
                 }
             }
         }
@@ -52,10 +66,68 @@ impl PreflopStrategy {
         }
     }
 
-    fn probs(&self, id: u32, class: usize) -> &[f32] {
+    /// The tree the strategy is for.
+    pub fn game(&self) -> &PreflopGame {
+        &self.game
+    }
+
+    /// The chance of each action at decision `id` with hand class `class`.
+    pub fn probs(&self, id: u32, class: usize) -> &[f32] {
         let (start, n) = self.offsets[id as usize];
         &self.probs[start + class * n..start + (class + 1) * n]
     }
+}
+
+/// Follows a six-handed hand's preflop actions down the tree, calling
+/// `visit(node, table seat, action index)` at each decision taken. Actions
+/// map by kind, as `SixMaxBot` maps them. Returns the node reached (a
+/// decision, or the end of the betting at the flop), or None if the hand
+/// left the tree.
+pub fn follow(
+    game: &PreflopGame,
+    events: &[Event],
+    button: usize,
+    mut visit: impl FnMut(usize, usize, usize),
+) -> Option<usize> {
+    let mut node = game.root();
+    for e in events {
+        let (seat, act) = match *e {
+            Event::Fold { seat } => (seat, Act::Fold),
+            Event::Check { seat } | Event::Call { seat, .. } => (seat, Act::Call),
+            Event::Bet { seat, all_in, .. } | Event::Raise { seat, all_in, .. } => {
+                (seat, if all_in { Act::AllIn } else { Act::Raise(0) })
+            }
+            Event::Board { .. } => break,
+            _ => continue,
+        };
+        let Node::Decision {
+            seat: pos, actions, ..
+        } = &game.nodes[node]
+        else {
+            return None;
+        };
+        if *pos != position(seat, button) {
+            return None;
+        }
+        let next = actions.iter().position(|(a, _)| match (a, act) {
+            (Act::Raise(_), Act::Raise(_)) => true,
+            (a, b) => *a == b,
+        });
+        // A raise the tree only has as an all-in (short stacks).
+        let next = next.or_else(|| {
+            matches!(act, Act::Raise(_))
+                .then(|| actions.iter().position(|(a, _)| *a == Act::AllIn))
+                .flatten()
+        })?;
+        visit(node, seat, next);
+        node = actions[next].1 as usize;
+    }
+    Some(node)
+}
+
+/// The solve's position of a table seat: 0 UTG, 1 HJ, 2 CO, 3 BTN, 4 SB, 5 BB.
+pub fn position(seat: usize, button: usize) -> usize {
+    (seat + SEATS - button + 3) % SEATS
 }
 
 /// The six-handed bot.
@@ -92,49 +164,13 @@ impl<B: Bot> SixMaxBot<B> {
         self
     }
 
-    /// The solve's position of a seat: 0 UTG, 1 HJ, 2 CO, 3 BTN, 4 SB, 5 BB.
-    fn position(seat: usize, button: usize) -> usize {
-        (seat + SEATS - button + 3) % SEATS
-    }
-
     /// The tree node the preflop has reached, following the hand's actions,
     /// or None if it left the tree.
     fn node(&self, obs: &Observation) -> Option<usize> {
-        let game = &self.strategy.game;
-        let mut node = game.root();
-        for e in &obs.history {
-            let (seat, act) = match *e {
-                Event::Fold { seat } => (seat, Some(Act::Fold)),
-                Event::Check { seat } | Event::Call { seat, .. } => (seat, Some(Act::Call)),
-                Event::Bet { seat, all_in, .. } | Event::Raise { seat, all_in, .. } => {
-                    (seat, Some(if all_in { Act::AllIn } else { Act::Raise(0) }))
-                }
-                Event::Board { .. } => return None,
-                _ => continue,
-            };
-            let Node::Decision {
-                seat: pos, actions, ..
-            } = &game.nodes[node]
-            else {
-                return None;
-            };
-            if *pos != Self::position(seat, obs.button) {
-                return None;
-            }
-            let act = act?;
-            let next = actions.iter().find(|(a, _)| match (a, act) {
-                (Act::Raise(_), Act::Raise(_)) => true,
-                (a, b) => *a == b,
-            });
-            // A raise the tree only has as an all-in (short stacks).
-            let next = next.or_else(|| {
-                matches!(act, Act::Raise(_))
-                    .then(|| actions.iter().find(|(a, _)| *a == Act::AllIn))
-                    .flatten()
-            });
-            node = next?.1 as usize;
+        if obs.history.iter().any(|e| matches!(e, Event::Board { .. })) {
+            return None;
         }
-        Some(node)
+        follow(&self.strategy.game, &obs.history, obs.button, |_, _, _| {})
     }
 
     fn preflop(&mut self, obs: &Observation) -> Option<Action> {
@@ -145,7 +181,7 @@ impl<B: Bot> SixMaxBot<B> {
         let Node::Decision { seat, id, actions } = &self.strategy.game.nodes[node] else {
             return None;
         };
-        if *seat != Self::position(obs.seat, obs.button) {
+        if *seat != position(obs.seat, obs.button) {
             return None;
         }
         let cards: Vec<_> = obs.hole_cards.iter(false).map(from_ducy).collect();

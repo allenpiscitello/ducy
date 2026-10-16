@@ -17,12 +17,25 @@
 //! fallback rule) and `gto6` (the six-handed bot: the preflop solve before
 //! the flop, Doug Poker after it; needs `--solve` and `--equity`, with
 //! `--realize` if the solve used it, and `--solve-bb`, default 100). The
-//! first bot is the one the others are compared with.
+//! first bot is the one the others are compared with. `gto6@FILE` (and
+//! `gto6hu@FILE`) play the solve in FILE instead of `--solve`, so two solves
+//! can be compared on the same deals. `--progress FILE` writes a small JSON
+//! status file every half minute.
 //!
 //! `--flops` instead plays tables of six random Regulars and reports how
 //! many players see the flop, by how the preflop went.
 
-use std::{sync::Arc, thread};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
+    },
+    thread,
+    time::{Duration, Instant},
+};
+
+/// Deals played so far, over all bots, for `--progress`.
+static PLAYED: AtomicU64 = AtomicU64::new(0);
 
 use ducy_gto::{
     holdem::{
@@ -120,6 +133,7 @@ fn run(make: &Make, rules: TableRules, stack: u64, deals: u64, seed: u64, thread
                         .step_by(threads as usize)
                         .map(|d| {
                             let p = play_deal(&make, rules, stack, d, seed);
+                            PLAYED.fetch_add(1, Relaxed);
                             (p.iter().sum(), p)
                         })
                         .collect()
@@ -242,6 +256,7 @@ fn main() {
     let mut solve_bb = 100u32;
     let mut equity_path: Option<String> = None;
     let mut realize_path: Option<String> = None;
+    let mut progress: Option<String> = None;
     let mut threads = thread::available_parallelism().map_or(4, |n| n.get()) as u64;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -259,6 +274,7 @@ fn main() {
             "--solve-bb" => solve_bb = v().parse().expect("--solve-bb"),
             "--equity" => equity_path = Some(v()),
             "--realize" => realize_path = Some(v()),
+            "--progress" => progress = Some(v()),
             f => panic!("unknown option {f}"),
         }
     }
@@ -272,12 +288,16 @@ fn main() {
 
     let mut bots: Vec<(String, Make)> = Vec::new();
     for name in names.split(',') {
-        let make: Make = match name {
+        let (kind, solve_file) = match name.split_once('@') {
+            Some((k, f)) => (k, Some(f.to_string())),
+            None => (name, solve_path.clone()),
+        };
+        let make: Make = match kind {
             "equity" => Arc::new(|s| Box::new(EquityBot::new(200, Some(s))) as Box<dyn Bot>),
             "gto6" | "gto6hu" => {
                 // gto6hu also plays heads-up pots after the flop with the
                 // heads-up blueprint (--cards, --blueprint).
-                let heads_up = (name == "gto6hu").then(|| {
+                let heads_up = (kind == "gto6hu").then(|| {
                     let cards = Arc::new(
                         CardAbstraction::load(
                             &std::fs::read(cards_path.as_ref().expect("gto6hu needs --cards"))
@@ -308,7 +328,7 @@ fn main() {
                 let solver = PreflopSolver::new(&game, &eq, 1);
                 solver
                     .load(
-                        &std::fs::read(solve_path.as_ref().expect("gto6 needs --solve"))
+                        &std::fs::read(solve_file.as_ref().expect("gto6 needs --solve"))
                             .expect("read --solve"),
                     )
                     .expect("a solve for this game");
@@ -352,8 +372,37 @@ fn main() {
             }
             id => regular(Personality::from_name(id).unwrap_or_else(|| panic!("unknown bot {id}"))),
         };
-        bots.push((name.to_string(), make));
+        // A solve's file by its name alone, so the table stays readable.
+        let shown = match name.split_once('@') {
+            Some((k, f)) => format!("{k}@{}", f.rsplit('/').next().unwrap_or(f)),
+            None => name.to_string(),
+        };
+        bots.push((shown, make));
     }
+
+    let finished = Arc::new(AtomicBool::new(false));
+    let reporter = progress.map(|path| {
+        let total = deals * bots.len() as u64;
+        let finished = finished.clone();
+        thread::spawn(move || {
+            let t = Instant::now();
+            while !finished.load(Relaxed) {
+                let done = PLAYED.load(Relaxed);
+                let rate = done as f64 / t.elapsed().as_secs_f64().max(1.0);
+                let eta = (total - done.min(total)) as f64 / rate.max(1e-9) / 60.0;
+                let json = format!(
+                    "{{\"label\": \"6-max: duplicate matches against the Regulars\", \"done\": {done}, \"total\": {total}, \"unit\": \"deals\", \"etaMin\": {eta:.0}}}\n"
+                );
+                let _ = std::fs::write(&path, json);
+                for _ in 0..30 {
+                    if finished.load(Relaxed) {
+                        break;
+                    }
+                    thread::sleep(Duration::from_secs(1));
+                }
+            }
+        })
+    });
 
     let bb = config.big_blind as f64;
     println!(
@@ -363,8 +412,12 @@ fn main() {
     for p in POSITIONS {
         print!(" {p:>7}");
     }
-    println!(" {:>16}", "vs first");
-    let mut first: Option<Vec<i64>> = None;
+    println!(" {:>16} {:>16}", "vs first", "vs second");
+    let diff = |a: &[i64], b: &[i64]| {
+        let d: Vec<f64> = a.iter().zip(b).map(|(x, y)| (x - y) as f64).collect();
+        rate(&d, bb)
+    };
+    let mut results: Vec<Vec<i64>> = Vec::new();
     for (name, make) in &bots {
         let s = run(make, rules, stack, deals, seed, threads);
         let per_deal: Vec<f64> = s.per_deal.iter().map(|&x| x as f64).collect();
@@ -373,21 +426,16 @@ fn main() {
         for c in s.by_position {
             print!(" {:>+7.1}", c as f64 / bb / deals as f64 * 100.0);
         }
-        match &first {
-            None => {
-                println!();
-                first = Some(s.per_deal);
-            }
-            Some(f) => {
-                let diff: Vec<f64> = s
-                    .per_deal
-                    .iter()
-                    .zip(f)
-                    .map(|(a, b)| (a - b) as f64)
-                    .collect();
-                let (d, dci) = rate(&diff, bb);
-                println!(" {:>+7.1} ± {:<5.1}", d, dci);
-            }
+        // Paired with the first bot, and from the third on with the second.
+        for other in results.iter().take(2) {
+            let (d, dci) = diff(&s.per_deal, other);
+            print!(" {:>+7.1} ± {:<5.1}", d, dci);
         }
+        println!();
+        results.push(s.per_deal);
+    }
+    finished.store(true, Relaxed);
+    if let Some(r) = reporter {
+        r.join().expect("reporter");
     }
 }

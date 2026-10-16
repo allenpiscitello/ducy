@@ -15,6 +15,7 @@ use std::{
 };
 
 use super::{
+    bot::PreflopStrategy,
     equity::PreflopEquity,
     preflop::{Node, PreflopGame, SEATS},
 };
@@ -44,9 +45,29 @@ pub struct PreflopSolver<'a> {
     average: Vec<AtomicU32>,
     iterations: AtomicU64,
     seed: u64,
+    /// When set, every seat but the one being trained plays this fixed
+    /// strategy (`against_field`).
+    field: Option<&'a PreflopStrategy>,
 }
 
 impl<'a> PreflopSolver<'a> {
+    /// A solver where the field plays `field` (a recorded field's strategy,
+    /// `FieldCounts::strategy`) and only the seat being traversed learns: each
+    /// position's strategy becomes a best response to five players who play
+    /// like the field, rather than an equilibrium.
+    pub fn against_field(
+        game: &'a PreflopGame,
+        eq: &'a PreflopEquity,
+        field: &'a PreflopStrategy,
+        seed: u64,
+    ) -> Self {
+        assert_eq!(field.game().decisions, game.decisions, "same tree");
+        Self {
+            field: Some(field),
+            ..Self::new(game, eq, seed)
+        }
+    }
+
     pub fn new(game: &'a PreflopGame, eq: &'a PreflopEquity, seed: u64) -> Self {
         let mut offsets = vec![(0, 0); game.decisions as usize];
         let mut total = 0;
@@ -65,6 +86,7 @@ impl<'a> PreflopSolver<'a> {
             average: zeros(total),
             iterations: AtomicU64::new(0),
             seed,
+            field: None,
         }
     }
 
@@ -122,12 +144,15 @@ impl<'a> PreflopSolver<'a> {
         classes
     }
 
+    /// `reach` is the traversed player's own chance of playing to this node,
+    /// used for its average strategy when the field is fixed.
     fn traverse(
         &self,
         node: usize,
         player: usize,
         classes: &[usize; SEATS],
         weight: f32,
+        reach: f32,
         rng: &mut Rng,
     ) -> f64 {
         match &self.game.nodes[node] {
@@ -135,13 +160,21 @@ impl<'a> PreflopSolver<'a> {
             Node::Decision { seat, id, actions } => {
                 let n = actions.len();
                 let mut sigma = [0f64; 4];
-                self.current(*id, classes[*seat], &mut sigma);
                 let (base, _) = self.slots(*id, classes[*seat]);
                 if *seat == player {
+                    self.current(*id, classes[*seat], &mut sigma);
+                    if self.field.is_some() {
+                        // The field never updates the average here: the
+                        // player's own, weighted by its reach.
+                        for (slot, p) in self.average[base..base + n].iter().zip(sigma) {
+                            add(slot, weight * reach * p as f32);
+                        }
+                    }
                     let mut values = [0f64; 4];
                     let mut value = 0.0;
                     for (a, &(_, child)) in actions.iter().enumerate() {
-                        values[a] = self.traverse(child as usize, player, classes, weight, rng);
+                        let r = reach * sigma[a] as f32;
+                        values[a] = self.traverse(child as usize, player, classes, weight, r, rng);
                         value += sigma[a] * values[a];
                     }
                     for (slot, v) in self.regret[base..base + n].iter().zip(values) {
@@ -149,12 +182,19 @@ impl<'a> PreflopSolver<'a> {
                         slot.store(r.to_bits(), Relaxed);
                     }
                     value
+                } else if let Some(field) = self.field {
+                    for (s, &p) in sigma.iter_mut().zip(field.probs(*id, classes[*seat])) {
+                        *s = p as f64;
+                    }
+                    let a = rng.sample(&sigma[..n]);
+                    self.traverse(actions[a].1 as usize, player, classes, weight, reach, rng)
                 } else {
+                    self.current(*id, classes[*seat], &mut sigma);
                     for (slot, p) in self.average[base..base + n].iter().zip(sigma) {
                         add(slot, weight * p as f32);
                     }
                     let a = rng.sample(&sigma[..n]);
-                    self.traverse(actions[a].1 as usize, player, classes, weight, rng)
+                    self.traverse(actions[a].1 as usize, player, classes, weight, reach, rng)
                 }
             }
         }
@@ -174,7 +214,14 @@ impl<'a> PreflopSolver<'a> {
                         let classes = Self::deal(&mut rng);
                         let weight = (i + 1) as f32;
                         for player in 0..SEATS {
-                            self.traverse(self.game.root(), player, &classes, weight, &mut rng);
+                            self.traverse(
+                                self.game.root(),
+                                player,
+                                &classes,
+                                weight,
+                                1.0,
+                                &mut rng,
+                            );
                         }
                         i += threads;
                     }
@@ -248,5 +295,39 @@ mod tests {
         again.load(&solver.to_bytes()).expect("load");
         assert_eq!(again.strategy(*id, class("AA")), aa);
         assert_eq!(again.iterations(), 60_000);
+    }
+
+    #[test]
+    fn against_a_field_that_always_folds_it_plays_any_hand() {
+        let eq = PreflopEquity::compute(200, 3, 4);
+        let game = PreflopGame::new(100);
+        // The field folds whenever it can, and checks otherwise.
+        let mut by_id = vec![None; game.decisions as usize];
+        for node in &game.nodes {
+            if let Node::Decision { id, actions, .. } = node {
+                by_id[*id as usize] = Some(actions);
+            }
+        }
+        let field = PreflopStrategy::from_fn(&game, |id, _| {
+            let actions = by_id[id as usize].expect("decision");
+            let fold = actions.iter().position(|(a, _)| *a == Act::Fold);
+            let call = actions.iter().position(|(a, _)| *a == Act::Call);
+            let pick = fold.or(call).expect("fold or check");
+            (0..actions.len())
+                .map(|a| if a == pick { 1.0 } else { 0.0 })
+                .collect()
+        });
+        let solver = PreflopSolver::against_field(&game, &eq, &field, 5);
+        solver.run(20_000, 4);
+        let Node::Decision { id, actions, .. } = &game.nodes[game.root()] else {
+            panic!("root");
+        };
+        let fold = actions
+            .iter()
+            .position(|(a, _)| *a == Act::Fold)
+            .expect("fold");
+        // Everyone folds behind: even 72o wins the blinds by playing.
+        let trash = solver.strategy(*id, class("72o"));
+        assert!(trash[fold] < 0.1, "72o folds {:?}", trash);
     }
 }
