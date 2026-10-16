@@ -313,26 +313,32 @@ fn main() {
                         Arc::new(Blueprint::load(&bytes, &game, &cards).expect("blueprint"));
                     (cards, blueprint, Arc::new(BettingTree::build(&config)))
                 });
-                let eq = PreflopEquity::from_bytes(
-                    &std::fs::read(equity_path.as_ref().expect("gto6 needs --equity"))
-                        .expect("read --equity"),
-                )
-                .expect("equity table");
-                let realize = realize_path
-                    .as_ref()
-                    .map_or_else(Realization::default, |p| {
-                        Realization::from_bytes(&std::fs::read(p).expect("read --realize"))
-                            .expect("realization table")
-                    });
-                let game = PreflopGame::with_realization(solve_bb, realize);
-                let solver = PreflopSolver::new(&game, &eq, 1);
-                solver
-                    .load(
-                        &std::fs::read(solve_file.as_ref().expect("gto6 needs --solve"))
-                            .expect("read --solve"),
-                    )
-                    .expect("a solve for this game");
-                let strategy = Arc::new(PreflopStrategy::from_solver(&game, &solver));
+                let bytes = std::fs::read(solve_file.as_ref().expect("gto6 needs --solve"))
+                    .expect("read --solve");
+                // A compact strategy (sixmax_export), or a solve's checkpoint.
+                let strategy = Arc::new(match PreflopStrategy::from_compact(&bytes) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        let eq = PreflopEquity::from_bytes(
+                            &std::fs::read(equity_path.as_ref().expect("gto6 needs --equity"))
+                                .expect("read --equity"),
+                        )
+                        .expect("equity table");
+                        let realize =
+                            realize_path
+                                .as_ref()
+                                .map_or_else(Realization::default, |p| {
+                                    Realization::from_bytes(
+                                        &std::fs::read(p).expect("read --realize"),
+                                    )
+                                    .expect("realization table")
+                                });
+                        let game = PreflopGame::with_realization(solve_bb, realize);
+                        let solver = PreflopSolver::new(&game, &eq, 1);
+                        solver.load(&bytes).expect("a solve for this game");
+                        PreflopStrategy::from_solver(&game, &solver)
+                    }
+                });
                 Arc::new(move |s| {
                     let mut bot =
                         SixMaxBot::new(strategy.clone(), Personality::DougPoker.bot(Some(s)), s);

@@ -36,6 +36,7 @@ use ducy_gto::{
         bot::{PloGtoBot, load_blueprint},
         river::PloRiverSolving,
     },
+    sixmax::bot::{PreflopStrategy, SixMaxBot},
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -391,6 +392,87 @@ pub fn gto_loaded() -> bool {
 }
 
 thread_local! {
+    /// The six-handed bot's preflop strategies, by depth, once `loadGto6` ran.
+    static GTO6: RefCell<Vec<Arc<PreflopStrategy>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The id that seats the six-handed bot.
+const GTO6_ID: &str = "gto6";
+/// How far from its depth a strategy plays, at the shallowest and deepest
+/// loaded: 100 BB alone plays 70 to 140 BB. Between two loaded depths, each
+/// plays up to their geometric mean.
+const GTO6_BELOW: f64 = 0.7;
+const GTO6_ABOVE: f64 = 1.4;
+
+/// A strategy's depth in big blinds (its tree's stacks are in half ones).
+fn gto6_depth(s: &PreflopStrategy) -> f64 {
+    s.game().stack as f64 / 2.0
+}
+
+/// Loads a six-handed preflop strategy (ducy-gto's `SixMaxBot`, a compact
+/// strategy from `sixmax_export`), for the depth it was solved at. After
+/// this, "gto6" can be used as a bot id. It plays each hand before the flop
+/// at a six-handed table with the strategy nearest that hand's depth (none
+/// beyond 0.7 times the shallowest or 1.4 times the deepest), and Doug
+/// Poker's game everywhere else. Loading a depth again replaces it.
+#[wasm_bindgen(js_name = loadGto6)]
+pub fn load_gto6(strategy: &[u8]) -> Result<(), JsError> {
+    let s = PreflopStrategy::from_compact(strategy).map_err(|e| JsError::new(&e))?;
+    GTO6.with(|g| {
+        let mut g = g.borrow_mut();
+        g.retain(|x| x.game().stack != s.game().stack);
+        g.push(Arc::new(s));
+        g.sort_by_key(|x| x.game().stack);
+    });
+    Ok(())
+}
+
+/// Whether `loadGto6` has been called.
+#[wasm_bindgen(js_name = gto6Loaded)]
+pub fn gto6_loaded() -> bool {
+    GTO6.with(|g| !g.borrow().is_empty())
+}
+
+/// The depths, in big blinds, of the strategies `loadGto6` loaded.
+#[wasm_bindgen(js_name = gto6Depths)]
+pub fn gto6_depths() -> Vec<f64> {
+    GTO6.with(|g| g.borrow().iter().map(|s| gto6_depth(s)).collect())
+}
+
+fn gto6_seat(seed: u64) -> Result<TableSeat, JsError> {
+    let strategies = GTO6.with(|g| g.borrow().clone());
+    if strategies.is_empty() {
+        return Err(JsError::new("call loadGto6 first"));
+    }
+    let depths: Vec<f64> = strategies.iter().map(|s| gto6_depth(s)).collect();
+    // Each one's depths: from the geometric mean with the one below (or 0.7
+    // times its depth) to the mean with the one above (or 1.4 times).
+    let window = |i: usize| {
+        let lo = if i == 0 {
+            depths[0] * GTO6_BELOW
+        } else {
+            (depths[i - 1] * depths[i]).sqrt()
+        };
+        let hi = depths
+            .get(i + 1)
+            .map_or(depths[i] * GTO6_ABOVE, |&up| (depths[i] * up).sqrt());
+        (lo, hi)
+    };
+    let (lo, hi) = window(0);
+    let mut bot = SixMaxBot::new(
+        strategies[0].clone(),
+        Personality::DougPoker.bot(Some(seed)),
+        seed,
+    )
+    .with_depths(lo, hi);
+    for (i, s) in strategies.iter().enumerate().skip(1) {
+        let (lo, hi) = window(i);
+        bot = bot.with_strategy(s.clone(), lo, hi);
+    }
+    Ok(TableSeat::with_bot("GTO", GTO6_ID, Box::new(bot)))
+}
+
+thread_local! {
     /// The network the "net:" bots play from, once `loadNet` has run.
     static NET: RefCell<Option<Arc<Mlp>>> = const { RefCell::new(None) };
 }
@@ -583,6 +665,10 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
             seats.push(gto_seat(seed.wrapping_add(i as u64 + 1))?);
             continue;
         }
+        if id == GTO6_ID {
+            seats.push(gto6_seat(seed.wrapping_add(i as u64 + 1))?);
+            continue;
+        }
         if let Some(plo) = plo_id(id) {
             seats.push(gto_plo_seat(plo, seed.wrapping_add(i as u64 + 1))?);
             continue;
@@ -606,6 +692,9 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
 fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
     if id == GTO_ID {
         return gto_seat(seed)?.bot.ok_or_else(|| JsError::new("no bot"));
+    }
+    if id == GTO6_ID {
+        return gto6_seat(seed)?.bot.ok_or_else(|| JsError::new("no bot"));
     }
     if let Some(plo) = plo_id(id) {
         return gto_plo_seat(plo, seed)?
