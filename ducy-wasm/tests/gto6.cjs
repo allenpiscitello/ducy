@@ -24,6 +24,11 @@ assert.throws(() => new ducy.BotTable(["gto6"], 200n, 1n, 2n, 1n, undefined), /l
 assert.throws(() => ducy.loadGto6(new Uint8Array([1, 2, 3])), /compact six-handed/);
 ducy.loadGto6(fs.readFileSync(path.join(modelDir, "sixmax.bin")));
 assert.equal(ducy.gto6Loaded(), true);
+assert.deepEqual(Array.from(ducy.gto6Depths()), [100]);
+// Another depth adds to it; loading one again replaces it.
+ducy.loadGto6(fs.readFileSync(path.join(modelDir, "sixmax-200.bin")));
+ducy.loadGto6(fs.readFileSync(path.join(modelDir, "sixmax.bin")));
+assert.deepEqual(Array.from(ducy.gto6Depths()), [100, 200]);
 
 /// Plays `hands` hands with `bots` and `buyIn` chips at blinds 1/2, the
 /// person checking or calling; every one must finish with legal play.
@@ -42,9 +47,10 @@ function play(bots, buyIn, hands) {
   }
 }
 
-// Six-handed at 100 BB (the solve's depth), at 200 BB (Doug's game), and at
-// a smaller table (always Doug's game).
+// Six-handed at 100 BB and 200 BB (each its own strategy), at 400 BB (past
+// the deepest: Doug's game), and at a smaller table (always Doug's game).
 play(["gto6", "doug_poker", "jonny_slow", "nik_airbag", "milk_king"], 200n, 30);
-play(["gto6", "doug_poker", "jonny_slow", "nik_airbag", "milk_king"], 400n, 10);
+play(["gto6", "doug_poker", "jonny_slow", "nik_airbag", "milk_king"], 400n, 20);
+play(["gto6", "doug_poker", "jonny_slow", "nik_airbag", "milk_king"], 800n, 5);
 play(["gto6", "doug_poker"], 200n, 10);
 console.log("gto6: ok");

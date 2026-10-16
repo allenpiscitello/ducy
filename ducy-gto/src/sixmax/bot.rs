@@ -233,7 +233,10 @@ pub fn position(seat: usize, button: usize) -> usize {
 
 /// The six-handed bot.
 pub struct SixMaxBot<B: Bot> {
-    strategy: Arc<PreflopStrategy>,
+    /// Each strategy with the hand depths, in big blinds (`hand_depth_bb`),
+    /// it's played at: a solve is for one depth. A hand at no strategy's
+    /// depths goes to `post`.
+    strategies: Vec<(Arc<PreflopStrategy>, f64, f64)>,
     post: B,
     /// Plays heads-up pots after the flop, seeing them as a heads-up hand
     /// (`heads_up_view`): a heads-up GTO bot. Without one, `post` does.
@@ -244,29 +247,34 @@ pub struct SixMaxBot<B: Bot> {
     pub off_tree: u64,
     /// Decisions after the flop the heads-up bot made.
     pub heads_up_decisions: u64,
-    /// The hand depths, in big blinds (`hand_depth_bb`), it plays the solve
-    /// at; other hands go to `post`.
-    depths: (f64, f64),
 }
 
 impl<B: Bot> SixMaxBot<B> {
+    /// Plays `strategy` at every depth.
     pub fn new(strategy: Arc<PreflopStrategy>, post: B, seed: u64) -> Self {
         Self {
-            strategy,
+            strategies: vec![(strategy, 0.0, f64::INFINITY)],
             post,
             heads_up: None,
             rng: Rng::new(seed),
             solved: 0,
             off_tree: 0,
             heads_up_decisions: 0,
-            depths: (0.0, f64::INFINITY),
         }
     }
 
-    /// Plays the solve only in hands from `lo` to `hi` big blinds deep (the
-    /// effective stack, `hand_depth_bb`): a solve is for one depth.
+    /// Plays the first strategy only in hands from `lo` to `hi` big blinds
+    /// deep (the effective stack, `hand_depth_bb`).
     pub fn with_depths(mut self, lo: f64, hi: f64) -> Self {
-        self.depths = (lo, hi);
+        self.strategies[0].1 = lo;
+        self.strategies[0].2 = hi;
+        self
+    }
+
+    /// Adds `strategy` for hands from `lo` to `hi` big blinds deep (a solve
+    /// at another depth). Where depths overlap, the first added plays.
+    pub fn with_strategy(mut self, strategy: Arc<PreflopStrategy>, lo: f64, hi: f64) -> Self {
+        self.strategies.push((strategy, lo, hi));
         self
     }
 
@@ -276,25 +284,23 @@ impl<B: Bot> SixMaxBot<B> {
         self
     }
 
-    /// The tree node the preflop has reached, following the hand's actions,
-    /// or None if it left the tree.
-    fn node(&self, obs: &Observation) -> Option<usize> {
-        if obs.history.iter().any(|e| matches!(e, Event::Board { .. })) {
-            return None;
-        }
-        follow(&self.strategy.game, &obs.history, obs.button, |_, _, _| {})
-    }
-
     fn preflop(&mut self, obs: &Observation) -> Option<Action> {
         if obs.seats.len() != SEATS || obs.seats.iter().any(|s| s.stack + s.contributed == 0) {
             return None;
         }
-        let depth = hand_depth_bb(obs);
-        if depth < self.depths.0 || depth > self.depths.1 {
+        if obs.history.iter().any(|e| matches!(e, Event::Board { .. })) {
             return None;
         }
-        let node = self.node(obs)?;
-        let Node::Decision { seat, id, actions } = &self.strategy.game.nodes[node] else {
+        let depth = hand_depth_bb(obs);
+        let strategy = self
+            .strategies
+            .iter()
+            .find(|(_, lo, hi)| (*lo..=*hi).contains(&depth))?
+            .0
+            .clone();
+        // The tree node the preflop has reached, or None if it left the tree.
+        let node = follow(&strategy.game, &obs.history, obs.button, |_, _, _| {})?;
+        let Node::Decision { seat, id, actions } = &strategy.game.nodes[node] else {
             return None;
         };
         if *seat != position(obs.seat, obs.button) {
@@ -302,7 +308,7 @@ impl<B: Bot> SixMaxBot<B> {
         }
         let cards: Vec<_> = obs.hole_cards.iter(false).map(from_ducy).collect();
         let class = preflop_class(cards[0], cards[1]);
-        let probs = self.strategy.probs(*id, class);
+        let probs = strategy.probs(*id, class);
         // A decision a compact strategy left out.
         if probs.is_empty() {
             return None;
@@ -630,5 +636,48 @@ mod tests {
             "200 BB deep: post plays it"
         );
         assert_eq!(bot.off_tree, 1);
+
+        // With a strategy for 140 to 280 BB too, that one plays 200 BB hands:
+        // it folds UTG there, where `post` would call.
+        let deep_game = PreflopGame::new(200);
+        let Node::Decision {
+            id: deep_root,
+            actions: deep_actions,
+            ..
+        } = &deep_game.nodes[deep_game.root()]
+        else {
+            panic!("root");
+        };
+        let deep_fold = deep_actions
+            .iter()
+            .position(|(a, _)| *a == Act::Fold)
+            .expect("fold");
+        let mut deep_n = vec![0; deep_game.decisions as usize];
+        for x in &deep_game.nodes {
+            if let Node::Decision { id, actions, .. } = x {
+                deep_n[*id as usize] = actions.len();
+            }
+        }
+        let deep_bytes = PreflopStrategy::from_fn(&deep_game, |id, _| {
+            let n = deep_n[id as usize];
+            if id == *deep_root {
+                (0..n)
+                    .map(|i| if i == deep_fold { 1.0 } else { 0.0 })
+                    .collect()
+            } else {
+                vec![1.0 / n as f32; n]
+            }
+        })
+        .to_compact(|id| id == *deep_root);
+        let deep_strategy = Arc::new(PreflopStrategy::from_compact(&deep_bytes).expect("200 BB"));
+        let mut both = SixMaxBot::new(strategy, Calls, 1)
+            .with_depths(70.0, 140.0)
+            .with_strategy(deep_strategy, 140.0, 280.0);
+        assert_eq!(
+            both.act(&obs),
+            Some(Action::Fold),
+            "the 200 BB strategy plays it"
+        );
+        assert_eq!(both.solved, 1);
     }
 }

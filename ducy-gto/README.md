@@ -1038,10 +1038,13 @@ cargo run --release -p ducy-gto --example sixmax_export -- \
 - **No loss:** on 200,000 fresh deals (seed 3), the compact strategy and
   the full solve played the same: +23.3 ± 2.6 against +23.6 ± 2.7 bb/100,
   a paired difference of −0.3 ± 0.8 (Doug: +11.3 ± 1.4).
-- **In ducy-wasm:** `loadGto6(bytes)` seats it as "gto6". It plays the
-  strategy before the flop at six-handed tables 70 to 140 big blinds deep
-  (the solve is for 100 BB; `SixMaxBot::with_depths`), and Doug Poker's
-  game after the flop and at any other depth or table size.
+- **In ducy-wasm:** `loadGto6(bytes)` seats it as "gto6", and each call
+  adds a strategy for the depth it was solved at (`gto6Depths`). Before the
+  flop at a six-handed table, each hand is played by the strategy nearest
+  its depth (`SixMaxBot::with_strategy`): up to the geometric mean with the
+  next depth loaded, and no further than 0.7 times the shallowest or 1.4
+  times the deepest (100 BB alone covers 70 to 140 BB). After the flop, and
+  at any other depth or table size, it plays Doug Poker's game.
 
 ## Next steps
 
