@@ -6,10 +6,15 @@
 //!
 //! - [`equity`]: preflop equity tables over the 169 starting-hand classes.
 //! - [`preflop`]: the six-handed preflop game.
+//! - [`realize`]: how much of its equity each hand realizes after the flop,
+//!   fitted from the heads-up blueprint.
 //! - [`solver`]: Monte Carlo CFR for more than two players, on that game.
 //! - [`chart`]: opening and defending charts from the solve.
+//! - [`bot`]: a six-handed bot playing the solve before the flop.
 
+pub mod bot;
 pub mod chart;
 pub mod equity;
 pub mod preflop;
+pub mod realize;
 pub mod solver;

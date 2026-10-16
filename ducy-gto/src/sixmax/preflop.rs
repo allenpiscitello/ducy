@@ -8,7 +8,7 @@
 //! 5 BB. Preflop, UTG acts first; after the flop the small blind does, and
 //! the button acts last.
 
-use super::equity::PreflopEquity;
+use super::{equity::PreflopEquity, realize::Realization};
 
 pub const SEATS: usize = 6;
 pub const POSITIONS: [&str; SEATS] = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];
@@ -23,12 +23,8 @@ const FOUR_BET: f64 = 2.3;
 /// The open, in half big blinds: 2.5 BB, or 3 BB from the small blind.
 const OPEN: u32 = 5;
 const OPEN_SB: u32 = 6;
-
-/// How much of its equity a hand realizes after the flop, when it isn't
-/// all-in: the player last to act after the flop realizes more, the others
-/// less (first numbers; to be fitted from the heads-up blueprint).
-pub const REALIZE_LAST: f64 = 1.08;
-pub const REALIZE_OTHERS: f64 = 0.9;
+/// Limpers the tree allows before the next player must raise or fold.
+const MAX_LIMPERS: u32 = 2;
 
 /// An action at a decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,15 +83,25 @@ pub struct PreflopGame {
     pub nodes: Vec<Node>,
     /// Number of decision nodes.
     pub decisions: u32,
+    /// How much of its equity each hand realizes after the flop, when it
+    /// isn't all-in: in position (last to act after the flop) or not.
+    pub realize: Realization,
 }
 
 impl PreflopGame {
-    /// The tree with `big_blinds`-deep stacks.
+    /// The tree with `big_blinds`-deep stacks, and the default realization
+    /// (in position 1.08, out of position 0.9, for every hand).
     pub fn new(big_blinds: u32) -> Self {
+        Self::with_realization(big_blinds, Realization::default())
+    }
+
+    /// The tree with realization fitted for this depth (`sixmax_realize`).
+    pub fn with_realization(big_blinds: u32, realize: Realization) -> Self {
         let mut g = Self {
             stack: 2 * big_blinds,
             nodes: Vec::new(),
             decisions: 0,
+            realize,
         };
         let mut put_in = [0; SEATS];
         put_in[SB] = 1;
@@ -152,16 +158,23 @@ impl PreflopGame {
         if facing {
             acts.push(Act::Fold);
         }
-        // No limping, except the small blind completing.
-        let limp = s.raises == 0 && seat != BB && seat != SB;
-        if !limp {
+        // Limpers so far (the small blind completing counts).
+        let limpers = (0..SEATS)
+            .filter(|&x| x != BB && x != seat && !s.folded[x] && s.put_in[x] == 2)
+            .count() as u32;
+        // Anyone may limp (the Regulars do, so the solve has to know those
+        // pots), up to MAX_LIMPERS before the rest must raise or fold, which
+        // keeps the tree a size that trains; the small blind may complete
+        // and the big blind check whatever came before.
+        if s.raises > 0 || seat == SB || seat == BB || limpers < MAX_LIMPERS {
             acts.push(Act::Call);
         }
         let cap = self.stack;
+        // Raising over limpers costs a big blind more per limper.
         if !s.all_in && s.bet < cap {
             let to = match s.raises {
-                0 if seat == SB => Some(OPEN_SB),
-                0 => Some(OPEN),
+                0 if seat == SB => Some(OPEN_SB + 2 * limpers),
+                0 => Some(OPEN + 2 * limpers),
                 1 => {
                     let raiser = s.raiser.expect("an opener");
                     let oop = postflop_order(seat) < postflop_order(raiser);
@@ -249,11 +262,12 @@ impl PreflopGame {
                     }
                 }
                 if !all_in {
-                    p *= if i == last {
-                        REALIZE_LAST
+                    let r = if i == last {
+                        &self.realize.ip
                     } else {
-                        REALIZE_OTHERS
+                        &self.realize.oop
                     };
+                    p *= r[classes[i]] as f64;
                 }
                 share[i] = p;
                 total += p;

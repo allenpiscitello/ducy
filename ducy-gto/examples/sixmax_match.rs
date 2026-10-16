@@ -14,18 +14,30 @@
 //!
 //! `--bots` takes personality ids, `equity` (EquityBot) and `gto` (GtoBot,
 //! which needs `--cards` and `--blueprint`; at six seats it plays its
-//! fallback rule). The first bot is the one the others are compared with.
+//! fallback rule) and `gto6` (the six-handed bot: the preflop solve before
+//! the flop, Doug Poker after it; needs `--solve` and `--equity`, with
+//! `--realize` if the solve used it, and `--solve-bb`, default 100). The
+//! first bot is the one the others are compared with.
 //!
 //! `--flops` instead plays tables of six random Regulars and reports how
 //! many players see the flop, by how the preflop went.
 
 use std::{sync::Arc, thread};
 
-use ducy_gto::holdem::{
-    abstraction::CardAbstraction,
-    blueprint::Blueprint,
-    bot::GtoBot,
-    hunl::{BettingTree, Hunl, HunlConfig},
+use ducy_gto::{
+    holdem::{
+        abstraction::CardAbstraction,
+        blueprint::Blueprint,
+        bot::GtoBot,
+        hunl::{BettingTree, Hunl, HunlConfig},
+    },
+    sixmax::{
+        bot::{PreflopStrategy, SixMaxBot},
+        equity::PreflopEquity,
+        preflop::PreflopGame,
+        realize::Realization,
+        solver::PreflopSolver,
+    },
 };
 use ducy_play::{
     Bot, Deal, Event, Hand, Street, TableRules, bots::EquityBot, personality::Personality,
@@ -226,6 +238,10 @@ fn main() {
     let mut cards_path = None;
     let mut blueprint_path = None;
     let mut flop_mode = false;
+    let mut solve_path: Option<String> = None;
+    let mut solve_bb = 100u32;
+    let mut equity_path: Option<String> = None;
+    let mut realize_path: Option<String> = None;
     let mut threads = thread::available_parallelism().map_or(4, |n| n.get()) as u64;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -239,6 +255,10 @@ fn main() {
             "--cards" => cards_path = Some(v()),
             "--blueprint" => blueprint_path = Some(v()),
             "--flops" => flop_mode = true,
+            "--solve" => solve_path = Some(v()),
+            "--solve-bb" => solve_bb = v().parse().expect("--solve-bb"),
+            "--equity" => equity_path = Some(v()),
+            "--realize" => realize_path = Some(v()),
             f => panic!("unknown option {f}"),
         }
     }
@@ -254,6 +274,59 @@ fn main() {
     for name in names.split(',') {
         let make: Make = match name {
             "equity" => Arc::new(|s| Box::new(EquityBot::new(200, Some(s))) as Box<dyn Bot>),
+            "gto6" | "gto6hu" => {
+                // gto6hu also plays heads-up pots after the flop with the
+                // heads-up blueprint (--cards, --blueprint).
+                let heads_up = (name == "gto6hu").then(|| {
+                    let cards = Arc::new(
+                        CardAbstraction::load(
+                            &std::fs::read(cards_path.as_ref().expect("gto6hu needs --cards"))
+                                .expect("read --cards"),
+                        )
+                        .expect("abstraction"),
+                    );
+                    let game = Hunl::new(config.clone(), Some(&cards));
+                    let bytes =
+                        std::fs::read(blueprint_path.as_ref().expect("gto6hu needs --blueprint"))
+                            .expect("read --blueprint");
+                    let blueprint =
+                        Arc::new(Blueprint::load(&bytes, &game, &cards).expect("blueprint"));
+                    (cards, blueprint, Arc::new(BettingTree::build(&config)))
+                });
+                let eq = PreflopEquity::from_bytes(
+                    &std::fs::read(equity_path.as_ref().expect("gto6 needs --equity"))
+                        .expect("read --equity"),
+                )
+                .expect("equity table");
+                let realize = realize_path
+                    .as_ref()
+                    .map_or_else(Realization::default, |p| {
+                        Realization::from_bytes(&std::fs::read(p).expect("read --realize"))
+                            .expect("realization table")
+                    });
+                let game = PreflopGame::with_realization(solve_bb, realize);
+                let solver = PreflopSolver::new(&game, &eq, 1);
+                solver
+                    .load(
+                        &std::fs::read(solve_path.as_ref().expect("gto6 needs --solve"))
+                            .expect("read --solve"),
+                    )
+                    .expect("a solve for this game");
+                let strategy = Arc::new(PreflopStrategy::from_solver(&game, &solver));
+                Arc::new(move |s| {
+                    let mut bot =
+                        SixMaxBot::new(strategy.clone(), Personality::DougPoker.bot(Some(s)), s);
+                    if let Some((cards, blueprint, tree)) = &heads_up {
+                        bot = bot.with_heads_up(Box::new(GtoBot::from_parts(
+                            cards.clone(),
+                            blueprint.clone(),
+                            tree.clone(),
+                            s ^ 0x6,
+                        )));
+                    }
+                    Box::new(bot) as Box<dyn Bot>
+                })
+            }
             "gto" => {
                 let cards = Arc::new(
                     CardAbstraction::load(
