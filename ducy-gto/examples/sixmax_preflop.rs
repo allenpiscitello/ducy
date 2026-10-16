@@ -5,7 +5,9 @@
 //!         --equity preflop-equity.bin --bb 100 --iters 20000000 \
 //!         --checkpoint sixmax-100.bin [--every 1000000] [--grids]
 //!
-//! `--equity` is the file `sixmax_equity` writes. With `--checkpoint`, a
+//! `--equity` is the file `sixmax_equity` writes; `--realize FILE` the
+//! realization `sixmax_realize` fits for this depth (default: in position
+//! 1.08, out of position 0.9, for every hand). With `--checkpoint`, a
 //! run resumes from the file if it exists and saves to it every `--every`
 //! iterations. Every report prints how much each position opens first in
 //! and how the big blind defends against it; `--grids` also prints each
@@ -17,6 +19,7 @@ use ducy_gto::sixmax::{
     chart::{Charts, SpotChart},
     equity::PreflopEquity,
     preflop::{POSITIONS, PreflopGame},
+    realize::Realization,
     solver::PreflopSolver,
 };
 
@@ -28,6 +31,7 @@ fn main() {
     let mut checkpoint: Option<String> = None;
     let mut seed = 1u64;
     let mut grids = false;
+    let mut realize_path: Option<String> = None;
     let mut threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -41,12 +45,20 @@ fn main() {
             "--seed" => seed = v().parse().expect("--seed"),
             "--threads" => threads = v().parse().expect("--threads"),
             "--grids" => grids = true,
+            "--realize" => realize_path = Some(v()),
             f => panic!("unknown option {f}"),
         }
     }
     let eq = PreflopEquity::from_bytes(&std::fs::read(&equity_path).expect("read --equity"))
         .expect("equity table");
-    let game = PreflopGame::new(bb);
+    let game = match &realize_path {
+        Some(path) => PreflopGame::with_realization(
+            bb,
+            Realization::from_bytes(&std::fs::read(path).expect("read --realize"))
+                .expect("realization table"),
+        ),
+        None => PreflopGame::new(bb),
+    };
     let solver = PreflopSolver::new(&game, &eq, seed);
     if let Some(path) = &checkpoint {
         if let Ok(bytes) = std::fs::read(path) {
