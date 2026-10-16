@@ -9,6 +9,8 @@
 //!   for the lean 10 big blind game, as `plo-cards.bin` and
 //!   `plo-blueprint.bin`; the same for six hole cards as `plo6-cards.bin`
 //!   and `plo6-blueprint.bin`.
+//! - Six-handed (`loadGto6`): a compact preflop strategy for 100 BB with
+//!   every action equally likely, as `sixmax.bin`.
 //!
 //!     cargo run -p ducy-gto --example tiny_model -- target/tiny-model
 
@@ -21,6 +23,10 @@ use ducy_gto::{
         hunl::{HuPlo, Hunl, HunlConfig},
     },
     omaha::abstraction::{PloAbstraction, PloAbstractionConfig},
+    sixmax::{
+        bot::PreflopStrategy,
+        preflop::{Node, PreflopGame},
+    },
 };
 
 fn main() {
@@ -73,5 +79,20 @@ fn main() {
     std::fs::write(dir.join("plo6-cards.bin"), cards.save()).expect("write plo6-cards.bin");
     std::fs::write(dir.join("plo6-blueprint.bin"), blueprint.save())
         .expect("write plo6-blueprint.bin");
+    // Six-handed (`loadGto6`): a compact preflop strategy for 100 BB, every
+    // action equally likely, with only the first decisions kept.
+    let game = PreflopGame::new(100);
+    let mut actions = vec![0; game.decisions as usize];
+    for n in &game.nodes {
+        if let Node::Decision { id, actions: a, .. } = n {
+            actions[*id as usize] = a.len();
+        }
+    }
+    let uniform = PreflopStrategy::from_fn(&game, |id, _| {
+        let n = actions[id as usize];
+        vec![1.0 / n as f32; n]
+    });
+    std::fs::write(dir.join("sixmax.bin"), uniform.to_compact(|id| id < 500))
+        .expect("write sixmax.bin");
     println!("wrote {}", dir.display());
 }

@@ -36,6 +36,7 @@ use ducy_gto::{
         bot::{PloGtoBot, load_blueprint},
         river::PloRiverSolving,
     },
+    sixmax::bot::{PreflopStrategy, SixMaxBot},
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -391,6 +392,44 @@ pub fn gto_loaded() -> bool {
 }
 
 thread_local! {
+    /// The six-handed bot's preflop strategy, once `loadGto6` has run.
+    static GTO6: RefCell<Option<Arc<PreflopStrategy>>> = const { RefCell::new(None) };
+}
+
+/// The id that seats the six-handed bot.
+const GTO6_ID: &str = "gto6";
+/// The depths, in big blinds, the six-handed bot plays its solve at: it was
+/// solved at 100 BB. Other hands, and every street after the flop, it plays
+/// as Doug Poker.
+const GTO6_DEPTHS: (f64, f64) = (70.0, 140.0);
+
+/// Loads the six-handed bot (ducy-gto's `SixMaxBot`): a compact preflop
+/// strategy (`sixmax_export`). After this, "gto6" can be used as a bot id.
+/// It plays the strategy before the flop at a six-handed table, 70 to 140
+/// big blinds deep, and Doug Poker's game everywhere else.
+#[wasm_bindgen(js_name = loadGto6)]
+pub fn load_gto6(strategy: &[u8]) -> Result<(), JsError> {
+    let s = PreflopStrategy::from_compact(strategy).map_err(|e| JsError::new(&e))?;
+    GTO6.with(|g| *g.borrow_mut() = Some(Arc::new(s)));
+    Ok(())
+}
+
+/// Whether `loadGto6` has been called.
+#[wasm_bindgen(js_name = gto6Loaded)]
+pub fn gto6_loaded() -> bool {
+    GTO6.with(|g| g.borrow().is_some())
+}
+
+fn gto6_seat(seed: u64) -> Result<TableSeat, JsError> {
+    let strategy = GTO6
+        .with(|g| g.borrow().clone())
+        .ok_or_else(|| JsError::new("call loadGto6 first"))?;
+    let bot = SixMaxBot::new(strategy, Personality::DougPoker.bot(Some(seed)), seed)
+        .with_depths(GTO6_DEPTHS.0, GTO6_DEPTHS.1);
+    Ok(TableSeat::with_bot("GTO", GTO6_ID, Box::new(bot)))
+}
+
+thread_local! {
     /// The network the "net:" bots play from, once `loadNet` has run.
     static NET: RefCell<Option<Arc<Mlp>>> = const { RefCell::new(None) };
 }
@@ -583,6 +622,10 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
             seats.push(gto_seat(seed.wrapping_add(i as u64 + 1))?);
             continue;
         }
+        if id == GTO6_ID {
+            seats.push(gto6_seat(seed.wrapping_add(i as u64 + 1))?);
+            continue;
+        }
         if let Some(plo) = plo_id(id) {
             seats.push(gto_plo_seat(plo, seed.wrapping_add(i as u64 + 1))?);
             continue;
@@ -606,6 +649,9 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
 fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
     if id == GTO_ID {
         return gto_seat(seed)?.bot.ok_or_else(|| JsError::new("no bot"));
+    }
+    if id == GTO6_ID {
+        return gto6_seat(seed)?.bot.ok_or_else(|| JsError::new("no bot"));
     }
     if let Some(plo) = plo_id(id) {
         return gto_plo_seat(plo, seed)?

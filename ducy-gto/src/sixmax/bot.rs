@@ -18,7 +18,9 @@ use super::{
 };
 use crate::{
     Rng,
-    holdem::{cards::from_ducy, iso::NUM_PREFLOP_CLASSES, iso::preflop_class},
+    holdem::{
+        cards::from_ducy, depths::hand_depth_bb, iso::NUM_PREFLOP_CLASSES, iso::preflop_class,
+    },
 };
 
 const C: usize = NUM_PREFLOP_CLASSES;
@@ -71,12 +73,111 @@ impl PreflopStrategy {
         &self.game
     }
 
-    /// The chance of each action at decision `id` with hand class `class`.
+    /// The chance of each action at decision `id` with hand class `class`;
+    /// empty for a decision a compact strategy left out.
     pub fn probs(&self, id: u32, class: usize) -> &[f32] {
         let (start, n) = self.offsets[id as usize];
         &self.probs[start + class * n..start + (class + 1) * n]
     }
+
+    /// The strategy for the decisions `keep` names, small enough to ship to
+    /// a web page: each probability in a byte. The tree is rebuilt from its
+    /// depth when it's read (`from_compact`); a decision left out has no
+    /// strategy there, and `SixMaxBot` leaves it to its `post` bot.
+    pub fn to_compact(&self, keep: impl Fn(u32) -> bool) -> Vec<u8> {
+        let ids: Vec<u32> = (0..self.offsets.len() as u32)
+            .filter(|&id| keep(id) && self.offsets[id as usize].1 > 0)
+            .collect();
+        let mut out = COMPACT_MAGIC.to_vec();
+        out.extend(COMPACT_VERSION.to_le_bytes());
+        out.extend(self.game.stack.to_le_bytes());
+        out.extend((ids.len() as u32).to_le_bytes());
+        for id in ids {
+            out.extend(id.to_le_bytes());
+            for class in 0..C {
+                out.extend(
+                    self.probs(id, class)
+                        .iter()
+                        .map(|&p| (p.clamp(0.0, 1.0) * 255.0).round() as u8),
+                );
+            }
+        }
+        out
+    }
+
+    /// Reads `to_compact`'s bytes: the tree for their depth, with the
+    /// decisions they hold (each class's probabilities summing to 1 again).
+    pub fn from_compact(bytes: &[u8]) -> Result<Self, String> {
+        let bad = || "not a compact six-handed preflop strategy".to_string();
+        let u32_at = |i: usize| -> Result<u32, String> {
+            Ok(u32::from_le_bytes(
+                bytes.get(i..i + 4).ok_or_else(bad)?.try_into().expect("4"),
+            ))
+        };
+        if bytes.get(..8) != Some(COMPACT_MAGIC) || u32_at(8)? != COMPACT_VERSION {
+            return Err(bad());
+        }
+        let stack = u32_at(12)?;
+        if stack == 0 || stack % 2 != 0 || stack > 2 * 1000 {
+            return Err(bad());
+        }
+        let game = PreflopGame::new(stack / 2);
+        // Each decision's number of actions.
+        let mut actions_of = vec![0; game.decisions as usize];
+        for node in &game.nodes {
+            if let Node::Decision { id, actions, .. } = node {
+                actions_of[*id as usize] = actions.len();
+            }
+        }
+        let mut table: Vec<Option<Vec<f32>>> = vec![None; game.decisions as usize];
+        let mut at = 20;
+        for _ in 0..u32_at(16)? {
+            let id = u32_at(at)? as usize;
+            at += 4;
+            let n = *actions_of.get(id).ok_or_else(bad)?;
+            let raw = bytes.get(at..at + n * C).ok_or_else(bad)?;
+            at += n * C;
+            let mut probs = Vec::with_capacity(n * C);
+            for class in raw.chunks(n) {
+                let sum: f32 = class.iter().map(|&b| b as f32).sum();
+                // A class rounded to all zeros: fold-or-check stays first.
+                probs.extend(class.iter().enumerate().map(|(i, &b)| {
+                    if sum > 0.0 {
+                        b as f32 / sum
+                    } else if i == 0 {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }));
+            }
+            table[id] = Some(probs);
+        }
+        if at != bytes.len() {
+            return Err(bad());
+        }
+        let mut offsets = vec![(0, 0); game.decisions as usize];
+        let mut probs = Vec::new();
+        for node in &game.nodes {
+            if let Node::Decision { id, actions, .. } = node {
+                if let Some(p) = table[*id as usize].take() {
+                    offsets[*id as usize] = (probs.len(), actions.len());
+                    probs.extend(p);
+                } else {
+                    offsets[*id as usize] = (probs.len(), 0);
+                }
+            }
+        }
+        Ok(Self {
+            game,
+            offsets,
+            probs,
+        })
+    }
 }
+
+const COMPACT_MAGIC: &[u8; 8] = b"DUCY6PS\0";
+const COMPACT_VERSION: u32 = 1;
 
 /// Follows a six-handed hand's preflop actions down the tree, calling
 /// `visit(node, table seat, action index)` at each decision taken. Actions
@@ -143,6 +244,9 @@ pub struct SixMaxBot<B: Bot> {
     pub off_tree: u64,
     /// Decisions after the flop the heads-up bot made.
     pub heads_up_decisions: u64,
+    /// The hand depths, in big blinds (`hand_depth_bb`), it plays the solve
+    /// at; other hands go to `post`.
+    depths: (f64, f64),
 }
 
 impl<B: Bot> SixMaxBot<B> {
@@ -155,7 +259,15 @@ impl<B: Bot> SixMaxBot<B> {
             solved: 0,
             off_tree: 0,
             heads_up_decisions: 0,
+            depths: (0.0, f64::INFINITY),
         }
+    }
+
+    /// Plays the solve only in hands from `lo` to `hi` big blinds deep (the
+    /// effective stack, `hand_depth_bb`): a solve is for one depth.
+    pub fn with_depths(mut self, lo: f64, hi: f64) -> Self {
+        self.depths = (lo, hi);
+        self
     }
 
     /// Plays heads-up pots after the flop with `bot`.
@@ -177,6 +289,10 @@ impl<B: Bot> SixMaxBot<B> {
         if obs.seats.len() != SEATS || obs.seats.iter().any(|s| s.stack + s.contributed == 0) {
             return None;
         }
+        let depth = hand_depth_bb(obs);
+        if depth < self.depths.0 || depth > self.depths.1 {
+            return None;
+        }
         let node = self.node(obs)?;
         let Node::Decision { seat, id, actions } = &self.strategy.game.nodes[node] else {
             return None;
@@ -187,6 +303,10 @@ impl<B: Bot> SixMaxBot<B> {
         let cards: Vec<_> = obs.hole_cards.iter(false).map(from_ducy).collect();
         let class = preflop_class(cards[0], cards[1]);
         let probs = self.strategy.probs(*id, class);
+        // A decision a compact strategy left out.
+        if probs.is_empty() {
+            return None;
+        }
         let mut x = self.rng.next_f64() as f32;
         let mut pick = actions.len() - 1;
         for (i, &p) in probs.iter().enumerate() {
@@ -442,5 +562,73 @@ mod tests {
         hand.act(Action::Call).expect("big blind calls");
         let obs = hand.observation(2).expect("big blind to act");
         assert!(heads_up_view(&obs).is_none());
+    }
+
+    /// A `post` bot that always calls, to tell its decisions apart.
+    struct Calls;
+    impl Bot for Calls {
+        fn act(&mut self, _: &Observation) -> Option<Action> {
+            Some(Action::Call)
+        }
+        fn hand_over(&mut self, _: &HandSummary) {}
+    }
+
+    #[test]
+    fn a_compact_strategy_keeps_its_decisions_and_leaves_the_rest_to_post() {
+        let game = PreflopGame::new(100);
+        let Node::Decision {
+            id: root, actions, ..
+        } = &game.nodes[game.root()]
+        else {
+            panic!("root");
+        };
+        let fold = actions
+            .iter()
+            .position(|(a, _)| *a == Act::Fold)
+            .expect("fold");
+        // Folds everything at the root; elsewhere every action is equally likely.
+        let mut n_of = vec![0; game.decisions as usize];
+        for n in &game.nodes {
+            if let Node::Decision { id, actions, .. } = n {
+                n_of[*id as usize] = actions.len();
+            }
+        }
+        let full = PreflopStrategy::from_fn(&game, |id, _| {
+            let n = n_of[id as usize];
+            if id == *root {
+                (0..n).map(|i| if i == fold { 1.0 } else { 0.0 }).collect()
+            } else {
+                vec![1.0 / n as f32; n]
+            }
+        });
+        let bytes = full.to_compact(|id| id == *root);
+        let compact = PreflopStrategy::from_compact(&bytes).expect("reads back");
+        assert_eq!(compact.game().decisions, game.decisions);
+        assert_eq!(compact.probs(*root, 0)[fold], 1.0);
+        let other = (0..game.decisions)
+            .find(|&id| id != *root)
+            .expect("another decision");
+        assert!(compact.probs(other, 0).is_empty(), "left out");
+        assert!(PreflopStrategy::from_compact(&bytes[..bytes.len() - 1]).is_err());
+        assert!(PreflopStrategy::from_compact(b"not one").is_err());
+
+        // UTG with the strategy folds; outside its depths, it plays as `post`.
+        let rules = TableRules::no_limit_holdem(1, 2);
+        let deal = Deal::random(rules.variant, 6, Some(5)).expect("deal");
+        let hand = Hand::new(rules, &[200; 6], 0, deal).expect("hand");
+        let obs = hand.observation(3).expect("UTG to act");
+        let strategy = Arc::new(compact);
+        let mut bot = SixMaxBot::new(strategy.clone(), Calls, 1).with_depths(70.0, 140.0);
+        assert_eq!(bot.act(&obs), Some(Action::Fold));
+        assert_eq!(bot.solved, 1);
+        let deal = Deal::random(rules.variant, 6, Some(5)).expect("deal");
+        let deep = Hand::new(rules, &[400; 6], 0, deal).expect("hand");
+        let obs = deep.observation(3).expect("UTG to act");
+        assert_eq!(
+            bot.act(&obs),
+            Some(Action::Call),
+            "200 BB deep: post plays it"
+        );
+        assert_eq!(bot.off_tree, 1);
     }
 }

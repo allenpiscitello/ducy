@@ -1019,6 +1019,30 @@ deals (1.2 million hands) each, bb/100 ± 95%:
   big favourite. Against these Regulars it pays; against players who adapt
   it would not, so the equilibrium solve stays the default for anyone else.
 
+### On the web page: a compact strategy
+
+The solve's checkpoint is 413 MB, far too much for a page. The bot only
+needs the average strategy where play actually goes, so `sixmax_export`
+keeps the decisions the recorded field reached most, until they cover 99.9%
+of its decisions, with each probability in a byte
+(`PreflopStrategy::to_compact`). Anywhere else, `SixMaxBot` plays its
+`post` bot (Doug Poker), as it already did off the tree.
+
+```sh
+cargo run --release -p ducy-gto --example sixmax_export -- \
+    --equity preflop-equity.bin --realize realize-100.bin --bb 100 \
+    --solve solve-field-w20.bin --field field-100.bin --out sixmax-100.bin
+```
+
+- **Size:** 3,682 of the tree's 141,752 decisions, 2.1 MB.
+- **No loss:** on 200,000 fresh deals (seed 3), the compact strategy and
+  the full solve played the same: +23.3 ± 2.6 against +23.6 ± 2.7 bb/100,
+  a paired difference of −0.3 ± 0.8 (Doug: +11.3 ± 1.4).
+- **In ducy-wasm:** `loadGto6(bytes)` seats it as "gto6". It plays the
+  strategy before the flop at six-handed tables 70 to 140 big blinds deep
+  (the solve is for 100 BB; `SixMaxBot::with_depths`), and Doug Poker's
+  game after the flop and at any other depth or table size.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
