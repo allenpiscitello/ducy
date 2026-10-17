@@ -70,9 +70,11 @@ fn main() {
         game.tree.nodes.len(),
         t0.elapsed().as_secs_f64()
     );
+    // Batches as big as the heads-up blueprint's: smaller ones spend much of
+    // their time merging and leave cores idle.
     let config = Config {
         seed,
-        batch: 256,
+        batch: 4096,
         discount: Discount::DCFR,
         prune: None,
     };
