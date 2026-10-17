@@ -21,3 +21,4 @@ pub mod field;
 pub mod preflop;
 pub mod realize;
 pub mod solver;
+pub mod spot;

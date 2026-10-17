@@ -250,7 +250,7 @@ fn main() {
     let all = tallies.lock().expect("lock");
     let mut rows: Vec<(&String, &Tally)> = all.iter().collect();
     // By Ducybot's own postflop decisions: the ones he needs solved.
-    rows.sort_by(|a, b| b.1.ducybot.cmp(&a.1.ducybot));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.1.ducybot));
     let total_dec: u64 = rows.iter().map(|r| r.1.decisions).sum();
     let total_mine: u64 = rows.iter().map(|r| r.1.ducybot).sum();
     let mut text = format!(
