@@ -328,6 +328,9 @@ pub fn set_gto_turn_options(river_samples: usize, biases: bool) {
 
 /// The id that seats the GTO bot.
 const GTO_ID: &str = "gto";
+/// The name every GTO bot sits under: Hold'em heads-up and six-handed, PLO4
+/// and PLO6.
+const BOT_NAME: &str = "Ducybot";
 
 /// Loads the GTO bot: a heads-up no-limit Hold'em blueprint and the card
 /// abstraction it was trained with (the compact form is enough). After
@@ -469,7 +472,7 @@ fn gto6_seat(seed: u64) -> Result<TableSeat, JsError> {
         let (lo, hi) = window(i);
         bot = bot.with_strategy(s.clone(), lo, hi);
     }
-    Ok(TableSeat::with_bot("GTO", GTO6_ID, Box::new(bot)))
+    Ok(TableSeat::with_bot(BOT_NAME, GTO6_ID, Box::new(bot)))
 }
 
 thread_local! {
@@ -592,7 +595,7 @@ fn gto_plo_seat(id: &'static str, seed: u64) -> Result<TableSeat, JsError> {
             hands: PAGE_PLO_RIVER_HANDS,
             time: None,
         });
-        Ok(TableSeat::with_bot("GTO", id, Box::new(bot)))
+        Ok(TableSeat::with_bot(BOT_NAME, id, Box::new(bot)))
     })
 }
 
@@ -641,13 +644,13 @@ fn gto_seat(seed: u64) -> Result<TableSeat, JsError> {
                 .collect()
         });
         if others.is_empty() {
-            return Ok(TableSeat::with_bot("GTO", GTO_ID, Box::new(main)));
+            return Ok(TableSeat::with_bot(BOT_NAME, GTO_ID, Box::new(main)));
         }
         let main_bb = HunlConfig::default().stack / HunlConfig::default().big_blind;
         let mut bots = vec![(main_bb, main)];
         bots.extend(others);
         Ok(TableSeat::with_bot(
-            "GTO",
+            BOT_NAME,
             GTO_ID,
             Box::new(DepthGtoBot::new(bots)),
         ))
