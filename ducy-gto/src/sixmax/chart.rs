@@ -141,6 +141,116 @@ pub fn big_blind_defence(game: &PreflopGame, seat: usize) -> Option<usize> {
     None
 }
 
+/// Folds every seat from `node` until it's `seat`'s decision, or None if the
+/// betting ends first.
+fn fold_to(game: &PreflopGame, mut node: usize, seat: usize) -> Option<usize> {
+    while let Node::Decision { seat: s, .. } = &game.nodes[node] {
+        if *s == seat {
+            return Some(node);
+        }
+        node = follow(game, node, |a| *a == Act::Fold)?;
+    }
+    None
+}
+
+/// A chart spot: a decision people study, by who acts and against whom.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spot {
+    /// Stable, e.g. "open-UTG", "vs-open-BB-UTG", "vs-3bet-UTG-BTN", "vs-limp-BB-SB".
+    pub id: String,
+    /// "open", "vs-open", "vs-3bet" or "vs-limp".
+    pub kind: &'static str,
+    pub hero: usize,
+    /// The seat whose raise (or limp) it faces, if any.
+    pub villain: Option<usize>,
+    /// The decision's node in the tree.
+    pub node: usize,
+}
+
+/// The spots charts show: each position first in; each later position
+/// facing each open (the standard raise, everyone between folding); the
+/// opener facing each of those 3-bets (the rest folding); and the big blind
+/// facing the small blind's limp.
+pub fn spots(game: &PreflopGame) -> Vec<Spot> {
+    let name = |s: usize| POSITIONS[s];
+    let mut out = Vec::new();
+    for opener in 0..SEATS - 1 {
+        let first = first_in(game, opener);
+        out.push(Spot {
+            id: format!("open-{}", name(opener)),
+            kind: "open",
+            hero: opener,
+            villain: None,
+            node: first,
+        });
+        let Some(raised) = follow(game, first, |a| matches!(a, Act::Raise(_))) else {
+            continue;
+        };
+        for hero in opener + 1..SEATS {
+            let Some(facing) = fold_to(game, raised, hero) else {
+                continue;
+            };
+            out.push(Spot {
+                id: format!("vs-open-{}-{}", name(hero), name(opener)),
+                kind: "vs-open",
+                hero,
+                villain: Some(opener),
+                node: facing,
+            });
+            let back = follow(game, facing, |a| matches!(a, Act::Raise(_)))
+                .and_then(|n| fold_to(game, n, opener));
+            if let Some(back) = back {
+                out.push(Spot {
+                    id: format!("vs-3bet-{}-{}", name(opener), name(hero)),
+                    kind: "vs-3bet",
+                    hero: opener,
+                    villain: Some(hero),
+                    node: back,
+                });
+            }
+        }
+    }
+    let sb = SEATS - 2;
+    if let Some(limp) = follow(game, first_in(game, sb), |a| *a == Act::Call)
+        .and_then(|n| fold_to(game, n, SEATS - 1))
+    {
+        out.push(Spot {
+            id: format!("vs-limp-{}-{}", name(SEATS - 1), name(sb)),
+            kind: "vs-limp",
+            hero: SEATS - 1,
+            villain: Some(sb),
+            node: limp,
+        });
+    }
+    out
+}
+
+/// The 169 hand classes in chart order: 13 rows from aces down, pairs on the
+/// diagonal, suited above it, offsuit below (AA, AKs, AQs, … then AKo, KK, …).
+pub fn grid_classes() -> Vec<usize> {
+    let mut out = Vec::with_capacity(NUM_PREFLOP_CLASSES);
+    for row in (0..13u8).rev() {
+        for col in (0..13u8).rev() {
+            out.push(if row == col {
+                class_of(row, col, false)
+            } else {
+                class_of(row.max(col), row.min(col), col < row)
+            });
+        }
+    }
+    out
+}
+
+/// An action's name for charts: "fold", "call" (or check), "raise", "allin".
+pub fn act_name(a: &Act) -> &'static str {
+    match a {
+        Act::Fold => "fold",
+        Act::Call => "call",
+        Act::Raise(_) => "raise",
+        Act::AllIn => "allin",
+    }
+}
+
 /// Opening charts for every position but the big blind, and the big blind's
 /// defence against each.
 pub struct Charts {
@@ -224,5 +334,46 @@ mod tests {
         let utg = charts.defences[0].as_ref().expect("BB vs UTG");
         assert!(bb.overall(SpotChart::fold) < utg.overall(SpotChart::fold));
         assert!(charts.summary().contains("BTN opens"));
+    }
+
+    #[test]
+    fn chart_spots_cover_opens_defences_and_3bets() {
+        let game = PreflopGame::new(100);
+        let s = spots(&game);
+        let ids: Vec<&str> = s.iter().map(|x| x.id.as_str()).collect();
+        // Five opens, fifteen spots facing an open, fifteen facing a 3-bet,
+        // and the big blind against the small blind's limp.
+        assert_eq!(s.iter().filter(|x| x.kind == "open").count(), 5);
+        assert_eq!(s.iter().filter(|x| x.kind == "vs-open").count(), 15);
+        assert_eq!(s.iter().filter(|x| x.kind == "vs-3bet").count(), 15);
+        assert!(ids.contains(&"vs-limp-BB-SB"));
+        let mut unique = ids.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), ids.len(), "ids are unique");
+        // Each spot is the hero's decision.
+        for x in &s {
+            let Node::Decision { seat, .. } = &game.nodes[x.node] else {
+                panic!("{} isn't a decision", x.id);
+            };
+            assert_eq!(*seat, x.hero, "{}", x.id);
+        }
+        let bb = s
+            .iter()
+            .find(|x| x.id == "vs-open-BB-BTN")
+            .expect("BB vs BTN");
+        assert_eq!(
+            bb.node,
+            big_blind_defence(&game, 3).expect("the same decision")
+        );
+        // The chart order holds every class once, aces first.
+        let order = grid_classes();
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, (0..NUM_PREFLOP_CLASSES).collect::<Vec<_>>());
+        assert_eq!(class_name(order[0]), "AA");
+        assert_eq!(class_name(order[1]), "AKs");
+        assert_eq!(class_name(order[13]), "AKo");
+        assert_eq!(class_name(order[168]), "22");
     }
 }
