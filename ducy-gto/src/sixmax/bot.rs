@@ -241,12 +241,17 @@ pub struct SixMaxBot<B: Bot> {
     /// Plays heads-up pots after the flop, seeing them as a heads-up hand
     /// (`heads_up_view`): a heads-up GTO bot. Without one, `post` does.
     heads_up: Option<Box<dyn Bot>>,
+    /// Plays the trained six-handed postflop spots (#267), tried before
+    /// `heads_up` and `post`.
+    spots: Option<super::spot::SpotBot>,
     rng: Rng,
     /// Preflop decisions taken from the solve, and those left to `post`.
     pub solved: u64,
     pub off_tree: u64,
     /// Decisions after the flop the heads-up bot made.
     pub heads_up_decisions: u64,
+    /// Decisions after the flop the spot blueprints made.
+    pub spot_decisions: u64,
 }
 
 impl<B: Bot> SixMaxBot<B> {
@@ -256,11 +261,19 @@ impl<B: Bot> SixMaxBot<B> {
             strategies: vec![(strategy, 0.0, f64::INFINITY)],
             post,
             heads_up: None,
+            spots: None,
             rng: Rng::new(seed),
             solved: 0,
             off_tree: 0,
             heads_up_decisions: 0,
+            spot_decisions: 0,
         }
+    }
+
+    /// Plays the trained postflop spots with `spots` (#267).
+    pub fn with_spots(mut self, spots: super::spot::SpotBot) -> Self {
+        self.spots = Some(spots);
+        self
     }
 
     /// Plays the first strategy only in hands from `lo` to `hi` big blinds
@@ -355,6 +368,9 @@ impl<B: Bot> Bot for SixMaxBot<B> {
                 return Some(action);
             }
             self.off_tree += 1;
+        } else if let Some(action) = self.spots.as_mut().and_then(|s| s.act(obs)) {
+            self.spot_decisions += 1;
+            return Some(action);
         } else if let Some(bot) = self.heads_up.as_mut() {
             if let Some(view) = heads_up_view(obs) {
                 if let Some(action) = bot.act(&view) {

@@ -38,6 +38,7 @@ use std::{
 static PLAYED: AtomicU64 = AtomicU64::new(0);
 
 use ducy_gto::{
+    Config, Mccfr, Profile,
     holdem::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
@@ -47,9 +48,10 @@ use ducy_gto::{
     sixmax::{
         bot::{PreflopStrategy, SixMaxBot},
         equity::PreflopEquity,
-        preflop::PreflopGame,
+        preflop::{POSITIONS as SOLVE_POSITIONS, PreflopGame},
         realize::Realization,
         solver::PreflopSolver,
+        spot::{SpotBot, SpotGame},
     },
 };
 use ducy_play::{
@@ -257,6 +259,9 @@ fn main() {
     let mut equity_path: Option<String> = None;
     let mut realize_path: Option<String> = None;
     let mut progress: Option<String> = None;
+    // Trained postflop spots for gto6s: checkpoints named
+    // spot-<bb>-<opener>-<caller>.bin (sixmax_spot_train).
+    let mut spot_files: Vec<String> = Vec::new();
     let mut threads = thread::available_parallelism().map_or(4, |n| n.get()) as u64;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -275,6 +280,7 @@ fn main() {
             "--equity" => equity_path = Some(v()),
             "--realize" => realize_path = Some(v()),
             "--progress" => progress = Some(v()),
+            "--spots" => spot_files = v().split(',').map(str::to_string).collect(),
             f => panic!("unknown option {f}"),
         }
     }
@@ -294,7 +300,7 @@ fn main() {
         };
         let make: Make = match kind {
             "equity" => Arc::new(|s| Box::new(EquityBot::new(200, Some(s))) as Box<dyn Bot>),
-            "gto6" | "gto6hu" => {
+            "gto6" | "gto6hu" | "gto6s" => {
                 // gto6hu also plays heads-up pots after the flop with the
                 // heads-up blueprint (--cards, --blueprint).
                 let heads_up = (kind == "gto6hu").then(|| {
@@ -339,9 +345,57 @@ fn main() {
                         PreflopStrategy::from_solver(&game, &solver)
                     }
                 });
+                // gto6s plays the trained postflop spots (--spots, --cards).
+                let spots: Vec<(Arc<SpotGame<'static>>, Arc<Profile<u64>>)> = if kind == "gto6s" {
+                    let cards: &'static CardAbstraction = Box::leak(Box::new(
+                        CardAbstraction::load(
+                            &std::fs::read(cards_path.as_ref().expect("gto6s needs --cards"))
+                                .expect("read --cards"),
+                        )
+                        .expect("abstraction"),
+                    ));
+                    // The solve's positions (UTG first), not the table's.
+                    let pos = |name: &str| {
+                        SOLVE_POSITIONS
+                            .iter()
+                            .position(|p| *p == name)
+                            .unwrap_or_else(|| panic!("no position {name}"))
+                    };
+                    spot_files
+                        .iter()
+                        .map(|file| {
+                            // spot-<bb>-<opener>-<caller>.bin
+                            let stem = std::path::Path::new(file)
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .expect("a spot file name");
+                            let parts: Vec<&str> = stem.split('-').collect();
+                            let [_, _, o, c] = parts[..] else {
+                                panic!("{file}: not spot-<bb>-<opener>-<caller>.bin");
+                            };
+                            let game = SpotGame::single_raised(&strategy, pos(o), pos(c), cards)
+                                .expect("that line is in the strategy");
+                            let profile = {
+                                let solver = Mccfr::load(
+                                    &game,
+                                    Config::default(),
+                                    &std::fs::read(file).expect("read a spot"),
+                                )
+                                .expect("a checkpoint for this spot");
+                                solver.average()
+                            };
+                            (Arc::new(game), Arc::new(profile))
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 Arc::new(move |s| {
                     let mut bot =
                         SixMaxBot::new(strategy.clone(), Personality::DougPoker.bot(Some(s)), s);
+                    if !spots.is_empty() {
+                        bot = bot.with_spots(SpotBot::new(spots.clone(), s ^ 0x5));
+                    }
                     if let Some((cards, blueprint, tree)) = &heads_up {
                         bot = bot.with_heads_up(Box::new(GtoBot::from_parts(
                             cards.clone(),

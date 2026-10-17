@@ -299,6 +299,149 @@ impl Game for SpotGame<'_> {
     }
 }
 
+/// The preflop line of a hand that went to the flop as a single-raised pot
+/// between two players, as (opener, caller) positions (0 UTG … 5 BB): one
+/// raise, no limps before it, everyone else folded. None for any other line.
+pub fn single_raised_line(events: &[ducy_play::Event], button: usize) -> Option<(usize, usize)> {
+    use ducy_play::Event;
+    let mut raiser = None;
+    let mut callers = Vec::new();
+    for e in events {
+        match *e {
+            Event::Call { seat, .. } => {
+                raiser?;
+                callers.push(seat);
+            }
+            Event::Bet { seat, .. } | Event::Raise { seat, .. } => {
+                if raiser.is_some() {
+                    return None;
+                }
+                raiser = Some(seat);
+            }
+            Event::Board { .. } => {
+                let r = raiser?;
+                return match callers.as_slice() {
+                    [c] => Some((
+                        super::bot::position(r, button),
+                        super::bot::position(*c, button),
+                    )),
+                    _ => None,
+                };
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Plays the trained six-handed spots after the flop: a hand that reached
+/// the flop as one of them, at its depth, follows the spot's tree
+/// ([`crate::holdem::follow::Follower`], off-menu sizes mapped to the
+/// nearest) and plays the trained strategy, turned into real chips the way
+/// the heads-up bot does. Anything else (another line, a multiway pot, a
+/// hand off the tree) is None, for the caller's fallback.
+pub struct SpotBot {
+    spots: Vec<(
+        std::sync::Arc<SpotGame<'static>>,
+        std::sync::Arc<crate::Profile<u64>>,
+    )>,
+    rng: Rng,
+}
+
+impl SpotBot {
+    /// `spots`: each trained spot with its average strategy.
+    pub fn new(
+        spots: Vec<(
+            std::sync::Arc<SpotGame<'static>>,
+            std::sync::Arc<crate::Profile<u64>>,
+        )>,
+        seed: u64,
+    ) -> Self {
+        Self {
+            spots,
+            rng: Rng::new(seed),
+        }
+    }
+
+    /// The trained action for this decision, or None.
+    pub fn act(&mut self, obs: &ducy_play::Observation) -> Option<ducy_play::Action> {
+        use crate::holdem::{bot::realize, cards::from_ducy, follow::Follower};
+        if obs.street == ducy_play::Street::Preflop || obs.seats.len() != SEATS {
+            return None;
+        }
+        let (opener, caller) = single_raised_line(&obs.history, obs.button)?;
+        let depth = crate::holdem::depths::hand_depth_bb(obs);
+        let (game, profile) = self.spots.iter().find(|(g, _)| {
+            let bb = g.config.stack as f64 / g.config.big_blind as f64;
+            g.positions.contains(&opener)
+                && g.positions.contains(&caller)
+                && depth >= bb * 0.7
+                && depth <= bb * 1.4
+        })?;
+        let side_of = |seat: usize| -> usize {
+            if super::bot::position(seat, obs.button) == game.positions[0] {
+                0
+            } else {
+                1
+            }
+        };
+        // Follow the hand from the flop: the two players' preflop chips as
+        // the starting pot (the tree's pot leaves the dead blinds out, too).
+        let flop_at = obs
+            .history
+            .iter()
+            .position(|e| matches!(e, ducy_play::Event::Board { .. }))?;
+        let mut follow = Follower::new();
+        let mut pre = [0u64; 2];
+        for e in &obs.history[..flop_at] {
+            match *e {
+                ducy_play::Event::SmallBlind { seat, amount }
+                | ducy_play::Event::BigBlind { seat, amount }
+                | ducy_play::Event::Call { seat, amount, .. } => {
+                    if !obs.seats[seat].folded {
+                        pre[side_of(seat)] += amount;
+                    }
+                }
+                ducy_play::Event::Raise { seat, to, .. }
+                | ducy_play::Event::Bet { seat, to, .. } => {
+                    // A raise's total for the street replaces what was in.
+                    pre[side_of(seat)] = to;
+                }
+                _ => {}
+            }
+        }
+        follow.real.contributed = pre;
+        follow.street = 1;
+        // The same mapping draws for every decision of the hand.
+        let mut map_rng =
+            Rng::new(u64::from(obs.hole_cards) ^ (obs.button as u64) << 56 ^ flop_at as u64);
+        for e in &obs.history[flop_at + 1..] {
+            follow.apply(&game.tree, e, side_of, &mut map_rng);
+        }
+        let node = follow.node?;
+        let n = &game.tree.nodes[node as usize];
+        let me = side_of(obs.seat);
+        let street = crate::holdem::follow::street_index(obs.street);
+        if n.actions.is_empty() || n.betting.to_act != me || n.betting.street != street {
+            return None;
+        }
+        let hole: Vec<Card> = obs.hole_cards.iter(false).map(from_ducy).collect();
+        let board: Vec<Card> = obs.board.iter().copied().map(from_ducy).collect();
+        let bucket = game.cards.bucket([hole[0], hole[1]], &board);
+        let probs = profile.probs(&((node as u64) << 16 | bucket as u64), n.actions.len());
+        let mut x = self.rng.next_f64();
+        let mut pick = n.actions.len() - 1;
+        for (i, p) in probs.iter().enumerate() {
+            if x < *p {
+                pick = i;
+                break;
+            }
+            x -= p;
+        }
+        Some(realize(&game.tree, node, n.actions[pick], obs))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
