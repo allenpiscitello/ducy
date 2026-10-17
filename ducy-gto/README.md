@@ -1021,23 +1021,29 @@ deals (1.2 million hands) each, bb/100 ± 95%:
 
 ### On the web page: a compact strategy
 
-The solve's checkpoint is 413 MB, far too much for a page. The bot only
-needs the average strategy where play actually goes, so `sixmax_export`
-keeps the decisions the recorded field reached most, until they cover 99.9%
-of its decisions, with each probability in a byte
-(`PreflopStrategy::to_compact`). Anywhere else, `SixMaxBot` plays its
-`post` bot (Doug Poker), as it already did off the tree.
+The page's bot (Ducybot) plays the **equilibrium** solve, never the field
+solve: the field solve is an exploit, kept here as a measure of what the
+Regulars give away.
+
+A solve's checkpoint is hundreds of MB, far too much for a page. The bot
+only needs the average strategy where play actually goes, so
+`sixmax_export` keeps the decisions the recorded field reached most, and
+those most likely when every seat plays the solve, each until they cover
+99.9%, with each probability in a byte (`PreflopStrategy::to_compact`).
+Anywhere else, `SixMaxBot` plays its `post` bot (Doug Poker), as it
+already did off the tree. At 100 BB that's 4,247 of 141,752 decisions, 2.3 MB.
 
 ```sh
 cargo run --release -p ducy-gto --example sixmax_export -- \
     --equity preflop-equity.bin --realize realize-100.bin --bb 100 \
-    --solve solve-field-w20.bin --field field-100.bin --out sixmax-100.bin
+    --solve solve-limps-100.bin --field field-100.bin --out sixmax-100.bin
 ```
 
-- **Size:** 3,682 of the tree's 141,752 decisions, 2.1 MB.
-- **No loss:** on 200,000 fresh deals (seed 3), the compact strategy and
-  the full solve played the same: +23.3 ± 2.6 against +23.6 ± 2.7 bb/100,
-  a paired difference of −0.3 ± 0.8 (Doug: +11.3 ± 1.4).
+- **No loss from compacting:** the field solve's compact form (the field's
+  decisions only, 3,682, 2.1 MB) played the same as the full solve on
+  200,000 fresh deals (seed 3): +23.3 ± 2.6 against +23.6 ± 2.7 bb/100, a
+  paired difference of −0.3 ± 0.8 (Doug: +11.3 ± 1.4). The equilibrium
+  solve's is measured the same way at every depth it ships at.
 - **In ducy-wasm:** `loadGto6(bytes)` seats it as "gto6", and each call
   adds a strategy for the depth it was solved at (`gto6Depths`). Before the
   flop at a six-handed table, each hand is played by the strategy nearest
