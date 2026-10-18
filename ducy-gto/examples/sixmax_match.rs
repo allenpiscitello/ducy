@@ -378,7 +378,8 @@ fn main() {
                             let profile = {
                                 let solver = Mccfr::load(
                                     &game,
-                                    Config::default(),
+                                    // The seed sixmax_spot_train trains with.
+                                    Config { seed: 1, ..Config::default() },
                                     &std::fs::read(file).expect("read a spot"),
                                 )
                                 .expect("a checkpoint for this spot");
