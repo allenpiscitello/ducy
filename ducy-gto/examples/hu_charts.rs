@@ -10,6 +10,11 @@
 //! smallest raise), the button facing the 3-bet, the big blind facing the
 //! 4-bet, the big blind after the button limps, and the button after limping
 //! and being raised. A raise to the whole stack counts as all-in.
+//!
+//! Each spot also gives `facing`, the raise the hero faces in big blinds
+//! (null first in or after a limp), and `sizes`, each raise size short of
+//! all-in (`to`, in big blinds) with how often the whole range picks it.
+//! With more than one size, `sizeCells` splits each hand's raise by size.
 
 use std::path::PathBuf;
 
@@ -141,7 +146,29 @@ fn main() {
             eprintln!("{id}: not in this tree");
             continue;
         };
-        let actions = &game.tree.nodes[node as usize].actions;
+        let n = &game.tree.nodes[node as usize];
+        let actions = &n.actions;
+        let big_blind = game.config.big_blind as f64;
+        // The raise the hero faces, in big blinds (none first in or after a limp).
+        let facing = match kind {
+            "open" | "vs-limp" => "null".to_string(),
+            _ => format!(
+                "{}",
+                *n.betting.contributed.iter().max().expect("two") as f64 / big_blind
+            ),
+        };
+        // The raise sizes short of all-in, as indices into `actions` and
+        // totals in big blinds.
+        let sizes: Vec<(usize, f64)> = actions
+            .iter()
+            .enumerate()
+            .filter_map(|(i, a)| match a {
+                HunlAction::Bet(to) | HunlAction::Raise(to) if *to < stack => {
+                    Some((i, *to as f64 / big_blind))
+                }
+                _ => None,
+            })
+            .collect();
         // Each action as fold 0, call 1, raise 2, all-in 3.
         let slot: Vec<usize> = actions
             .iter()
@@ -160,6 +187,10 @@ fn main() {
             m
         };
         let mut overall = [0.0; 4];
+        let mut size_overall = vec![0.0f64; sizes.len()];
+        // Per hand, how often it raises to each size (percent of all its
+        // actions); only written when there's more than one size.
+        let mut size_cells: Vec<String> = Vec::new();
         let cells: Vec<String> = order
             .iter()
             .map(|&c| {
@@ -167,6 +198,19 @@ fn main() {
                 for (o, x) in overall.iter_mut().zip(m) {
                     *o += x * combos(c) / 1326.0;
                 }
+                let probs = blueprint.probs(node, c as u16);
+                let by_size: Vec<f64> = sizes.iter().map(|&(i, _)| probs[i]).collect();
+                for (o, x) in size_overall.iter_mut().zip(&by_size) {
+                    *o += x * combos(c) / 1326.0;
+                }
+                size_cells.push(format!(
+                    "[{}]",
+                    by_size
+                        .iter()
+                        .map(|x| format!("{:.0}", 100.0 * x))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
                 format!(
                     "[{}]",
                     m.iter()
@@ -177,8 +221,19 @@ fn main() {
             })
             .collect();
         let villain = villain.map_or("null".to_string(), |v| format!("\"{v}\""));
+        let size_list = sizes
+            .iter()
+            .zip(&size_overall)
+            .map(|(&(_, to), p)| format!("{{\"to\": {to}, \"pct\": {:.1}}}", 100.0 * p))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let size_cells = if sizes.len() > 1 {
+            format!(", \"sizeCells\": [{}]", size_cells.join(","))
+        } else {
+            String::new()
+        };
         parts.push(format!(
-            "\n  {{\"id\": \"{id}\", \"kind\": \"{kind}\", \"hero\": \"{hero}\", \"villain\": {villain}, \"overall\": [{}], \"cells\": [{}]}}",
+            "\n  {{\"id\": \"{id}\", \"kind\": \"{kind}\", \"hero\": \"{hero}\", \"villain\": {villain}, \"facing\": {facing}, \"sizes\": [{size_list}], \"overall\": [{}], \"cells\": [{}]{size_cells}}}",
             overall.iter().map(|x| format!("{:.1}", 100.0 * x)).collect::<Vec<_>>().join(", "),
             cells.join(",")
         ));
