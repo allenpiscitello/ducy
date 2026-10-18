@@ -69,6 +69,25 @@ pub fn bot_personalities() -> Result<JsValue, JsError> {
     serde_wasm_bindgen::to_value(&list).map_err(err)
 }
 
+/// The generic players' families (ducy_play::generic, #256), as [{id,
+/// name}]: a player of family `id` seats as `g-<id>-<seed>`.
+#[wasm_bindgen(js_name = genericFamilies)]
+pub fn generic_families() -> Result<JsValue, JsError> {
+    #[derive(Serialize)]
+    struct FamilyInfo {
+        id: &'static str,
+        name: &'static str,
+    }
+    let list: Vec<FamilyInfo> = generic::Family::ALL
+        .iter()
+        .map(|f| FamilyInfo {
+            id: f.id(),
+            name: f.name(),
+        })
+        .collect();
+    serde_wasm_bindgen::to_value(&list).map_err(err)
+}
+
 /// What each of `seats` seats did in one finished hand, counted by the same
 /// rules the bots use (ducy_play::stats::hand_counts): the page adds these
 /// up for its player stats. `events` is the hand's event list as table
