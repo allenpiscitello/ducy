@@ -1021,6 +1021,43 @@ fn sit_out_and_back_in_through_the_host() {
 }
 
 #[test]
+fn owing_the_table_hands_sitting_out_or_away_is_blinded_off() {
+    let mut h = club_of_three();
+    h.set_sit_out_limit(60_000);
+    assert!(h.set_must_play("c", true, 0));
+    assert!(!h.set_must_play("nobody", true, 0));
+    // Sitting out between hands: still dealt in, folding as away.
+    h.handle("c", Command::SitOut, 1);
+    for n in 0..4u64 {
+        h.new_hand(10 + n * 10).unwrap();
+        assert_eq!(h.table().dealt(), &[0, 1, 2], "hand {n}: c is dealt in");
+        play_out_club(&mut h, &["a", "b", "c"], 11 + n * 10);
+    }
+    // Past the sit-out limit, they're still there; disconnected too, for
+    // more hands than a disconnect is usually allowed.
+    assert!(h.tick(10 * 60_000).iter().all(|o| o.to != "c"));
+    h.disconnected("c", 10 * 60_000);
+    for n in 0..5u64 {
+        h.new_hand(700_000 + n * 10).unwrap();
+        assert_eq!(h.table().dealt(), &[0, 1, 2]);
+        play_out_club(&mut h, &["a", "b", "c"], 700_001 + n * 10);
+    }
+    assert!(h.seated().iter().any(|p| p.client_id == "c"));
+    // Call time over: the usual rules again, the sit-out limit from now.
+    h.set_must_play("c", false, 800_000);
+    h.tick(800_000 + 30_000);
+    assert!(
+        h.seated().iter().any(|p| p.client_id == "c"),
+        "the limit starts over"
+    );
+    h.new_hand(830_010).unwrap_or_default();
+    assert!(
+        !h.table().dealt().contains(&2),
+        "out again once call time ends"
+    );
+}
+
+#[test]
 fn sitting_out_past_the_limit_gives_the_seat_up_with_the_chips() {
     let mut h = club_of_three();
     h.set_sit_out_limit(10 * 60_000);

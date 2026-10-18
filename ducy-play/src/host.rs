@@ -274,6 +274,10 @@ struct Player {
     out_since: Option<u64>,
     /// Time left in their time bank.
     time_bank_ms: u64,
+    /// Owes the table hands (a club's call time, [`TableHost::set_must_play`]):
+    /// sitting out or away, they're dealt in anyway and check or fold
+    /// ("blinded off"), and aren't removed for it.
+    must_play: bool,
 }
 
 /// A table's buy-in limits, in chips.
@@ -637,6 +641,7 @@ impl TableHost {
                     out_by_choice: p.out_by_choice,
                     out_ms: p.out_since.map(|t| now.saturating_sub(t)),
                     time_bank_ms: p.time_bank_ms,
+                    must_play: p.must_play,
                 })
                 .collect(),
             seq: self.seq,
@@ -694,6 +699,7 @@ impl TableHost {
                 out_by_choice: p.out_by_choice,
                 out_since: p.out_ms.map(|ms| now.saturating_sub(ms)),
                 time_bank_ms: p.time_bank_ms.min(TIME_BANK_MS),
+                must_play: p.must_play,
             })
             .collect();
         Ok(Self {
@@ -797,6 +803,7 @@ impl TableHost {
                     out_by_choice: false,
                     out_since: None,
                     time_bank_ms: TIME_BANK_MS,
+                    must_play: false,
                 });
                 if !pending {
                     self.take_seat(seat, name);
@@ -829,9 +836,10 @@ impl TableHost {
                 let p = &mut self.players[i];
                 p.out_by_choice = true;
                 p.out_since.get_or_insert(clock);
-                let (seat, pending) = (p.seat, p.pending);
-                // Out from the next hand; between hands, at once.
-                if !pending && !self.table.in_hand() {
+                let (seat, pending, must_play) = (p.seat, p.pending, p.must_play);
+                // Out from the next hand; between hands, at once. Owing the
+                // table hands, they're blinded off instead (deal_next).
+                if !pending && !must_play && !self.table.in_hand() {
                     self.table.seat_mut(seat).sitting_out = true;
                 }
                 self.changed(now)
@@ -953,6 +961,24 @@ impl TableHost {
     /// Checked by [`Self::tick`].
     pub fn set_sit_out_limit(&mut self, ms: u64) {
         self.sit_out_limit_ms = ms;
+    }
+
+    /// Whether `client_id` owes the table hands (a club's call time): while
+    /// they do, sitting out or being away doesn't take them out of hands.
+    /// They're dealt in, post their blinds and check or fold, and neither
+    /// the sit-out limit nor missed hands remove them. When it ends, someone
+    /// still out starts the sit-out limit over from `now`. Returns whether
+    /// they're at the table.
+    pub fn set_must_play(&mut self, client_id: &str, on: bool, now: u64) -> bool {
+        let clock = self.clock(now);
+        let Some(p) = self.players.iter_mut().find(|p| p.client_id == client_id) else {
+            return false;
+        };
+        if p.must_play && !on && p.out_since.is_some() {
+            p.out_since = Some(clock);
+        }
+        p.must_play = on;
+        true
     }
 
     /// The host's own answer to running it twice (seat 0).
@@ -1132,7 +1158,7 @@ impl TableHost {
         while let Some(i) = self
             .players
             .iter()
-            .position(|p| p.leaving || p.missed >= DROP_AFTER_HANDS)
+            .position(|p| p.leaving || (p.missed >= DROP_AFTER_HANDS && !p.must_play))
         {
             self.release_seat(i);
         }
@@ -1171,10 +1197,17 @@ impl TableHost {
             }
             // Away (disconnected, or timed out twice): not dealt in. Nor, in
             // a hidden deal, anyone the deck wasn't made for.
-            let away = self.table.seat(seat).away
-                || self.players[i].out_by_choice
-                || matches!(with, DealWith::Hidden(ids) if !ids.contains(&self.players[i].client_id));
-            self.table.seat_mut(seat).sitting_out = away;
+            let out = self.table.seat(seat).away || self.players[i].out_by_choice;
+            let not_in_deck =
+                matches!(with, DealWith::Hidden(ids) if !ids.contains(&self.players[i].client_id));
+            if self.players[i].must_play && out && !not_in_deck {
+                // Owing the table hands: dealt in anyway, posting their
+                // blinds and checking or folding as an away player does.
+                self.table.seat_mut(seat).away = true;
+                self.table.seat_mut(seat).sitting_out = false;
+            } else {
+                self.table.seat_mut(seat).sitting_out = out || not_in_deck;
+            }
         }
         match with {
             DealWith::Random => self.table.new_hand()?,
@@ -1250,7 +1283,11 @@ impl TableHost {
         let expired: Vec<String> = self
             .players
             .iter()
-            .filter(|p| !p.leaving && p.out_since.is_some_and(|t| now.saturating_sub(t) >= limit))
+            .filter(|p| {
+                !p.leaving
+                    && !p.must_play
+                    && p.out_since.is_some_and(|t| now.saturating_sub(t) >= limit)
+            })
             .map(|p| p.client_id.clone())
             .collect();
         if expired.is_empty() {

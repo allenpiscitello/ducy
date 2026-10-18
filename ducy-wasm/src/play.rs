@@ -1501,6 +1501,15 @@ impl MultiTable {
         self.host.set_sit_out_limit(ms as u64);
     }
 
+    /// Whether player `client_id` owes the table hands (a club's call time):
+    /// while they do, sitting out or being away blinds them off (dealt in,
+    /// checking or folding) instead of taking them out, and they aren't
+    /// removed for it. Returns whether they're at the table.
+    #[wasm_bindgen(js_name = setMustPlay)]
+    pub fn set_must_play(&mut self, client_id: &str, on: bool, now: f64) -> bool {
+        self.host.set_must_play(client_id, on, now as u64)
+    }
+
     /// Approves the chips the player in `seat` asked for.
     #[wasm_bindgen(js_name = approveChips)]
     pub fn approve_chips(&mut self, seat: usize, now: f64) -> Result<JsValue, JsError> {
