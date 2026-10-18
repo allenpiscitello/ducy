@@ -14,6 +14,7 @@ use ducy_play::{
     Action, ChipRequest, Command, Departure, Outgoing, Personality, Refund, SeatedPlayer, Table,
     TableHost, TableRules, TableSeat, Variant,
     features::NUM_FEATURES,
+    generic,
     net::{Mlp, NUM_CLASSES, NetBot},
 };
 use std::{
@@ -63,6 +64,25 @@ pub fn bot_personalities() -> Result<JsValue, JsError> {
             name: p.name(),
             description: p.description(),
             catchphrase: p.catchphrase(),
+        })
+        .collect();
+    serde_wasm_bindgen::to_value(&list).map_err(err)
+}
+
+/// The generic players' families (ducy_play::generic, #256), as [{id,
+/// name}]: a player of family `id` seats as `g-<id>-<seed>`.
+#[wasm_bindgen(js_name = genericFamilies)]
+pub fn generic_families() -> Result<JsValue, JsError> {
+    #[derive(Serialize)]
+    struct FamilyInfo {
+        id: &'static str,
+        name: &'static str,
+    }
+    let list: Vec<FamilyInfo> = generic::Family::ALL
+        .iter()
+        .map(|f| FamilyInfo {
+            id: f.id(),
+            name: f.name(),
         })
         .collect();
     serde_wasm_bindgen::to_value(&list).map_err(err)
@@ -680,6 +700,10 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
             seats.push(seat?);
             continue;
         }
+        if let Some(bot) = generic::bot_by_id(id, Some(seed.wrapping_add(i as u64 + 1))) {
+            seats.push(TableSeat::bot(id, bot));
+            continue;
+        }
         let p =
             Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
         seats.push(TableSeat::bot(
@@ -706,6 +730,9 @@ fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
     }
     if let Some(seat) = net_seat(id, seed) {
         return seat?.bot.ok_or_else(|| JsError::new("no bot"));
+    }
+    if let Some(bot) = generic::bot_by_id(id, Some(seed)) {
+        return Ok(Box::new(bot));
     }
     let p = Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
     Ok(Box::new(p.bot(Some(seed))))
@@ -953,9 +980,14 @@ impl BotTable {
         if self.table.in_hand() {
             return Err(JsError::new("the current hand isn't over"));
         }
-        let p =
-            Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
-        *self.table.seat_mut(seat) = TableSeat::bot(p.id(), p.bot(Some(seed)));
+        *self.table.seat_mut(seat) = match generic::bot_by_id(id, Some(seed)) {
+            Some(bot) => TableSeat::bot(id, bot),
+            None => {
+                let p = Personality::from_name(id)
+                    .ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
+                TableSeat::bot(p.id(), p.bot(Some(seed)))
+            }
+        };
         self.table.set_stack(seat, chips).map_err(err)
     }
 
