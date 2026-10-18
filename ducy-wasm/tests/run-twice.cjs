@@ -31,6 +31,30 @@ const w = require(path.join(__dirname, '..', 'pkg-node', 'ducy_wasm.js'));
   assert.ok(found, 'a bot called an all-in');
 }
 
+// Milk King only runs it once: all-in against him, the person isn't asked
+// and the board runs once.
+{
+  const table = new w.BotTable(['milk_king'], 200n, 1n, 2n, 11n, undefined);
+  let found = false;
+  for (let hand = 0; hand < 60 && !found; hand++) {
+    let s = table.newHand();
+    let allIn = false;
+    for (let guard = 0; guard < 50 && !s.complete; guard++) {
+      assert.equal(s.run_choice, false, 'never asked against Milk King');
+      if (table.botToAct()) s = table.advance();
+      else if (s.legal) {
+        allIn = true;
+        s = table.act(s.legal.raise || s.legal.bet ? 'allin' : 'call', 0n);
+      } else break;
+    }
+    if (!allIn || !s.complete || !s.showdown || s.seats.some(x => x.folded)) continue;
+    found = true;
+    assert.equal(s.runs, 1, 'run once');
+    assert.deepEqual(s.second_board, []);
+  }
+  assert.ok(found, 'Milk King called an all-in');
+}
+
 // A club table: Ann and Bo all-in; twice only when both say yes.
 function clubAllIn() {
   let now = 1000;
