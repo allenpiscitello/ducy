@@ -9,6 +9,7 @@
 //! the button acts last.
 
 use super::{equity::PreflopEquity, realize::Realization};
+use crate::holdem::iso::NUM_PREFLOP_CLASSES as NUM_CLASSES;
 
 pub const SEATS: usize = 6;
 pub const POSITIONS: [&str; SEATS] = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];
@@ -86,6 +87,72 @@ pub struct PreflopGame {
     /// How much of its equity each hand realizes after the flop, when it
     /// isn't all-in: in position (last to act after the flop) or not.
     pub realize: Realization,
+    /// Measured postflop values for single-raised pots ([`PostflopTable`]):
+    /// where the preflop betting ends in one of these, its pot shares come
+    /// from the table instead of equity times realization.
+    pub postflop: Vec<PostflopTable>,
+}
+
+/// What a two-player pot (limped, single-raised, 3-bet …) is worth after the
+/// flop, measured by playing a trained postflop spot (`sixmax::spot`): for
+/// each pair of hand classes, the share of the flop pot the player in
+/// position ends up with (more than 1 when they win more than the pot after
+/// the flop, less than 0 when they lose more than they put in). The other
+/// player gets the rest. A preflop line uses it when exactly these two
+/// players reach the flop with `to` each in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PostflopTable {
+    /// The two players' positions (0 UTG … 5 BB), in either order.
+    pub opener: usize,
+    pub caller: usize,
+    /// Each put this in preflop, in half big blinds.
+    pub to: u32,
+    /// `[ip class * 169 + oop class]`.
+    pub share: Vec<f32>,
+}
+
+const TABLES_MAGIC: &[u8; 8] = b"DUCY6PT\0";
+
+impl PostflopTable {
+    /// Tables as one file: the magic, a count, then per table the opener,
+    /// the caller (a byte each), `to` (u32) and the shares (f32s).
+    pub fn to_bytes(tables: &[PostflopTable]) -> Vec<u8> {
+        let mut out = TABLES_MAGIC.to_vec();
+        out.extend((tables.len() as u32).to_le_bytes());
+        for t in tables {
+            out.push(t.opener as u8);
+            out.push(t.caller as u8);
+            out.extend(t.to.to_le_bytes());
+            for s in &t.share {
+                out.extend(s.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Vec<PostflopTable>, String> {
+        let bad = || "not six-handed postflop tables".to_string();
+        if bytes.get(..8) != Some(TABLES_MAGIC) {
+            return Err(bad());
+        }
+        let n = u32::from_le_bytes(bytes.get(8..12).ok_or_else(bad)?.try_into().expect("4"));
+        let size = 6 + 4 * NUM_CLASSES * NUM_CLASSES;
+        let mut out = Vec::new();
+        for i in 0..n as usize {
+            let at = 12 + i * size;
+            let b = bytes.get(at..at + size).ok_or_else(bad)?;
+            out.push(PostflopTable {
+                opener: b[0] as usize,
+                caller: b[1] as usize,
+                to: u32::from_le_bytes(b[2..6].try_into().expect("4")),
+                share: b[6..]
+                    .chunks(4)
+                    .map(|c| f32::from_le_bytes(c.try_into().expect("4")))
+                    .collect(),
+            });
+        }
+        Ok(out)
+    }
 }
 
 impl PreflopGame {
@@ -102,6 +169,7 @@ impl PreflopGame {
             nodes: Vec::new(),
             decisions: 0,
             realize,
+            postflop: Vec::new(),
         };
         let mut put_in = [0; SEATS];
         put_in[SB] = 1;
@@ -244,8 +312,29 @@ impl PreflopGame {
         let pot: u32 = put_in.iter().sum();
         let mut share = [0f64; SEATS];
         let players: Vec<usize> = (0..SEATS).filter(|&s| live[s]).collect();
+        // A single-raised pot with a measured postflop table.
+        let table = (players.len() == 2 && !all_in)
+            .then(|| {
+                self.postflop.iter().find(|t| {
+                    let pair = [t.opener, t.caller];
+                    pair.contains(&players[0])
+                        && pair.contains(&players[1])
+                        && put_in[t.opener] == t.to
+                        && put_in[t.caller] == t.to
+                })
+            })
+            .flatten();
         if players.len() == 1 {
             share[players[0]] = 1.0;
+        } else if let Some(t) = table {
+            let (ip, oop) = if postflop_order(players[0]) > postflop_order(players[1]) {
+                (players[0], players[1])
+            } else {
+                (players[1], players[0])
+            };
+            let s = t.share[classes[ip] * NUM_CLASSES + classes[oop]] as f64;
+            share[ip] = s;
+            share[oop] = 1.0 - s;
         } else {
             // The chance each beats every other, treating the matchups as
             // independent, then realization by position after the flop.

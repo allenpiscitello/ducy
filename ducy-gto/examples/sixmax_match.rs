@@ -48,7 +48,7 @@ use ducy_gto::{
     sixmax::{
         bot::{PreflopStrategy, SixMaxBot},
         equity::PreflopEquity,
-        preflop::{POSITIONS as SOLVE_POSITIONS, PreflopGame},
+        preflop::PreflopGame,
         realize::Realization,
         solver::PreflopSolver,
         spot::{SpotBot, SpotGame},
@@ -259,8 +259,8 @@ fn main() {
     let mut equity_path: Option<String> = None;
     let mut realize_path: Option<String> = None;
     let mut progress: Option<String> = None;
-    // Trained postflop spots for gto6s: checkpoints named
-    // spot-<bb>-<opener>-<caller>.bin (sixmax_spot_train).
+    // Trained postflop spots for gto6s: checkpoints named spot-<bb>-<name>.bin
+    // (sixmax_spot_train, SpotGame::from_name).
     let mut spot_files: Vec<String> = Vec::new();
     let mut threads = thread::available_parallelism().map_or(4, |n| n.get()) as u64;
     let mut it = std::env::args().skip(1);
@@ -354,32 +354,21 @@ fn main() {
                         )
                         .expect("abstraction"),
                     ));
-                    // The solve's positions (UTG first), not the table's.
-                    let pos = |name: &str| {
-                        SOLVE_POSITIONS
-                            .iter()
-                            .position(|p| *p == name)
-                            .unwrap_or_else(|| panic!("no position {name}"))
-                    };
                     spot_files
                         .iter()
                         .map(|file| {
-                            // spot-<bb>-<opener>-<caller>.bin
-                            let stem = std::path::Path::new(file)
-                                .file_stem()
-                                .and_then(|s| s.to_str())
-                                .expect("a spot file name");
-                            let parts: Vec<&str> = stem.split('-').collect();
-                            let [_, _, o, c] = parts[..] else {
-                                panic!("{file}: not spot-<bb>-<opener>-<caller>.bin");
-                            };
-                            let game = SpotGame::single_raised(&strategy, pos(o), pos(c), cards)
+                            let name = SpotGame::name_of_file(file)
+                                .unwrap_or_else(|| panic!("{file}: not spot-<bb>-<name>.bin"));
+                            let game = SpotGame::from_name(&strategy, &name, cards)
                                 .expect("that line is in the strategy");
                             let profile = {
                                 let solver = Mccfr::load(
                                     &game,
                                     // The seed sixmax_spot_train trains with.
-                                    Config { seed: 1, ..Config::default() },
+                                    Config {
+                                        seed: 1,
+                                        ..Config::default()
+                                    },
                                     &std::fs::read(file).expect("read a spot"),
                                 )
                                 .expect("a checkpoint for this spot");

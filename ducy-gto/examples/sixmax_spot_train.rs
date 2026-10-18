@@ -4,10 +4,17 @@
 //!     cargo run --release -p ducy-gto --example sixmax_spot_train -- \
 //!         --strategy sixmax-100.bin --cards cards-full.bin --opener BTN --caller BB \
 //!         --iters 30000000 --every 2000000 --checkpoint spot-100-BTN-BB.bin \
-//!         [--progress progress.json] [--threads N]
+//!         [--progress progress.json] [--floor 0.02]
+//!
+//! Or any two-player line of the preflop tree in place of `--opener` and
+//! `--caller`: `--line ffffcc` (the small blind limps, the big blind checks),
+//! `--line fffrfrc` (the big blind 3-bets the button, who calls); one letter
+//! per decision from UTG, `f` fold, `c` call or check, `r` raise
+//! (`SpotGame::from_line`). Name its file spot-<bb>-line-<letters>.bin.
 //!
 //! `--strategy` is the compact preflop strategy (`sixmax_export`); its depth
-//! is the spot's. A checkpoint is resumed if it exists and saved at every
+//! is the spot's. `--floor` deals every hand class at least that often
+//! (`SpotGame::with_floor`), for the postflop value tables. A checkpoint is resumed if it exists and saved at every
 //! report. Each report prints the speed, the information sets so far, and
 //! how the player out of position starts the flop (check or bet, by share
 //! of their range).
@@ -25,11 +32,13 @@ fn main() {
     let mut cards_path = String::new();
     let mut opener = String::from("BTN");
     let mut caller = String::from("BB");
+    let mut line: Option<String> = None;
     let mut iters = 10_000_000u64;
     let mut every = 1_000_000u64;
     let mut checkpoint: Option<String> = None;
     let mut progress: Option<String> = None;
     let mut seed = 1u64;
+    let mut floor = 0f64;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         let mut v = || args.next().unwrap_or_else(|| panic!("{a} needs a value"));
@@ -38,11 +47,13 @@ fn main() {
             "--cards" => cards_path = v(),
             "--opener" => opener = v(),
             "--caller" => caller = v(),
+            "--line" => line = Some(v()),
             "--iters" => iters = v().replace('_', "").parse().expect("--iters"),
             "--every" => every = v().replace('_', "").parse().expect("--every"),
             "--checkpoint" => checkpoint = Some(v()),
             "--progress" => progress = Some(v()),
             "--seed" => seed = v().parse().expect("--seed"),
+            "--floor" => floor = v().parse().expect("--floor"),
             _ => panic!("unknown argument {a}"),
         }
     }
@@ -58,8 +69,12 @@ fn main() {
             .expect("a compact strategy");
     let cards = CardAbstraction::load(&std::fs::read(&cards_path).expect("read --cards"))
         .expect("a card abstraction");
-    let game = SpotGame::single_raised(&strategy, pos(&opener), pos(&caller), &cards)
-        .expect("that line is in the strategy");
+    let game = match &line {
+        Some(l) => SpotGame::from_line(&strategy, l, &cards),
+        None => SpotGame::single_raised(&strategy, pos(&opener), pos(&caller), &cards),
+    }
+    .expect("that line is in the strategy")
+    .with_floor(floor);
     let depth = strategy.game().stack / 2;
     let pot = game.tree.nodes[0].betting.pot() + game.dead;
     println!(

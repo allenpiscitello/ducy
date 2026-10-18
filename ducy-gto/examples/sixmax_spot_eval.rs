@@ -56,7 +56,10 @@ fn main() {
     let solver = Mccfr::load(
         &game,
         // The seed sixmax_spot_train trains with (a checkpoint checks it).
-        Config { seed: 1, ..Config::default() },
+        Config {
+            seed: 1,
+            ..Config::default()
+        },
         &std::fs::read(&checkpoint).expect("read --checkpoint"),
     )
     .expect("a checkpoint for this spot");

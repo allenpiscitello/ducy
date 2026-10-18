@@ -27,7 +27,7 @@ use ducy_gto::sixmax::{
     chart::{Charts, SpotChart},
     equity::PreflopEquity,
     field::FieldCounts,
-    preflop::{POSITIONS, PreflopGame},
+    preflop::{POSITIONS, PostflopTable, PreflopGame},
     realize::Realization,
     solver::PreflopSolver,
 };
@@ -45,6 +45,7 @@ fn main() {
     let mut prior_path: Option<String> = None;
     let mut prior_weight = 20f32;
     let mut progress: Option<String> = None;
+    let mut postflop_path: Option<String> = None;
     let mut threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -63,12 +64,13 @@ fn main() {
             "--prior" => prior_path = Some(v()),
             "--prior-weight" => prior_weight = v().parse().expect("--prior-weight"),
             "--progress" => progress = Some(v()),
+            "--postflop" => postflop_path = Some(v()),
             f => panic!("unknown option {f}"),
         }
     }
     let eq = PreflopEquity::from_bytes(&std::fs::read(&equity_path).expect("read --equity"))
         .expect("equity table");
-    let game = match &realize_path {
+    let mut game = match &realize_path {
         Some(path) => PreflopGame::with_realization(
             bb,
             Realization::from_bytes(&std::fs::read(path).expect("read --realize"))
@@ -76,6 +78,12 @@ fn main() {
         ),
         None => PreflopGame::new(bb),
     };
+    // Measured postflop values for single-raised pots (sixmax_postflop_tables).
+    if let Some(path) = &postflop_path {
+        game.postflop = PostflopTable::from_bytes(&std::fs::read(path).expect("read --postflop"))
+            .expect("postflop tables");
+        println!("{} postflop tables from {path}", game.postflop.len());
+    }
     let field = field_path.as_ref().map(|path| {
         let counts = FieldCounts::from_bytes(&game, &std::fs::read(path).expect("read --field"))
             .expect("field counts for this tree");

@@ -51,6 +51,12 @@ pub struct SpotGame<'a> {
     cumulative: [Vec<f64>; 2],
     /// The preflop positions of player 0 and 1.
     pub positions: [usize; 2],
+    /// Raises preflop: 0 a limped pot, 1 single-raised, 2 3-bet, …
+    pub raises: u32,
+    /// The position (0 UTG … 5 BB) that raised last preflop, None in a
+    /// limped pot: it tells a small blind open from a big blind raising a
+    /// small blind limp.
+    pub aggressor: Option<usize>,
 }
 
 impl<'a> SpotGame<'a> {
@@ -102,21 +108,9 @@ impl<'a> SpotGame<'a> {
         };
         let opener_range = weights(*open_id, raise)?;
         let caller_range = weights(*face_id, call)?;
-        // Player 0 acts last after the flop.
-        let (p0, p1, r0, r1) = if postflop_order(opener) > postflop_order(caller) {
-            (opener, caller, opener_range, caller_range)
-        } else {
-            (caller, opener, caller_range, opener_range)
-        };
-        // The tree's chips are half big blinds: blinds 1/2.
-        let to = to as u64;
-        let config = HunlConfig {
-            stack: game.stack as u64,
-            ..HunlConfig::default()
-        };
         let blind = |p: usize| match p {
-            4 => config.small_blind,
-            5 => config.big_blind,
+            4 => 1,
+            5 => 2,
             _ => 0,
         };
         let dead = [4, 5]
@@ -124,6 +118,161 @@ impl<'a> SpotGame<'a> {
             .filter(|&&p| p != opener && p != caller)
             .map(|&p| blind(p))
             .sum();
+        let name = format!("SRP {} v {}", POSITIONS[opener], POSITIONS[caller]);
+        Some(Self::two_player(
+            name,
+            game.stack as u64,
+            to as u64,
+            dead,
+            [(opener, opener_range), (caller, caller_range)],
+            (1, Some(opener)),
+            cards,
+        ))
+    }
+
+    /// The spot at the end of a preflop line of the strategy's tree, given
+    /// as one letter per decision from the start (UTG first): `f` fold, `c`
+    /// call or check, `r` raise. The line must end with two players to the
+    /// flop, not all-in. Each player's range is the product of their
+    /// actions' probabilities along the line. None if the line isn't in the
+    /// tree, or a player never takes it.
+    ///
+    /// For example `"ffffcc"` is the small blind limping and the big
+    /// blind checking, and `"fffrfrc"` the big blind 3-betting the button,
+    /// who calls.
+    pub fn from_line(
+        strategy: &PreflopStrategy,
+        line: &str,
+        cards: &'a CardAbstraction,
+    ) -> Option<Self> {
+        let game = strategy.game();
+        let mut node = 0usize;
+        let mut weights = vec![vec![1.0f64; NUM_PREFLOP_CLASSES]; SEATS];
+        let mut raises = 0;
+        let mut first_in = None;
+        let mut last_raiser = None;
+        for ch in line.chars() {
+            let Node::Decision { seat, id, actions } = &game.nodes[node] else {
+                return None;
+            };
+            let a = actions.iter().position(|(a, _)| {
+                matches!(
+                    (ch, a),
+                    ('f', Act::Fold) | ('c', Act::Call) | ('r', Act::Raise(_))
+                )
+            })?;
+            if ch == 'r' {
+                raises += 1;
+                last_raiser = Some(*seat);
+            }
+            if ch != 'f' && first_in.is_none() {
+                first_in = Some(*seat);
+            }
+            let probs: Vec<f64> = (0..NUM_PREFLOP_CLASSES)
+                .map(|c| strategy.probs(*id, c).get(a).copied().unwrap_or(0.0) as f64)
+                .collect();
+            for (w, p) in weights[*seat].iter_mut().zip(probs) {
+                *w *= p;
+            }
+            node = actions[a].1 as usize;
+        }
+        let Node::End {
+            put_in,
+            live,
+            all_in,
+        } = &game.nodes[node]
+        else {
+            return None;
+        };
+        let players: Vec<usize> = (0..SEATS).filter(|&s| live[s]).collect();
+        let [a, b] = players[..] else {
+            return None;
+        };
+        if *all_in || put_in[a] != put_in[b] {
+            return None;
+        }
+        if [a, b]
+            .iter()
+            .any(|&p| weights[p].iter().sum::<f64>() <= 0.0)
+        {
+            return None;
+        }
+        let dead = (0..SEATS)
+            .filter(|&s| !live[s])
+            .map(|s| put_in[s] as u64)
+            .sum();
+        let first = last_raiser
+            .or(first_in)
+            .filter(|p| *p == a || *p == b)
+            .unwrap_or(a);
+        let second = if first == a { b } else { a };
+        let kind = ["limped", "SRP", "3BP", "4BP", "5BP"]
+            .get(raises)
+            .copied()
+            .unwrap_or("raised");
+        let name = format!("{kind} {} v {}", POSITIONS[first], POSITIONS[second]);
+        Some(Self::two_player(
+            name,
+            game.stack as u64,
+            put_in[a] as u64,
+            dead,
+            [(a, weights[a].clone()), (b, weights[b].clone())],
+            (raises as u32, last_raiser),
+            cards,
+        ))
+    }
+
+    /// A spot by name: `<opener>-<caller>` for a single-raised pot (`BTN-BB`)
+    /// or `line-<letters>` for any line ([`Self::from_line`]). A spot file's
+    /// name is `spot-<bb>-<name>.bin` (or `spot-floor-<bb>-<name>.bin`);
+    /// [`Self::name_of_file`] takes the name back out.
+    pub fn from_name(
+        strategy: &PreflopStrategy,
+        name: &str,
+        cards: &'a CardAbstraction,
+    ) -> Option<Self> {
+        if let Some(line) = name.strip_prefix("line-") {
+            return Self::from_line(strategy, line, cards);
+        }
+        let (o, c) = name.split_once('-')?;
+        let pos = |n: &str| POSITIONS.iter().position(|p| *p == n);
+        Self::single_raised(strategy, pos(o)?, pos(c)?, cards)
+    }
+
+    /// The spot name in a spot file's path: what follows `spot-<bb>-` or
+    /// `spot-floor-<bb>-`, without `.bin`.
+    pub fn name_of_file(path: &str) -> Option<String> {
+        let stem = std::path::Path::new(path).file_stem()?.to_str()?;
+        let rest = stem.strip_prefix("spot-")?;
+        let rest = rest.strip_prefix("floor-").unwrap_or(rest);
+        let (bb, name) = rest.split_once('-')?;
+        bb.parse::<u32>().ok()?;
+        Some(name.to_string())
+    }
+
+    /// A spot from its parts: stacks and each player's preflop bet `to` in
+    /// half big blinds, the dead chips, and the two (position, range) pairs.
+    fn two_player(
+        name: String,
+        stack: u64,
+        to: u64,
+        dead: u64,
+        players: [(usize, Vec<f64>); 2],
+        (raises, aggressor): (u32, Option<usize>),
+        cards: &'a CardAbstraction,
+    ) -> Self {
+        let [(pa, ra), (pb, rb)] = players;
+        // Player 0 acts last after the flop.
+        let (p0, p1, r0, r1) = if postflop_order(pa) > postflop_order(pb) {
+            (pa, pb, ra, rb)
+        } else {
+            (pb, pa, rb, ra)
+        };
+        // The tree's chips are half big blinds: blinds 1/2.
+        let config = HunlConfig {
+            stack,
+            ..HunlConfig::default()
+        };
         let start = Betting::street_start(
             1,
             [config.stack - to, config.stack - to],
@@ -131,16 +280,34 @@ impl<'a> SpotGame<'a> {
             config.big_blind,
         );
         let tree = BettingTree::build_from(&config, start);
-        let name = format!("SRP {} v {}", POSITIONS[opener], POSITIONS[caller]);
-        Some(Self::new(
-            name,
-            config,
-            cards,
-            tree,
-            dead,
-            [r0, r1],
-            [p0, p1],
-        ))
+        let mut spot = Self::new(name, config, cards, tree, dead, [r0, r1], [p0, p1]);
+        spot.raises = raises;
+        spot.aggressor = aggressor;
+        spot
+    }
+
+    /// Deals every hand class at least `floor` of the time (a probability,
+    /// like the range weights), so training also learns to play hands the
+    /// preflop ranges rarely or never bring here. The postflop value tables
+    /// (`share_table`) need those: the preflop solve tries every hand.
+    pub fn with_floor(self, floor: f64) -> Self {
+        let ranges = self
+            .ranges
+            .clone()
+            .map(|r| r.into_iter().map(|w| w.max(floor)).collect());
+        let (raises, aggressor) = (self.raises, self.aggressor);
+        let mut spot = Self::new(
+            self.name,
+            self.config,
+            self.cards,
+            self.tree,
+            self.dead,
+            ranges,
+            self.positions,
+        );
+        spot.raises = raises;
+        spot.aggressor = aggressor;
+        spot
     }
 
     fn new(
@@ -171,6 +338,8 @@ impl<'a> SpotGame<'a> {
             ranges,
             cumulative,
             positions,
+            raises: 1,
+            aggressor: None,
         }
     }
 
@@ -186,6 +355,120 @@ impl<'a> SpotGame<'a> {
                 return [a, b];
             }
         }
+    }
+
+    /// Each player's preflop bet, in chips (half big blinds).
+    pub fn preflop_bet(&self) -> u64 {
+        self.tree.nodes[0].betting.contributed[0]
+    }
+
+    /// Player 0's expected payoff on this deal when both play `profile`,
+    /// exactly over its mixed actions: a walk of the whole betting tree.
+    fn value(&self, s: &SpotState, profile: &crate::Profile<u64>) -> f64 {
+        match self.turn(s) {
+            Turn::Terminal => self.utility(s),
+            Turn::Player(_) => {
+                let n = self.num_actions(s);
+                let probs = profile.probs(&self.info(s), n);
+                (0..n)
+                    .filter(|&a| probs[a] > 0.0)
+                    .map(|a| probs[a] * self.value(&self.apply(s, a), profile))
+                    .sum()
+            }
+            Turn::Chance => panic!("the deal is at the root"),
+        }
+    }
+
+    /// The postflop value table ([`super::preflop::PostflopTable`]) of this
+    /// spot played with `profile`: for each pair of hand classes (in
+    /// position, out of position), the share of the flop pot the player in
+    /// position ends up with, averaged over `samples` deals of those classes
+    /// (random combos and boards). Runs on `threads` threads.
+    pub fn share_table(
+        &self,
+        profile: &crate::Profile<u64>,
+        samples: usize,
+        seed: u64,
+        threads: usize,
+    ) -> Vec<f32> {
+        use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+        let combos: Vec<Vec<[Card; 2]>> = {
+            let mut by: Vec<Vec<[Card; 2]>> = vec![Vec::new(); NUM_PREFLOP_CLASSES];
+            for i in 0..NUM_HOLES {
+                let (a, b) = hole_cards(i);
+                by[preflop_class(a, b)].push([a, b]);
+            }
+            by
+        };
+        let to = self.preflop_bet() as f64;
+        let pot = 2.0 * to + self.dead as f64;
+        let half_dead = self.dead as f64 / 2.0;
+        let pairs = NUM_PREFLOP_CLASSES * NUM_PREFLOP_CLASSES;
+        let out: Vec<std::sync::atomic::AtomicU32> = (0..pairs)
+            .map(|_| std::sync::atomic::AtomicU32::new(0))
+            .collect();
+        let next = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..threads.max(1) {
+                scope.spawn(|| {
+                    loop {
+                        let k = next.fetch_add(1, Relaxed);
+                        if k >= pairs {
+                            break;
+                        }
+                        let (ci, cj) = (k / NUM_PREFLOP_CLASSES, k % NUM_PREFLOP_CLASSES);
+                        let mut rng =
+                            Rng::new(seed ^ (k as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+                        let mut total = 0.0;
+                        let mut n = 0usize;
+                        let mut tries = 0;
+                        while n < samples && tries < samples * 20 {
+                            tries += 1;
+                            let h0 =
+                                combos[ci][(rng.next_u64() % combos[ci].len() as u64) as usize];
+                            let h1 =
+                                combos[cj][(rng.next_u64() % combos[cj].len() as u64) as usize];
+                            let mut used = bit(h0[0]) | bit(h0[1]);
+                            if used & (bit(h1[0]) | bit(h1[1])) != 0 {
+                                continue;
+                            }
+                            used |= bit(h1[0]) | bit(h1[1]);
+                            let mut board = [0; 5];
+                            for c in board.iter_mut() {
+                                *c = loop {
+                                    let x = (rng.next_u64() % NUM_CARDS as u64) as Card;
+                                    if used & bit(x) == 0 {
+                                        used |= bit(x);
+                                        break x;
+                                    }
+                                };
+                            }
+                            let buckets = self.cards.deal_buckets([&h0, &h1], &board);
+                            let showdown =
+                                showdown_score(&h0, &board).cmp(&showdown_score(&h1, &board)) as i8;
+                            let s = SpotState {
+                                hole: [h0, h1],
+                                board,
+                                buckets,
+                                node: 0,
+                                showdown,
+                                dealt: true,
+                            };
+                            // Player 0's real result: the zero-sum payoff plus
+                            // their half of the dead money.
+                            let net = self.value(&s, profile) + half_dead;
+                            total += (net + to) / pot;
+                            n += 1;
+                        }
+                        let share = if n > 0 { total / n as f64 } else { 0.5 };
+                        out[k].store((share as f32).to_bits(), Relaxed);
+                    }
+                });
+            }
+        });
+        out.iter()
+            .map(|x| f32::from_bits(x.load(Relaxed)))
+            .collect()
     }
 
     pub fn node(&self, s: &SpotState) -> &crate::holdem::hunl::Node {
@@ -334,6 +617,45 @@ pub fn single_raised_line(events: &[ducy_play::Event], button: usize) -> Option<
     None
 }
 
+/// The preflop line of a hand that went to the flop between two players:
+/// their positions (0 UTG … 5 BB) and the raises before the flop (0 a
+/// limped pot, 1 single-raised, 2 3-bet, …) and the position that raised
+/// last. None for a multiway pot or before the flop.
+pub fn heads_up_line(
+    events: &[ducy_play::Event],
+    button: usize,
+) -> Option<([usize; 2], u32, Option<usize>)> {
+    use ducy_play::Event;
+    let mut raises = 0;
+    let mut last_raiser = None;
+    let mut folded = [false; SEATS];
+    for e in events {
+        match *e {
+            Event::Bet { seat, .. } | Event::Raise { seat, .. } => {
+                raises += 1;
+                last_raiser = Some(super::bot::position(seat, button));
+            }
+            Event::Fold { seat } if seat < SEATS => folded[seat] = true,
+            Event::Board { .. } => {
+                let live: Vec<usize> = (0..SEATS).filter(|&s| !folded[s]).collect();
+                return match live[..] {
+                    [a, b] => Some((
+                        [
+                            super::bot::position(a, button),
+                            super::bot::position(b, button),
+                        ],
+                        raises,
+                        last_raiser,
+                    )),
+                    _ => None,
+                };
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Plays the trained six-handed spots after the flop: a hand that reached
 /// the flop as one of them, at its depth, follows the spot's tree
 /// ([`crate::holdem::follow::Follower`], off-menu sizes mapped to the
@@ -369,12 +691,14 @@ impl SpotBot {
         if obs.street == ducy_play::Street::Preflop || obs.seats.len() != SEATS {
             return None;
         }
-        let (opener, caller) = single_raised_line(&obs.history, obs.button)?;
+        let ([a, b], raises, aggressor) = heads_up_line(&obs.history, obs.button)?;
         let depth = crate::holdem::depths::hand_depth_bb(obs);
         let (game, profile) = self.spots.iter().find(|(g, _)| {
             let bb = g.config.stack as f64 / g.config.big_blind as f64;
-            g.positions.contains(&opener)
-                && g.positions.contains(&caller)
+            g.raises == raises
+                && g.aggressor == aggressor
+                && g.positions.contains(&a)
+                && g.positions.contains(&b)
                 && depth >= bb * 0.7
                 && depth <= bb * 1.4
         })?;
