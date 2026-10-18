@@ -1046,9 +1046,15 @@ fn owing_the_table_hands_sitting_out_or_away_is_blinded_off() {
     // Call time over: the usual rules again, the sit-out limit from now.
     h.set_must_play("c", false, 800_000);
     h.tick(800_000 + 30_000);
-    assert!(h.seated().iter().any(|p| p.client_id == "c"), "the limit starts over");
+    assert!(
+        h.seated().iter().any(|p| p.client_id == "c"),
+        "the limit starts over"
+    );
     h.new_hand(830_010).unwrap_or_default();
-    assert!(!h.table().dealt().contains(&2), "out again once call time ends");
+    assert!(
+        !h.table().dealt().contains(&2),
+        "out again once call time ends"
+    );
 }
 
 #[test]

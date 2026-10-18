@@ -1198,7 +1198,8 @@ impl TableHost {
             // Away (disconnected, or timed out twice): not dealt in. Nor, in
             // a hidden deal, anyone the deck wasn't made for.
             let out = self.table.seat(seat).away || self.players[i].out_by_choice;
-            let not_in_deck = matches!(with, DealWith::Hidden(ids) if !ids.contains(&self.players[i].client_id));
+            let not_in_deck =
+                matches!(with, DealWith::Hidden(ids) if !ids.contains(&self.players[i].client_id));
             if self.players[i].must_play && out && !not_in_deck {
                 // Owing the table hands: dealt in anyway, posting their
                 // blinds and checking or folding as an away player does.
@@ -1282,7 +1283,11 @@ impl TableHost {
         let expired: Vec<String> = self
             .players
             .iter()
-            .filter(|p| !p.leaving && !p.must_play && p.out_since.is_some_and(|t| now.saturating_sub(t) >= limit))
+            .filter(|p| {
+                !p.leaving
+                    && !p.must_play
+                    && p.out_since.is_some_and(|t| now.saturating_sub(t) >= limit)
+            })
             .map(|p| p.client_id.clone())
             .collect();
         if expired.is_empty() {
