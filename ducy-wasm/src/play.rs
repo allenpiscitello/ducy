@@ -913,7 +913,12 @@ impl BotTable {
         if self.table.hand().is_none() {
             return Err(JsError::new("no hand dealt"));
         }
-        to_js(&self.table.view(0))
+        let mut view = self.table.view(0);
+        // The bots settle it (Milk King runs it once): nothing to ask.
+        if self.bots_choose_runs() {
+            view.run_choice = false;
+        }
+        to_js(&view)
     }
 
     /// Puts every seat back to the buy-in for the next hand, so no chips
@@ -1048,9 +1053,11 @@ impl BotTable {
 }
 
 impl BotTable {
-    /// The hand asks whether to run it twice and the person isn't in it.
+    /// The hand asks whether to run it twice and the bots answer: the person
+    /// isn't in it, or Milk King is, who only ever runs it once.
     fn bots_choose_runs(&self) -> bool {
-        matches!(self.table.awaiting(), Some(ducy_play::Awaiting::RunChoice(seats)) if !seats.contains(&0))
+        matches!(self.table.awaiting(), Some(ducy_play::Awaiting::RunChoice(seats))
+            if !seats.contains(&0) || seats.iter().any(|&s| self.table.seat(s).id == Personality::MilkKing.id()))
     }
 
     /// Whether the person plays the GTO bot heads-up, where review works.
