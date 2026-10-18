@@ -4,7 +4,10 @@
 //!     cargo run --release -p ducy-gto --example sixmax_spot_train -- \
 //!         --strategy sixmax-100.bin --cards cards-full.bin --opener BTN --caller BB \
 //!         --iters 30000000 --every 2000000 --checkpoint spot-100-BTN-BB.bin \
-//!         [--progress progress.json] [--floor 0.02]
+//!         [--progress progress.json] [--floor 0.02] [--total 60000000]
+//!
+//! `--total` trains up to that many iterations in all instead of `--iters`
+//! more, so a stopped run started again finishes the same job.
 //!
 //! Or any two-player line of the preflop tree in place of `--opener` and
 //! `--caller`: `--line ffffcc` (the small blind limps, the big blind checks),
@@ -39,6 +42,7 @@ fn main() {
     let mut progress: Option<String> = None;
     let mut seed = 1u64;
     let mut floor = 0f64;
+    let mut total: Option<u64> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         let mut v = || args.next().unwrap_or_else(|| panic!("{a} needs a value"));
@@ -54,6 +58,7 @@ fn main() {
             "--progress" => progress = Some(v()),
             "--seed" => seed = v().parse().expect("--seed"),
             "--floor" => floor = v().parse().expect("--floor"),
+            "--total" => total = Some(v().replace('_', "").parse().expect("--total")),
             _ => panic!("unknown argument {a}"),
         }
     }
@@ -133,7 +138,9 @@ fn main() {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let target = solver.iterations() + iters;
+    // `--total` trains up to that many iterations in all (a restarted run
+    // picks up where it stopped); `--iters` trains that many more.
+    let target = total.map_or(solver.iterations() + iters, |t| t.max(solver.iterations()));
     while solver.iterations() < target {
         let t = Instant::now();
         let before = solver.iterations();
