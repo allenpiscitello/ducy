@@ -14,6 +14,7 @@ use ducy_play::{
     Action, ChipRequest, Command, Departure, Outgoing, Personality, Refund, SeatedPlayer, Table,
     TableHost, TableRules, TableSeat, Variant,
     features::NUM_FEATURES,
+    generic,
     net::{Mlp, NUM_CLASSES, NetBot},
 };
 use std::{
@@ -680,6 +681,10 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
             seats.push(seat?);
             continue;
         }
+        if let Some(bot) = generic::bot_by_id(id, Some(seed.wrapping_add(i as u64 + 1))) {
+            seats.push(TableSeat::bot(id, bot));
+            continue;
+        }
         let p =
             Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
         seats.push(TableSeat::bot(
@@ -706,6 +711,9 @@ fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
     }
     if let Some(seat) = net_seat(id, seed) {
         return seat?.bot.ok_or_else(|| JsError::new("no bot"));
+    }
+    if let Some(bot) = generic::bot_by_id(id, Some(seed)) {
+        return Ok(Box::new(bot));
     }
     let p = Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
     Ok(Box::new(p.bot(Some(seed))))
@@ -948,9 +956,14 @@ impl BotTable {
         if self.table.in_hand() {
             return Err(JsError::new("the current hand isn't over"));
         }
-        let p =
-            Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
-        *self.table.seat_mut(seat) = TableSeat::bot(p.id(), p.bot(Some(seed)));
+        *self.table.seat_mut(seat) = match generic::bot_by_id(id, Some(seed)) {
+            Some(bot) => TableSeat::bot(id, bot),
+            None => {
+                let p = Personality::from_name(id)
+                    .ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
+                TableSeat::bot(p.id(), p.bot(Some(seed)))
+            }
+        };
         self.table.set_stack(seat, chips).map_err(err)
     }
 

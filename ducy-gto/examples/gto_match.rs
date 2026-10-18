@@ -67,6 +67,7 @@ use ducy_gto::{
 use ducy_play::{
     Bot, MatchConfig, TableRules, Variant,
     bots::{CallingStation, EquityBot},
+    generic::{Family, GenericPlayer},
     personality::Personality,
     run_match,
 };
@@ -218,6 +219,17 @@ fn main() {
             Box::new(move |s| Box::new(p.bot(Some(s))) as Box<dyn Bot>),
         ));
     }
+    // The Bankroll Challenge's generic players (#256), a family each: a
+    // different player of the family for each seed, so the result is the
+    // family's average.
+    for f in Family::ALL {
+        opponents.push((
+            format!("g-{}", f.id()),
+            Box::new(move |s| {
+                Box::new(GenericPlayer::new(f, s % 1000).bot(Some(s))) as Box<dyn Bot>
+            }),
+        ));
+    }
     let rules = TableRules::no_limit_holdem(config.small_blind, config.big_blind);
     let stack = stack_bb.map_or(config.stack, |n| n * config.big_blind);
     let depth_bytes: Vec<(u64, Vec<u8>)> = depths
@@ -264,6 +276,10 @@ fn main() {
         };
         let mut bots: Vec<Box<dyn Bot>> = vec![me, make(2000)];
         for b in 0..BLOCKS {
+            // A generic family plays a different player each block.
+            if name.starts_with("g-") {
+                bots[1] = make(2000 + b as u64);
+            }
             let m = MatchConfig::new(rules, per_block, 7919 * b as u64 + 1)
                 .with_starting_stack(stack)
                 .duplicate();
