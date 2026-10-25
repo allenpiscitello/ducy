@@ -42,7 +42,7 @@ use ducy_gto::{
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-fn err(e: impl std::fmt::Debug) -> JsError {
+pub(crate) fn err(e: impl std::fmt::Debug) -> JsError {
     JsError::new(&format!("{e:?}"))
 }
 
@@ -716,7 +716,7 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
 
 /// The bot with id `id` (a personality, or "gto" once loaded), for a
 /// restored table.
-fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
+pub(crate) fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
     if id == GTO_ID {
         return gto_seat(seed)?.bot.ok_or_else(|| JsError::new("no bot"));
     }
@@ -1117,7 +1117,7 @@ impl BotTable {
     }
 }
 
-fn to_js(value: &impl Serialize) -> Result<JsValue, JsError> {
+pub(crate) fn to_js(value: &impl Serialize) -> Result<JsValue, JsError> {
     value
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(err)
