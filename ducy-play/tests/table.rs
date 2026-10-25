@@ -1,5 +1,5 @@
 use ducy_play::{
-    Command, Event, Outgoing, Personality, Refund, Table, TableHost, TableRules, TableSeat,
+    Action, Command, Event, Outgoing, Personality, Refund, Table, TableHost, TableRules, TableSeat,
     TableView, Update,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
@@ -1213,6 +1213,81 @@ fn a_capped_top_up_survives_a_snapshot() {
     let snap = h.snapshot(6);
     let mut back = TableHost::restore(&snap, 6, |_| None).unwrap();
     assert_eq!(back.take_refunds(), h.take_refunds());
+}
+
+/// `e` with its seat (a hand index) moved by `rot`.
+fn renumber(e: &Event, rot: impl Fn(usize) -> usize) -> Event {
+    let mut e = e.clone();
+    match &mut e {
+        Event::Ante { seat, .. }
+        | Event::SmallBlind { seat, .. }
+        | Event::BigBlind { seat, .. }
+        | Event::Post { seat, .. }
+        | Event::Fold { seat }
+        | Event::Check { seat }
+        | Event::Call { seat, .. }
+        | Event::Bet { seat, .. }
+        | Event::Raise { seat, .. }
+        | Event::Reveal { seat, .. }
+        | Event::Forfeit { seat }
+        | Event::Award { seat, .. } => *seat = rot(*seat),
+        _ => {}
+    }
+    e
+}
+
+#[test]
+fn a_seats_view_gives_a_bot_what_the_hand_would() {
+    let mut rng = StdRng::seed_from_u64(21);
+    for rules in [
+        TableRules::no_limit_holdem(1, 2).with_ante(1),
+        TableRules::pot_limit_omaha(1, 2).with_variant(ducy_play::Variant::Omaha { hole_cards: 5 }),
+    ] {
+        // An empty seat, and a person who sits out now and then.
+        let seats = vec![
+            TableSeat::human("A", "a"),
+            TableSeat::empty(),
+            TableSeat::human("B", "b"),
+            TableSeat::human("C", "c"),
+            TableSeat::human("D", "d"),
+        ];
+        let mut t = Table::new(rules, seats, 100, 9).unwrap();
+        let mut checked = 0;
+        for _ in 0..40 {
+            t.seat_mut(4).sitting_out = rng.random_range(0..3) == 0;
+            t.new_hand().unwrap();
+            while let Some(seat) = t.to_act() {
+                let k = t.hand_index(seat).unwrap();
+                let n = t.dealt().len();
+                let rot = |i: usize| (i + n - k) % n;
+                let mut want = t.hand().unwrap().observation(k).unwrap();
+                want.seat = 0;
+                want.seats.rotate_left(k);
+                want.button = rot(want.button);
+                want.legal.seat = 0;
+                want.history = want.history.iter().map(|e| renumber(e, rot)).collect();
+                let got = t.view(seat).observation().expect("their turn");
+                assert_eq!(got, want);
+                checked += 1;
+                // No one else's view has one.
+                assert!(
+                    (0..5)
+                        .filter(|&s| s != seat)
+                        .all(|s| t.view(s).observation().is_none())
+                );
+                let legal = want.legal;
+                let action = match rng.random_range(0..5) {
+                    0 if legal.can_fold => Action::Fold,
+                    1 if legal.raise.is_some() => Action::Raise(legal.raise.unwrap().min_to),
+                    2 if legal.bet.is_some() => Action::Bet(legal.bet.unwrap().max_to),
+                    _ if legal.can_check => Action::Check,
+                    _ => Action::Call,
+                };
+                t.act(seat, action).unwrap();
+            }
+        }
+        assert!(checked > 100, "{checked} decisions");
+    }
 }
 
 /// Plays the hand at `friends` with Ann in seat 1: the host folds the first

@@ -2,6 +2,7 @@ use wasm_bindgen::prelude::*;
 
 mod fair;
 mod play;
+mod seat_bot;
 mod shuffle;
 mod tournament;
 pub use play::{BotTable, MultiTable};
