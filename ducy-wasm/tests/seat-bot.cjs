@@ -30,6 +30,13 @@ for (const game of [undefined, 'plo4']) {
   for (; hands < 30; hands++) {
     let r = take(table.newHand(t()));
     for (let guard = 0; guard < 200 && !r.state.complete; guard++) {
+      // Everyone left is all-in with cards to come: asked, they run it once
+      // (one "no" settles it for everyone).
+      if (r.awaiting?.kind === 'run_choice') {
+        const asked = r.players.find(p => p.seat === r.awaiting.seats[0]).client_id;
+        r = take(table.handle(asked, {type: 'run_twice', yes: false}, t()));
+        continue;
+      }
       const id = ids.find(x => last[x]?.view.legal);
       assert.ok(id, 'someone to act');
       const {seq, view} = last[id];
