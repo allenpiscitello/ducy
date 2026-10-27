@@ -199,8 +199,10 @@ pub struct Entry {
     pub about: Option<String>,
 }
 
-/// Why a move was refused.
+/// Why a move was refused. As JSON, `{code, …}`.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "code", rename_all = "camelCase"))]
 pub enum MoneyError {
     /// Not a whole number of chips from 1 to [`MAX_CHIPS`].
     Amount,
@@ -220,9 +222,15 @@ pub enum MoneyError {
     /// The link would make someone their own agent's agent.
     Loop,
     /// They have no backer to play through.
-    NoBacker(String),
+    NoBacker {
+        /// Who.
+        member: String,
+    },
     /// Agencies don't play.
-    Agency(String),
+    Agency {
+        /// The agency.
+        member: String,
+    },
     /// Not one of the agency's people.
     NotInAgency,
     /// A link on the path has too little room.
@@ -252,6 +260,8 @@ pub enum MoneyError {
     Seated,
     /// Not seated.
     NotSeated,
+    /// Not something the club pays.
+    Kind,
 }
 
 impl fmt::Display for MoneyError {
@@ -263,8 +273,8 @@ impl fmt::Display for MoneyError {
             Self::NoLink { member, backer } => write!(f, "{member} doesn't play through {backer}."),
             Self::LinkExists => write!(f, "They're linked already."),
             Self::Loop => write!(f, "That would make them their own agent's agent."),
-            Self::NoBacker(m) => write!(f, "{m} has no one to play through."),
-            Self::Agency(m) => write!(f, "{m} is an agency."),
+            Self::NoBacker { member } => write!(f, "{member} has no one to play through."),
+            Self::Agency { member } => write!(f, "{member} is an agency."),
             Self::NotInAgency => write!(f, "Not one of the agency's people."),
             Self::Room {
                 member,
@@ -279,6 +289,7 @@ impl fmt::Display for MoneyError {
             Self::TakeBack { owed } => write!(f, "They're owed {owed}."),
             Self::Seated => write!(f, "Already seated."),
             Self::NotSeated => write!(f, "Not seated."),
+            Self::Kind => write!(f, "The club pays prizes and refunds."),
         }
     }
 }
@@ -489,7 +500,7 @@ impl Money {
     /// Makes `id` an agency. It must be linked up already.
     pub fn make_agency(&mut self, id: &str) -> Result<(), MoneyError> {
         if id == CLUB || self.backers_of(id).next().is_none() {
-            return Err(MoneyError::NoBacker(id.into()));
+            return Err(MoneyError::NoBacker { member: id.into() });
         }
         let a = self.accounts.entry(id.into()).or_default();
         a.agency.get_or_insert_with(Agency::default);
@@ -550,7 +561,7 @@ impl Money {
             .accounts
             .get(at)
             .and_then(|a| a.through.clone())
-            .ok_or_else(|| MoneyError::NoBacker(at.into()))?;
+            .ok_or_else(|| MoneyError::NoBacker { member: at.into() })?;
         if let Some(ag) = self.accounts.get(&through).and_then(|a| a.agency.as_ref()) {
             if let Some(p) = &ag.on_shift {
                 if p != at && !ag.people.iter().any(|x| x == at) {
@@ -564,7 +575,9 @@ impl Money {
     /// The path `member` plays through now, from them up to the club.
     pub fn path(&self, member: &str) -> Result<Vec<String>, MoneyError> {
         if self.is_agency(member) {
-            return Err(MoneyError::Agency(member.into()));
+            return Err(MoneyError::Agency {
+                member: member.into(),
+            });
         }
         let mut path = vec![member.to_string()];
         while path.last().unwrap() != CLUB {
@@ -937,6 +950,9 @@ impl Money {
         amt: u64,
         now: u64,
     ) -> Result<Vec<Entry>, MoneyError> {
+        if !matches!(kind, EntryKind::Prize | EntryKind::Refund) {
+            return Err(MoneyError::Kind);
+        }
         let a = amount(amt)?;
         let path = self.path(member)?;
         Ok(self.move_path(&path, kind, a, now, Some(about)))

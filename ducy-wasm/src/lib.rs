@@ -2,6 +2,7 @@ use wasm_bindgen::prelude::*;
 
 mod club;
 mod fair;
+mod money;
 mod play;
 mod seat_bot;
 mod shuffle;

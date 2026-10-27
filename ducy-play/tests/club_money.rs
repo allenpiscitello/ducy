@@ -310,6 +310,10 @@ fn tournament_buy_ins_and_prizes_travel_the_path() {
     );
     m.pay("ben", EntryKind::Prize, "high-hand", 50, 4).unwrap();
     assert_eq!(bal(&m, "ben", CLUB), 1050);
+    assert_eq!(
+        m.pay("ben", EntryKind::Give, "x", 50, 5).unwrap_err(),
+        MoneyError::Kind
+    );
     assert!(m.audit().is_empty());
 }
 
