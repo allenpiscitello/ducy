@@ -71,6 +71,7 @@ mod process;
 pub mod ranges;
 pub mod replay;
 mod rules;
+pub mod runner;
 mod showdown;
 pub mod snapshot;
 pub mod stats;
