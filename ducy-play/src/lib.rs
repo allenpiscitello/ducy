@@ -80,6 +80,7 @@ pub mod structure;
 mod table;
 mod tournament;
 mod tournament_host;
+pub mod tourney_runner;
 pub mod traits;
 mod variants;
 
