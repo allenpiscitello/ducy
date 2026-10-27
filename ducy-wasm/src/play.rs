@@ -1117,6 +1117,34 @@ impl BotTable {
     }
 }
 
+/// A club table's host: `seats` empty seats and no seat for the host (see
+/// [`MultiTable::club`]).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn club_host(
+    seats: usize,
+    min_buy_in: u64,
+    max_buy_in: u64,
+    small_blind: u64,
+    big_blind: u64,
+    seed: u64,
+    game: Option<String>,
+    turn_ms: u64,
+) -> Result<TableHost, JsError> {
+    let rules = rules_for(game.as_deref(), small_blind, big_blind)?;
+    if small_blind == 0 || big_blind < small_blind || min_buy_in < big_blind {
+        return Err(JsError::new("invalid blinds or buy-in"));
+    }
+    if !(2..=ducy_play::MAX_PLAYERS).contains(&seats) {
+        return Err(JsError::new("a table seats 2 to 10"));
+    }
+    let all = (0..seats).map(|_| TableSeat::empty()).collect();
+    let mut table = Table::new(rules, all, min_buy_in, seed)
+        .map_err(err)?
+        .with_secure_deals();
+    table.set_run_it_twice(true);
+    TableHost::without_host(table, turn_ms, min_buy_in, max_buy_in).map_err(err)
+}
+
 pub(crate) fn to_js(value: &impl Serialize) -> Result<JsValue, JsError> {
     value
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
@@ -1309,19 +1337,16 @@ impl MultiTable {
         game: Option<String>,
         turn_ms: u64,
     ) -> Result<MultiTable, JsError> {
-        let rules = rules_for(game.as_deref(), small_blind, big_blind)?;
-        if small_blind == 0 || big_blind < small_blind || min_buy_in < big_blind {
-            return Err(JsError::new("invalid blinds or buy-in"));
-        }
-        if !(2..=ducy_play::MAX_PLAYERS).contains(&seats) {
-            return Err(JsError::new("a table seats 2 to 10"));
-        }
-        let all = (0..seats).map(|_| TableSeat::empty()).collect();
-        let mut table = Table::new(rules, all, min_buy_in, seed)
-            .map_err(err)?
-            .with_secure_deals();
-        table.set_run_it_twice(true);
-        let host = TableHost::without_host(table, turn_ms, min_buy_in, max_buy_in).map_err(err)?;
+        let host = club_host(
+            seats,
+            min_buy_in,
+            max_buy_in,
+            small_blind,
+            big_blind,
+            seed,
+            game,
+            turn_ms,
+        )?;
         Ok(MultiTable { host })
     }
 

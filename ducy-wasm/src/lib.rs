@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 
+mod club;
 mod fair;
 mod play;
 mod seat_bot;
