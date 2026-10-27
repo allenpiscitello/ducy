@@ -55,6 +55,7 @@ pub struct ReadmeDoctests;
 
 mod bot;
 pub mod bots;
+pub mod club_money;
 mod deal;
 mod error;
 pub mod fair_deal;
