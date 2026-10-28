@@ -826,6 +826,8 @@ impl Money {
 
     /// Stands `member` up: their stack goes back up the session's path, and
     /// each link gets its share of the rake and time they `contributed`.
+    /// With nothing left, the cash-out is still recorded, at 0, so the
+    /// ledger shows the session ended.
     pub fn cash_out(
         &mut self,
         member: &str,
@@ -833,6 +835,11 @@ impl Money {
         now: u64,
     ) -> Result<Vec<Entry>, MoneyError> {
         let s = self.sessions.remove(member).ok_or(MoneyError::NotSeated)?;
+        if s.stack == 0 {
+            let mut out = self.move_path(&s.path, EntryKind::CashOut, 0, now, Some(&s.about));
+            out.extend(self.rake_shares(&s.path, contributed, now, &s.about));
+            return Ok(out);
+        }
         Ok(self.close(&s, contributed, now))
     }
 

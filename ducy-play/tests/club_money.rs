@@ -60,6 +60,21 @@ fn a_buy_in_moves_every_link_on_the_path() {
 }
 
 #[test]
+fn standing_up_with_nothing_is_still_a_cash_out() {
+    let mut m = example();
+    m.buy_in("ann", "t1", 500, 1).unwrap();
+    m.set_stack("ann", 0).unwrap();
+    let out = m.cash_out("ann", 0, 2).unwrap();
+    assert_eq!(out.len(), 3);
+    assert!(out.iter().all(|e| e.kind == EntryKind::CashOut
+        && e.amount == 0
+        && e.balance == -500
+        && e.about.as_deref() == Some("t1")));
+    assert!(m.session("ann").is_none());
+    assert!(m.audit().is_empty());
+}
+
+#[test]
 fn room_is_the_least_on_the_path_and_refusals_move_nothing() {
     let mut m = example();
     assert_eq!(m.room("ben", 0).unwrap(), 1000);
@@ -175,8 +190,8 @@ fn giving_and_taking_back_settle_one_link() {
         m.give(CLUB, "ben", 0, "", 5).unwrap_err(),
         MoneyError::Amount
     );
-    // The buy-in, two gives and the take-back; standing up with nothing moves nothing.
-    assert_eq!(m.entries("ann", "marco", 0).len(), 4);
+    // The buy-in, the cash-out at 0, two gives and the take-back.
+    assert_eq!(m.entries("ann", "marco", 0).len(), 5);
     assert!(m.audit().is_empty());
 }
 
