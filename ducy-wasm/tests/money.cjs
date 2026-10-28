@@ -72,5 +72,23 @@ const back = w.ClubMoney.restore(m.save());
 assert.deepEqual(back.links(), m.links());
 assert.deepEqual(back.ledger(0), m.ledger(0));
 assert.throws(() => m.run({op: 'nope'}, 0));
+// As a plain object, and back.
+const data = m.data();
+assert.equal(data.links.length, 3);
+assert.deepEqual(w.ClubMoney.fromData(JSON.parse(JSON.stringify(data))).ledger(0), m.ledger(0));
+
+// A club moving to links: balances (negative too) and a seated player.
+const c = new w.ClubMoney(0);
+for (const op of [{op: 'addLink', member: 'bob', backer: 'club'}, {op: 'openBalance', member: 'bob', backer: 'club', balance: -250}, {op: 'openSession', member: 'bob', table: 't9', stack: 400, put: 300}]) {
+  const r = c.run(op, 0);
+  assert.equal(r.ok, true, JSON.stringify(r));
+}
+assert.equal(c.link('bob', 'club').balance, -250);
+assert.equal(c.session('bob').stack, 400);
+assert.equal(c.run({op: 'cashOut', member: 'bob'}, 1).ok, true);
+assert.equal(c.link('bob', 'club').balance, 150);
+assert.equal(c.run({op: 'pay', member: 'bob', kind: 'prize', about: 'hh', amount: 100}, 2).ok, true);
+assert.equal(c.run({op: 'void', member: 'bob', about: 'hh', amount: 300}, 3).error.code, 'takeBack');
+assert.equal(c.run({op: 'void', member: 'bob', about: 'hh', amount: 100}, 3).entries[0].kind, 'void');
 
 console.log('money ok:', m.ledger(0).length, 'entries');

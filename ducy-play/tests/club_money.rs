@@ -399,6 +399,69 @@ fn a_shift_change_hands_the_session_over() {
     assert!(m.audit().is_empty());
 }
 
+#[test]
+fn a_voided_prize_goes_back_up_the_path() {
+    let mut m = example();
+    m.pay("ann", EntryKind::Prize, "high-hand", 300, 0).unwrap();
+    let out = m.void("ann", "high-hand", 300, 1).unwrap();
+    assert!(
+        out.iter()
+            .all(|e| e.kind == EntryKind::Void && e.amount == -300)
+    );
+    assert_eq!(
+        [
+            bal(&m, "ann", "marco"),
+            bal(&m, "marco", "priya"),
+            bal(&m, "priya", CLUB)
+        ],
+        [0; 3]
+    );
+    // Not once she's played it away: her link no longer has it.
+    m.pay("ann", EntryKind::Prize, "high-hand", 300, 2).unwrap();
+    m.buy_in("ann", "t1", 200, 3).unwrap();
+    assert_eq!(
+        m.void("ann", "high-hand", 300, 4).unwrap_err(),
+        MoneyError::TakeBack { owed: 100 }
+    );
+    assert!(m.audit().is_empty());
+}
+
+#[test]
+fn a_club_moves_to_links_with_its_balances_and_seats() {
+    let mut m = example();
+    // Ann owed Marco 200 and is seated with 350 she brought 300 of.
+    assert_eq!(
+        m.open_balance("ann", "marco", -200, 0)
+            .unwrap()
+            .unwrap()
+            .balance,
+        -200
+    );
+    assert_eq!(m.open_balance("marco", "priya", 0, 0).unwrap(), None);
+    m.open_session("ann", "t1", 350, 300).unwrap();
+    assert_eq!(
+        m.session("ann").unwrap().path,
+        ["ann", "marco", "priya", CLUB]
+    );
+    assert_eq!(
+        m.open_session("ann", "t1", 1, 1).unwrap_err(),
+        MoneyError::Seated
+    );
+    // Once a link has entries, its balance isn't set again.
+    assert_eq!(
+        m.open_balance("ann", "marco", 5, 1).unwrap_err(),
+        MoneyError::LinkExists
+    );
+    assert!(
+        m.open_balance("ann", "priya", 5, 1).is_err(),
+        "no such link"
+    );
+    m.cash_out("ann", 0, 2).unwrap();
+    assert_eq!(bal(&m, "ann", "marco"), 150);
+    assert_eq!(bal(&m, "marco", "priya"), 350);
+    assert!(m.audit().is_empty());
+}
+
 #[cfg(feature = "serde")]
 #[test]
 fn saves_and_restores() {
