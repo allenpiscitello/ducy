@@ -1,6 +1,6 @@
 //! A club table's runner (`ducy_play::runner`, ducy-web #452): events in
-//! with the time, steps out with the next time to wake it. The same cases
-//! as ducy-web's `test/table-runner.test.mjs`, against a real club table.
+//! with the time, steps out with the next time to wake it, against a real
+//! club table.
 
 use ducy_play::fair_deal::{Reveal, hand_seed};
 use ducy_play::runner::{
@@ -341,6 +341,45 @@ fn a_hand_is_dealt_from_a_fair_deal_round() {
             .iter()
             .any(|(to, u)| *to == "a" && matches!(u, RunnerUpdate::FairResult(_)))
     );
+}
+
+#[test]
+fn a_seed_picker_chooses_a_hand_and_then_leaves_the_deals_alone() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let mut r = runner(
+        0,
+        RunnerConfig {
+            next_hand_ms: 100,
+            ..RunnerConfig::default()
+        },
+    );
+    // It picks the first hand only, and sees who's seated when it does.
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let saw = seen.clone();
+    r.set_seed_picker(Some(Box::new(move |host| {
+        let mut saw = saw.borrow_mut();
+        saw.push(host.seated().len());
+        (saw.len() == 1).then_some([7; 32])
+    })));
+    sit(&mut r, "a", 0, true, 0);
+    let step = sit(&mut r, "b", 1, true, 0);
+    let dealt = |s: &Step| results(s).iter().find_map(|res| res.seed);
+    let (_, step) = run_until(&mut r, step.wake, 20_000, |s| dealt(s).is_some()).expect("dealt");
+    assert_eq!(dealt(&step), Some(Some([7; 32])));
+    assert_eq!(*seen.borrow(), [2]);
+    // Its hand over: no fair-deal results, since no round dealt it.
+    let step = play_out(&mut r, &["a", "b", "", ""], 30_000);
+    assert!(
+        !sends(&step)
+            .iter()
+            .any(|(_, u)| matches!(u, RunnerUpdate::FairResult(_)))
+    );
+    // The next hand is the table's own, dealt the table's 100 ms later.
+    let (at, step) = run_until(&mut r, step.wake, 60_000, |s| dealt(s).is_some()).expect("dealt");
+    assert_eq!(at, 30_100);
+    assert_ne!(dealt(&step), Some(Some([7; 32])));
+    assert_eq!(seen.borrow().len(), 2);
 }
 
 #[test]

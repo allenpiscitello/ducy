@@ -6,8 +6,8 @@
 //! happened and when to wake it next. The club keeps registration,
 //! knockouts, prizes, saving and the transport.
 //!
-//! Ported from ducy-web's `tourney-runner.js` (ducy-web #458): the same
-//! events in, the same steps out.
+//! Ported from ducy-web's `tourney-runner.js` (ducy-web #458), which it has
+//! since replaced.
 
 use std::collections::HashMap;
 
