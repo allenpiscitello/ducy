@@ -196,6 +196,9 @@ impl TournamentHost {
         self.t.add_entry(Entrant::person(id, name))?;
         self.people.insert(id.to_string());
         self.t.set_absent(id, !self.connected.contains(id))?;
+        // A table opened for them gets players from the others now.
+        let moves = self.t.balance()?;
+        self.events.moves.extend(moves);
         Ok(self.changed(now))
     }
 
