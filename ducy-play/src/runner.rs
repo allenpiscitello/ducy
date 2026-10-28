@@ -18,7 +18,7 @@ use crate::{
 };
 
 /// The next hand is dealt this long after the last one ends.
-pub const NEXT_HAND_MS: u64 = 3000;
+pub const NEXT_HAND_MS: u64 = 1000;
 /// An away player's move comes after this long.
 pub const BOT_PACE_MS: u64 = 700;
 /// How long players have to send a fair-deal commitment, then a reveal.
