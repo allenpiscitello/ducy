@@ -522,6 +522,15 @@ impl Tournament {
         self.seat_entrant(id, e)
     }
 
+    /// Balances the tables now, as after a hand: after a late entry that
+    /// opened a table of its own, so they don't sit alone there until
+    /// another table's hand ends. Only settled tables give up players.
+    pub fn balance(&mut self) -> Result<Vec<Move>, PlayError> {
+        let mut report = HandReport::default();
+        self.rebalance(&mut report)?;
+        Ok(report.moves)
+    }
+
     /// Whether table `id` may deal its next hand now: it's between hands,
     /// has two players, and, hand-for-hand, every other table has caught up.
     pub fn can_deal(&self, id: usize) -> bool {
