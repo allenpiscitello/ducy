@@ -1,18 +1,18 @@
 //! A club table and its runner (ducy-play's `runner`, ducy-web #452), for
-//! ducy-web's club-engine.js: the same events in and the same steps out as
-//! its `table-runner.js`, as plain JS objects. Bytes cross as lowercase hex.
+//! ducy-web's club-engine.js, with events and steps as plain JS objects.
+//! Bytes cross as lowercase hex.
 
 use ducy_play::fair_deal::{Bytes32, Reveal};
 use ducy_play::runner::{
-    ASK_MS, Action, Event, FairResult, IDLE_MS, PlayerCommand, RunnerConfig, RunnerUpdate, Step,
-    TableResult, TableRunner,
+    ASK_MS, Action, Event, FairResult, IDLE_MS, NEXT_HAND_MS, PlayerCommand, RunnerConfig,
+    RunnerUpdate, SeedPicker, Step, TableResult, TableRunner,
 };
 use ducy_play::{Command, HostSnapshot, TableHost};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
-use crate::fair::hex;
+use crate::fair::{bytes32, hex};
 use crate::play::{club_host, err, to_js};
 
 /// The table and runner options from club-host.js.
@@ -47,6 +47,8 @@ struct Config {
     idle_ms: Option<u64>,
     #[serde(default)]
     ask_ms: Option<u64>,
+    #[serde(default)]
+    next_hand_ms: Option<u64>,
 }
 
 fn yes() -> bool {
@@ -68,6 +70,7 @@ impl Config {
                 .collect(),
             idle_ms: self.idle_ms.unwrap_or(IDLE_MS),
             ask_ms: self.ask_ms.unwrap_or(ASK_MS),
+            next_hand_ms: self.next_hand_ms.unwrap_or(NEXT_HAND_MS),
         }
     }
 }
@@ -84,7 +87,7 @@ pub struct ClubTable {
 #[wasm_bindgen]
 impl ClubTable {
     /// A new table `id`: `config` = {seats, minBuyIn, maxBuyIn, sb, bb, seed,
-    /// game, turnMs, sitOutMs, open, link, idleMs, askMs}.
+    /// game, turnMs, sitOutMs, open, link, idleMs, askMs, nextHandMs}.
     pub fn create(id: String, config: JsValue) -> Result<ClubTable, JsError> {
         let c: Config = serde_wasm_bindgen::from_value(config).map_err(err)?;
         let mut host = club_host(
@@ -125,7 +128,7 @@ impl ClubTable {
         }))
     }
 
-    /// Takes in an event ({type, …}, as table-runner.js) and returns the step:
+    /// Takes in an event ({type, …}, the runner's `Event`) and returns the step:
     /// {actions, wake, stopped, paused}.
     pub fn event(&mut self, ev: JsValue, now: f64) -> Result<JsValue, JsError> {
         let v: Value = serde_wasm_bindgen::from_value(ev).map_err(err)?;
@@ -137,6 +140,31 @@ impl ClubTable {
     pub fn save(&mut self, now: f64) -> Result<String, JsError> {
         serde_json::to_string(&self.runner.snapshot(now as u64)).map_err(err)
     }
+
+    /// Deals each hand from `pick`'s seed when it gives one, in place of the
+    /// fair-deal round (ducy-web's demo club): `pick({state, players})`, the
+    /// table about to deal, returns a seed in hex or nothing. Null stops it.
+    #[wasm_bindgen(js_name = setSeedPicker)]
+    pub fn set_seed_picker(&mut self, pick: Option<SeedFn>) {
+        self.runner.set_seed_picker(pick.map(|f| -> SeedPicker {
+            Box::new(move |host: &TableHost| {
+                let table =
+                    to_js(&json!({"state": host.host_view(), "players": host.seated()})).ok()?;
+                let seed = f.call(&JsValue::NULL, &table).ok()?.as_string()?;
+                bytes32(&seed).ok()
+            })
+        }));
+    }
+}
+
+#[wasm_bindgen]
+extern "C" {
+    /// A JS function for `setSeedPicker`.
+    #[wasm_bindgen(typescript_type = "(table: any) => string | undefined")]
+    pub type SeedFn;
+
+    #[wasm_bindgen(method, catch)]
+    fn call(this: &SeedFn, ctx: &JsValue, table: &JsValue) -> Result<JsValue, JsValue>;
 }
 
 fn s(v: &Value, k: &str) -> Result<String, JsError> {

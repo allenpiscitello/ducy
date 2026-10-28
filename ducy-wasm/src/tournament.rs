@@ -311,9 +311,8 @@ impl RunnerIn {
 }
 
 /// A club tournament run by its runner (ducy-play's `tourney_runner`,
-/// ducy-web #458), for ducy-web's club-engine.js: the same events in and the
-/// same steps out as its `tourney-runner.js`. Every call takes the time in
-/// milliseconds.
+/// ducy-web #458), for ducy-web's club-engine.js, with events and steps as
+/// plain JS objects. Every call takes the time in milliseconds.
 #[wasm_bindgen]
 pub struct ClubTourney {
     runner: TourneyRunner,
@@ -354,7 +353,7 @@ impl ClubTourney {
         })
     }
 
-    /// Takes in an event ({type, …}, as tourney-runner.js) and returns the
+    /// Takes in an event ({type, …}, the runner's `TourneyEvent`) and returns the
     /// step: {actions, wake, step, stepEndsAt, onBreak, level}.
     pub fn event(&mut self, ev: JsValue, now: f64) -> Result<JsValue, JsError> {
         let v: Value = serde_wasm_bindgen::from_value(ev).map_err(err)?;

@@ -6,8 +6,8 @@
 //! happened and when to wake it next. The club keeps the money, the members
 //! and the transport.
 //!
-//! Ported from ducy-web's `table-runner.js` (ducy-web #452): the same events
-//! in, the same steps out.
+//! Ported from ducy-web's `table-runner.js` (ducy-web #452), which it has
+//! since replaced.
 
 use std::collections::{HashMap, HashSet};
 
@@ -41,6 +41,11 @@ pub const ASK_MS: u64 = 2 * 60_000;
 const IDLE_RECHECK_MS: u64 = 30_000;
 /// A table with people at it ticks this often, for the sit-out limit.
 const SWEEP_MS: u64 = 5000;
+
+/// Picks a hand's seed in place of the fair-deal round: given the table
+/// about to deal, a seed, or `None` for the usual deal. Only ducy-web's demo
+/// club sets one, for the outcomes a visitor asks for.
+pub type SeedPicker = Box<dyn FnMut(&TableHost) -> Option<Bytes32>>;
 
 /// A member's command: one for the table, or one the runner answers itself.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -283,6 +288,8 @@ pub struct RunnerConfig {
     pub idle_ms: u64,
     /// Time to answer "Still here?".
     pub ask_ms: u64,
+    /// The next hand is dealt this long after the last one ends.
+    pub next_hand_ms: u64,
 }
 
 impl Default for RunnerConfig {
@@ -296,6 +303,7 @@ impl Default for RunnerConfig {
             active: Vec::new(),
             idle_ms: IDLE_MS,
             ask_ms: ASK_MS,
+            next_hand_ms: NEXT_HAND_MS,
         }
     }
 }
@@ -339,6 +347,7 @@ pub struct TableRunner {
     game: String,
     idle_ms: u64,
     ask_ms: u64,
+    next_hand_ms: u64,
     due: Due,
     grace_unset: bool,
     now: u64,
@@ -363,6 +372,7 @@ pub struct TableRunner {
     round: Option<Round>,
     dealt: Option<Dealt>,
     results: HashMap<String, Vec<FairResult>>,
+    pick: Option<SeedPicker>,
 }
 
 impl TableRunner {
@@ -374,6 +384,7 @@ impl TableRunner {
             game: config.game,
             idle_ms: config.idle_ms,
             ask_ms: config.ask_ms,
+            next_hand_ms: config.next_hand_ms,
             due: Due::default(),
             grace_unset: config.paused,
             now: 0,
@@ -398,7 +409,14 @@ impl TableRunner {
             round: None,
             dealt: None,
             results: HashMap::new(),
+            pick: None,
         }
+    }
+
+    /// Deals each hand from `pick`'s seed when it gives one (see
+    /// [`SeedPicker`]); `None` goes back to fair deals only.
+    pub fn set_seed_picker(&mut self, pick: Option<SeedPicker>) {
+        self.pick = pick;
     }
 
     /// The table.
@@ -622,7 +640,7 @@ impl TableRunner {
             self.due.deal = Some(
                 self.now
                     + if self.hand_number != 0 {
-                        NEXT_HAND_MS
+                        self.next_hand_ms
                     } else {
                         500
                     },
@@ -642,7 +660,10 @@ impl TableRunner {
             return;
         }
         let round = self.round.take();
-        let seed = round.as_ref().and_then(|f| f.seed);
+        // A picked seed replaces the round's, and its hand gets no results.
+        let picked = self.pick.as_mut().and_then(|p| p(&self.host));
+        let round = if picked.is_some() { None } else { round };
+        let seed = picked.or(round.as_ref().and_then(|f| f.seed));
         let t = self.time();
         // If people left meanwhile the engine refuses; the next change
         // (someone sitting down, chips) tries again.
