@@ -163,12 +163,19 @@ pub enum EntryKind {
     Prize,
     /// A share of the rake a player contributed.
     RakeShare,
+    /// A prize taken back: up the path, as the prize came down it.
+    Void,
+    /// A link's balance when the club moved to links.
+    Opening,
 }
 
 impl EntryKind {
     /// A move along a whole path.
     pub fn is_path_move(self) -> bool {
-        !matches!(self, Self::Give | Self::TakeBack | Self::RakeShare)
+        !matches!(
+            self,
+            Self::Give | Self::TakeBack | Self::RakeShare | Self::Opening
+        )
     }
 }
 
@@ -956,6 +963,86 @@ impl Money {
         let a = amount(amt)?;
         let path = self.path(member)?;
         Ok(self.move_path(&path, kind, a, now, Some(about)))
+    }
+
+    /// Takes back a prize the club paid `member`: `amt` down their path, as
+    /// long as their own link still has it.
+    pub fn void(
+        &mut self,
+        member: &str,
+        about: &str,
+        amt: u64,
+        now: u64,
+    ) -> Result<Vec<Entry>, MoneyError> {
+        let a = amount(amt)?;
+        let path = self.path(member)?;
+        let owed = self
+            .link(&path[0], &path[1])
+            .map_or(0, |l| l.balance.max(0));
+        if a > owed {
+            return Err(MoneyError::TakeBack { owed: owed as u64 });
+        }
+        Ok(self.move_path(&path, EntryKind::Void, -a, now, Some(about)))
+    }
+
+    /// Moving a club to links: a link's balance carried over, as its first
+    /// entry. Refused once the link has entries.
+    pub fn open_balance(
+        &mut self,
+        member: &str,
+        backer: &str,
+        balance: i64,
+        now: u64,
+    ) -> Result<Option<Entry>, MoneyError> {
+        self.link_mut(member, backer)?;
+        if self
+            .ledger
+            .iter()
+            .any(|e| e.member == member && e.backer == backer)
+        {
+            return Err(MoneyError::LinkExists);
+        }
+        if balance.unsigned_abs() > MAX_CHIPS {
+            return Err(MoneyError::Amount);
+        }
+        if balance == 0 {
+            return Ok(None);
+        }
+        let tx = self.tx();
+        Ok(Some(self.record(
+            (member, backer),
+            EntryKind::Opening,
+            balance,
+            (tx, now),
+            None,
+            None,
+        )))
+    }
+
+    /// Moving a club to links: a player seated with `stack` at `table`
+    /// (`put` brought in all), on their path now. No link moves: the chips
+    /// went to the table before.
+    pub fn open_session(
+        &mut self,
+        member: &str,
+        table: &str,
+        stack: u64,
+        put: u64,
+    ) -> Result<(), MoneyError> {
+        if self.sessions.contains_key(member) {
+            return Err(MoneyError::Seated);
+        }
+        let path = self.path(member)?;
+        self.sessions.insert(
+            member.into(),
+            Session {
+                about: table.into(),
+                path,
+                stack,
+                put,
+            },
+        );
+        Ok(())
     }
 
     /// What doesn't add up, if anything: a link whose entries don't sum to

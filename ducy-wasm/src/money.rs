@@ -104,6 +104,22 @@ enum Op {
         about: String,
         amount: u64,
     },
+    Void {
+        member: String,
+        about: String,
+        amount: u64,
+    },
+    OpenBalance {
+        member: String,
+        backer: String,
+        balance: i64,
+    },
+    OpenSession {
+        member: String,
+        table: String,
+        stack: u64,
+        put: u64,
+    },
 }
 
 /// A club's links, sessions and ledger.
@@ -136,6 +152,20 @@ impl ClubMoney {
     /// Everything, as JSON.
     pub fn save(&self) -> Result<String, JsError> {
         serde_json::to_string(&self.money).map_err(err)
+    }
+
+    /// Everything, as a plain object (what `save` writes, parsed), for a
+    /// club object to keep.
+    pub fn data(&self) -> Result<JsValue, JsError> {
+        to_js(&self.money)
+    }
+
+    /// The money from `data`.
+    #[wasm_bindgen(js_name = fromData)]
+    pub fn from_data(data: JsValue) -> Result<ClubMoney, JsError> {
+        Ok(ClubMoney {
+            money: serde_wasm_bindgen::from_value(data).map_err(err)?,
+        })
     }
 
     /// Makes a move: `{ok: true, entries}` with the ledger entries it wrote,
@@ -210,6 +240,24 @@ impl ClubMoney {
                 about,
                 amount,
             } => m.pay(&member, kind, &about, amount, now),
+            Op::Void {
+                member,
+                about,
+                amount,
+            } => m.void(&member, &about, amount, now),
+            Op::OpenBalance {
+                member,
+                backer,
+                balance,
+            } => m
+                .open_balance(&member, &backer, balance, now)
+                .map(|e| e.into_iter().collect()),
+            Op::OpenSession {
+                member,
+                table,
+                stack,
+                put,
+            } => none(m.open_session(&member, &table, stack, put)),
         };
         to_js(&match r {
             Ok(entries) => json!({"ok": true, "entries": entries}),
