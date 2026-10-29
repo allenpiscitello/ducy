@@ -57,6 +57,8 @@ mod bot;
 pub mod bots;
 #[cfg(feature = "club")]
 pub mod club_book;
+#[cfg(feature = "club")]
+pub mod club_host;
 pub mod club_money;
 #[cfg(feature = "club")]
 pub mod club_oneoff;
