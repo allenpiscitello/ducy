@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 
+mod book;
 mod club;
 mod fair;
 mod hands;
