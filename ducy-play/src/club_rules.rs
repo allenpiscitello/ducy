@@ -124,6 +124,10 @@ pub struct Member {
     /// When the host last changed their status.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub changed_at: Option<u64>,
+    /// When they were last removed. Kept when they ask to join again, so
+    /// the manager knows: nobody is ever forgotten (ducy-web #488).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removed_at: Option<u64>,
     /// "yes" when they're an agent (ducy-web #74).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
@@ -147,6 +151,7 @@ impl Member {
             requested_at: None,
             joined_at: None,
             changed_at: None,
+            removed_at: None,
             agent: None,
             agent_invite: None,
             agent_of: None,
@@ -976,6 +981,10 @@ impl Club {
             .members
             .entry(from.into())
             .or_insert_with(|| Member::new(from, &name));
+        // Removed before this was kept: when their status last changed.
+        if m.is(Status::Removed) && m.removed_at.is_none() {
+            m.removed_at = m.changed_at.or(Some(now));
+        }
         m.name = name;
         m.status = Status::Pending;
         m.requested_at = Some(now);
@@ -1032,6 +1041,9 @@ impl Club {
         m.status = to;
         if to == Status::Member {
             m.joined_at = Some(now);
+        }
+        if to == Status::Removed {
+            m.removed_at = Some(now);
         }
         m.changed_at = Some(now);
         Some(self.reply(id))
@@ -2317,6 +2329,27 @@ mod tests {
         c.approve("ann", 0);
         assert_eq!(c.remove("ann", 0).unwrap()["body"]["status"], "removed");
         assert_eq!(c.remove("ann", 0), None);
+    }
+
+    #[test]
+    fn a_removed_player_asking_again_is_remembered() {
+        let mut c = club();
+        let invite = c.invite.clone();
+        c.receive("ann", &join(&c, &invite, "Ann"), 0);
+        c.approve("ann", 10);
+        c.remove("ann", 20);
+        c.receive("ann", &join(&c, &invite, "Ann"), 30);
+        let ann = &c.members["ann"];
+        assert!(ann.is(Status::Pending));
+        assert_eq!(ann.removed_at, Some(20));
+        // Let in again, it's still on record.
+        c.approve("ann", 40);
+        assert_eq!(c.members["ann"].removed_at, Some(20));
+        // A club saved before this kept only when their status changed.
+        c.remove("ann", 50);
+        c.members.get_mut("ann").unwrap().removed_at = None;
+        c.receive("ann", &join(&c, &invite, "Ann"), 60);
+        assert_eq!(c.members["ann"].removed_at, Some(50));
     }
 
     #[test]
