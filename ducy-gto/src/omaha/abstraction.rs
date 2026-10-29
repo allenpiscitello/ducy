@@ -79,6 +79,12 @@ pub struct PloAbstractionConfig {
     pub seed: u64,
     /// Nut potential as well as equity (see the module docs).
     pub nut_aware: bool,
+    /// Nuts first (#291, version 4; implies `nut_aware`): cluster on the
+    /// chance of ending with exactly the nuts, the chance of ending second
+    /// best, and redraws past the current nuts, instead of banded nut
+    /// potential. For five and six cards, where nearly all the value is in
+    /// the nuts.
+    pub nut_first: bool,
 }
 
 impl Default for PloAbstractionConfig {
@@ -93,6 +99,7 @@ impl Default for PloAbstractionConfig {
             equity_samples: 1000,
             seed: 1,
             nut_aware: true,
+            nut_first: false,
         }
     }
 }
@@ -105,6 +112,80 @@ pub const NUM_NUT_FEATURES: usize = 24;
 
 /// Features per starting hand for nut-aware preflop models.
 pub const NUM_PREFLOP_NUT_FEATURES: usize = 20;
+
+/// Features per hand on the flop and turn for nuts-first models: the
+/// nut-aware ones and four freeroll features (see
+/// [`BoardView::nut_first_features`]).
+pub const NUM_NUT_FIRST_FEATURES: usize = NUM_NUT_FEATURES + 4;
+
+/// How much each nuts-first measure counts in clustering, against equity
+/// (0 to 1), for `k` hole cards: the chance of the nuts on the river, of
+/// ending second best, and of improving past the current nuts. Five and six
+/// cards weigh them more: there the nuts are nearly all the value.
+pub fn nut_first_scales(k: usize) -> [f64; 3] {
+    if k >= 5 {
+        [1.5, 1.0, 1.0]
+    } else {
+        [1.0, 0.5, 0.5]
+    }
+}
+
+/// How a hand ends on the river, over `runouts` random completions of
+/// `board` (exact on a full board): the share of runouts where it is the
+/// nuts (no two-card holding beats it; ties count), where it is close but
+/// not the nuts (beaten by under [`NUT_BAND`] of holdings: second best, the
+/// hands that lose the big pots), and where it ends better than the best
+/// hand possible on the board now (redraws past the current nuts; 0
+/// preflop). Blockers count, as in [`beaten_share`].
+pub fn nut_outcomes(hole: &[Card], board: &[Card], runouts: usize, rng: &mut Rng) -> [f64; 3] {
+    let fixed = mask(hole) | mask(board);
+    let runouts = if board.len() == 5 { 1 } else { runouts.max(1) };
+    let top_now = if board.len() >= 3 {
+        BoardView::exact(board).sorted.last().copied().unwrap_or(0)
+    } else {
+        u32::MAX
+    };
+    let mut out = [0.0; 3];
+    for _ in 0..runouts {
+        let mut used = fixed;
+        let mut full = [0 as Card; 5];
+        full[..board.len()].copy_from_slice(board);
+        for c in full.iter_mut().skip(board.len()) {
+            *c = draw(&mut used, rng);
+        }
+        let river = RiverBoard::new(&full);
+        let s = river.score(hole);
+        let taken = mask(hole) | mask(&full);
+        let (mut above, mut ties, mut n) = (0u32, 0u32, 0u32);
+        for hi in 1..NUM_CARDS as Card {
+            if taken & bit(hi) != 0 {
+                continue;
+            }
+            for lo in 0..hi {
+                if taken & bit(lo) != 0 {
+                    continue;
+                }
+                n += 1;
+                let t = river.pair_score(hi, lo);
+                if t > s {
+                    above += 1;
+                } else if t == s {
+                    ties += 1;
+                }
+            }
+        }
+        let share = (above as f64 + ties as f64 / 2.0) / n.max(1) as f64;
+        if above == 0 {
+            out[0] += 1.0;
+        } else if share < NUT_BAND {
+            out[1] += 1.0;
+        }
+        if top_now != u32::MAX && s > top_now {
+            out[2] += 1.0;
+        }
+    }
+    out.map(|x| x / runouts as f64)
+}
 
 /// How far from the nuts still counts: a hand beaten by this share of
 /// two-card holdings or more has no [`nutness`].
@@ -527,6 +608,51 @@ impl BoardView {
         ]);
         x
     }
+
+    /// The features of nuts-first models (see [`NUM_NUT_FIRST_FEATURES`]):
+    /// [`BoardView::nut_features`], then the freerolls (#291): the nuts with
+    /// the nut flush draw, the nut straight with redraws to a higher nut
+    /// straight (the share of unseen cards that move the nut straight up
+    /// while we still hold it), a set with a nut flush draw or straight
+    /// outs, and a set at all.
+    pub fn nut_first_features(&self, hole: &[Card]) -> [f64; NUM_NUT_FIRST_FEATURES] {
+        let nut = self.nut_features(hole);
+        let (nut_fd, straight_outs, is_nuts) = (nut[4], nut[6], nut[NUM_FEATURES + 1]);
+        let river = self.board.len() == 5;
+        let hand = rank_bits(hole);
+        let mut redraw = 0.0;
+        if !river && Self::holds_nut_straight(hand, self.ranks) {
+            let top = |board: u16| {
+                (0..10)
+                    .rev()
+                    .find(|&w| (board & 0b11111 << w).count_ones() >= 3)
+            };
+            let now = top(self.ranks);
+            let seen = mask(hole) | mask(&self.board);
+            let (mut up, mut unseen) = (0u32, 0u32);
+            for c in (0..NUM_CARDS as Card).filter(|&c| seen & bit(c) == 0) {
+                unseen += 1;
+                let after = self.ranks | rank_bits(&[c]);
+                if top(after) > now && Self::holds_nut_straight(hand, after) {
+                    up += 1;
+                }
+            }
+            redraw = up as f64 / unseen.max(1) as f64;
+        }
+        let set = if hole.iter().enumerate().any(|(i, &a)| {
+            hole[i + 1..].iter().any(|&b| rank(a) == rank(b))
+                && self.board.iter().any(|&c| rank(c) == rank(a))
+        }) {
+            1.0
+        } else {
+            0.0
+        };
+        let draws = (nut_fd + if straight_outs > 0.0 { 1.0 } else { 0.0 }).min(1.0);
+        let mut x = [0.0; NUM_NUT_FIRST_FEATURES];
+        x[..NUM_NUT_FEATURES].copy_from_slice(&nut);
+        x[NUM_NUT_FEATURES..].copy_from_slice(&[is_nuts * nut_fd, redraw, set * draws, set]);
+        x
+    }
 }
 
 /// Per-suit rank masks, sorted: equal for hands that differ only by suits.
@@ -732,8 +858,16 @@ enum Preflop {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StreetModel {
     pub weights: Vec<f64>,
-    /// Empty for abstractions that aren't nut-aware.
+    /// Empty for abstractions that aren't nut-aware. Nuts first: the chance
+    /// of exactly the nuts on the river.
     pub nut_weights: Vec<f64>,
+    /// Nuts first only (else empty): the chance of ending second best, and
+    /// of ending past the current nuts ([`nut_outcomes`]).
+    pub second_weights: Vec<f64>,
+    pub free_weights: Vec<f64>,
+    /// Nuts first only: [`nut_first_scales`] for the hole cards (not saved;
+    /// set from the settings).
+    pub scales: Vec<f64>,
     pub centres: Vec<f32>,
 }
 
@@ -754,14 +888,30 @@ impl StreetModel {
         dot(&self.nut_weights, x).clamp(0.0, 1.0)
     }
 
+    /// Whether this is a nuts-first model.
+    pub fn nut_first(&self) -> bool {
+        !self.second_weights.is_empty()
+    }
+
     /// Values per cluster centre.
     pub fn dims(&self) -> usize {
-        if self.nut_weights.is_empty() { 2 } else { 3 }
+        if self.nut_first() {
+            5
+        } else if self.nut_weights.is_empty() {
+            2
+        } else {
+            3
+        }
     }
 
     fn point(&self, x: &[f64]) -> Vec<f32> {
         let mut p = vec![self.predict(x) as f32];
-        if !self.nut_weights.is_empty() {
+        if self.nut_first() {
+            let s = &self.scales;
+            p.push((s[0] * self.predict_nuts(x)) as f32);
+            p.push((s[1] * dot(&self.second_weights, x).clamp(0.0, 1.0)) as f32);
+            p.push((s[2] * dot(&self.free_weights, x).clamp(0.0, 1.0)) as f32);
+        } else if !self.nut_weights.is_empty() {
             p.push((NUT_WEIGHT * self.predict_nuts(x)) as f32);
         }
         p.push((STRENGTH_WEIGHT * x[1]) as f32);
@@ -781,6 +931,7 @@ impl StreetModel {
 enum Feats {
     Plain([f64; NUM_FEATURES]),
     Nut([f64; NUM_NUT_FEATURES]),
+    NutFirst([f64; NUM_NUT_FIRST_FEATURES]),
 }
 
 impl std::ops::Deref for Feats {
@@ -790,6 +941,7 @@ impl std::ops::Deref for Feats {
         match self {
             Feats::Plain(x) => x,
             Feats::Nut(x) => x,
+            Feats::NutFirst(x) => x,
         }
     }
 }
@@ -805,11 +957,12 @@ pub struct PloAbstraction {
     river_cuts: Vec<f64>,
 }
 
-/// One sampled hand for fitting: its features, equity and nut potential.
+/// One sampled hand for fitting: its features, equity and nut potential
+/// (nuts first: [`nut_outcomes`]; else the second and third are 0).
 struct FitHand {
     x: Vec<f64>,
     equity: f64,
-    nuts: f64,
+    nuts: [f64; 3],
 }
 
 /// A random hand and board of `board_len` cards.
@@ -876,7 +1029,15 @@ fn least_squares(xs: &[Vec<f64>], ys: &[f64]) -> Vec<f64> {
 impl PloAbstraction {
     /// Builds the abstraction: preflop classes and their buckets, then a
     /// fitted model for each street. `progress` hears about each stage.
-    pub fn build(config: PloAbstractionConfig, mut progress: impl FnMut(&str)) -> Self {
+    pub fn build(mut config: PloAbstractionConfig, mut progress: impl FnMut(&str)) -> Self {
+        // Nuts first builds on the nut-aware features.
+        config.nut_aware |= config.nut_first;
+        let nut_first = config.nut_first;
+        let scales = if nut_first {
+            nut_first_scales(config.hole_cards).to_vec()
+        } else {
+            Vec::new()
+        };
         let k = config.hole_cards;
         assert!((4..=6).contains(&k), "4 to 6 hole cards");
         assert!(
@@ -892,7 +1053,19 @@ impl PloAbstraction {
                 (0, false) => preflop_features(hole).to_vec(),
                 (0, true) => preflop_nut_features(hole).to_vec(),
                 (_, false) => BoardView::for_hands(board, k).features(hole).to_vec(),
+                (_, true) if nut_first => BoardView::exact(board).nut_first_features(hole).to_vec(),
                 (_, true) => BoardView::exact(board).nut_features(hole).to_vec(),
+            }
+        };
+        // What a hand's nut targets are: nuts first, its river outcomes;
+        // nut-aware, its nut potential.
+        let nut_targets = |hole: &[Card], board: &[Card], rng: &mut Rng| -> [f64; 3] {
+            if nut_first {
+                nut_outcomes(hole, board, NUT_RUNOUTS, rng)
+            } else if nut_aware {
+                [nut_potential(hole, board, NUT_RUNOUTS, rng), 0.0, 0.0]
+            } else {
+                [0.0; 3]
             }
         };
 
@@ -908,23 +1081,26 @@ impl PloAbstraction {
                 FitHand {
                     x: features(&hole, &board),
                     equity: equity_vs_random(&hole, &board, samples, &mut rng).mean,
-                    nuts: if nut_aware {
-                        nut_potential(&hole, &board, NUT_RUNOUTS, &mut rng)
-                    } else {
-                        0.0
-                    },
+                    nuts: nut_targets(&hole, &board, &mut rng),
                 }
             });
             let xs: Vec<Vec<f64>> = hands.iter().map(|h| h.x.clone()).collect();
             let ys: Vec<f64> = hands.iter().map(|h| h.equity).collect();
+            let target = |i: usize| -> Vec<f64> { hands.iter().map(|h| h.nuts[i]).collect() };
             let mut model = StreetModel {
                 weights: least_squares(&xs, &ys),
                 nut_weights: Vec::new(),
+                second_weights: Vec::new(),
+                free_weights: Vec::new(),
+                scales: scales.clone(),
                 centres: Vec::new(),
             };
             if nut_aware {
-                let nuts: Vec<f64> = hands.iter().map(|h| h.nuts).collect();
-                model.nut_weights = least_squares(&xs, &nuts);
+                model.nut_weights = least_squares(&xs, &target(0));
+            }
+            if nut_first {
+                model.second_weights = least_squares(&xs, &target(1));
+                model.free_weights = least_squares(&xs, &target(2));
             }
             let flat: Vec<f32> = xs.iter().flat_map(|x| model.point(x)).collect();
             let dims = model.dims();
@@ -952,8 +1128,13 @@ impl PloAbstraction {
                     let mut rng = Rng::new(seed ^ (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
                     let e = equity_vs_random(hand, &[], samples, &mut rng).mean;
                     let mut p = vec![e as f32];
-                    if nut_aware {
-                        let n = nut_potential(hand, &[], NUT_RUNOUTS, &mut rng);
+                    if nut_first {
+                        let n = nut_targets(hand, &[], &mut rng);
+                        for i in 0..3 {
+                            p.push((scales[i] * n[i]) as f32);
+                        }
+                    } else if nut_aware {
+                        let n = nut_targets(hand, &[], &mut rng)[0];
                         p.push((NUT_WEIGHT * n) as f32);
                     }
                     p.push((STRENGTH_WEIGHT * playability(hand)) as f32);
@@ -1026,7 +1207,9 @@ impl PloAbstraction {
     }
 
     fn features_on(&self, hole: &[Card], view: &BoardView) -> Feats {
-        if self.config.nut_aware {
+        if self.config.nut_first {
+            Feats::NutFirst(view.nut_first_features(hole))
+        } else if self.config.nut_aware {
             Feats::Nut(view.nut_features(hole))
         } else {
             Feats::Plain(view.features(hole))
@@ -1081,10 +1264,12 @@ impl PloAbstraction {
     /// the settings, version 2 (five or six cards) a third model before the
     /// flop's. Version 3 (nut-aware, any hole count) says which after the
     /// settings (1 for a table), and each model has its nut weights after
-    /// its equity weights.
+    /// its equity weights. Version 4 (nuts first) is version 3 with the
+    /// second-best and redraw weights after the nut weights.
     pub fn save(&self) -> Vec<u8> {
         let c = &self.config;
         let mut out = match (&self.preflop, c.nut_aware) {
+            _ if c.nut_first => MAGIC_NUT_FIRST,
             (_, true) => MAGIC_NUT,
             (Preflop::Classes { .. }, false) => MAGIC,
             (Preflop::Model(_), false) => MAGIC_MODEL,
@@ -1121,9 +1306,14 @@ impl PloAbstraction {
             for w in &m.weights {
                 out.extend(w.to_le_bytes());
             }
-            if c.nut_aware {
-                out.extend((m.nut_weights.len() as u64).to_le_bytes());
-                for w in &m.nut_weights {
+            let extra: &[&Vec<f64>] = match (c.nut_first, c.nut_aware) {
+                (true, _) => &[&m.nut_weights, &m.second_weights, &m.free_weights],
+                (false, true) => &[&m.nut_weights],
+                _ => &[],
+            };
+            for ws in extra {
+                out.extend((ws.len() as u64).to_le_bytes());
+                for w in ws.iter() {
                     out.extend(w.to_le_bytes());
                 }
             }
@@ -1144,7 +1334,8 @@ impl PloAbstraction {
         let mut input = bytes;
         let input = &mut input;
         let magic = take(input, MAGIC.len())?;
-        let nut_aware = magic == MAGIC_NUT;
+        let nut_first = magic == MAGIC_NUT_FIRST;
+        let nut_aware = magic == MAGIC_NUT || nut_first;
         let mut with_table = if magic == MAGIC {
             true
         } else if magic == MAGIC_MODEL || nut_aware {
@@ -1163,6 +1354,7 @@ impl PloAbstraction {
             equity_samples: num()?,
             seed: num()? as u64,
             nut_aware,
+            nut_first,
         };
         if nut_aware {
             with_table = match read_u64(input)? {
@@ -1208,12 +1400,17 @@ impl PloAbstraction {
         for _ in 0..if with_table { 2 } else { 3 } {
             let w = read_u64(input)? as usize;
             let weights = f64s(input, w)?;
-            let nut_weights = if nut_aware {
-                let w = read_u64(input)? as usize;
-                f64s(input, w)?
-            } else {
-                Vec::new()
+            let mut more = |on: bool| -> Option<Vec<f64>> {
+                if on {
+                    let w = read_u64(input)? as usize;
+                    f64s(input, w)
+                } else {
+                    Some(Vec::new())
+                }
             };
+            let nut_weights = more(nut_aware)?;
+            let second_weights = more(nut_first)?;
+            let free_weights = more(nut_first)?;
             let c = read_u64(input)? as usize;
             let b = take(input, c * 4)?;
             let centres = b
@@ -1223,12 +1420,19 @@ impl PloAbstraction {
             models.push(StreetModel {
                 weights,
                 nut_weights,
+                second_weights,
+                free_weights,
+                scales: if nut_first {
+                    nut_first_scales(config.hole_cards).to_vec()
+                } else {
+                    Vec::new()
+                },
                 centres,
             });
         }
         let r = read_u64(input)? as usize;
         let river_cuts = f64s(input, r)?;
-        if !input.is_empty() || models_bad(&models, with_table, nut_aware) {
+        if !input.is_empty() || models_bad(&models, with_table, nut_aware, nut_first) {
             return None;
         }
         let turn = models.pop()?;
@@ -1250,20 +1454,23 @@ impl PloAbstraction {
 const MAGIC: &[u8] = b"DUCYPLOA\x01";
 const MAGIC_MODEL: &[u8] = b"DUCYPLOA\x02";
 const MAGIC_NUT: &[u8] = b"DUCYPLOA\x03";
+const MAGIC_NUT_FIRST: &[u8] = b"DUCYPLOA\x04";
 
 /// Saved models (the preflop one first, if any, then the flop's and the
 /// turn's) with the wrong number of weights or no whole set of centres (a
 /// file from a different feature set).
-fn models_bad(models: &[StreetModel], with_table: bool, nut_aware: bool) -> bool {
+fn models_bad(models: &[StreetModel], with_table: bool, nut_aware: bool, nut_first: bool) -> bool {
     models.iter().enumerate().any(|(i, m)| {
         let preflop = !with_table && i == 0;
         let n = match (nut_aware, preflop) {
             (false, _) => NUM_FEATURES,
             (true, true) => NUM_PREFLOP_NUT_FEATURES,
+            (true, false) if nut_first => NUM_NUT_FIRST_FEATURES,
             (true, false) => NUM_NUT_FEATURES,
         };
         m.weights.len() != n
             || nut_aware && m.nut_weights.len() != n
+            || nut_first && (m.second_weights.len() != n || m.free_weights.len() != n)
             || m.centres.is_empty()
             || m.centres.len() % m.dims() != 0
     })
@@ -1311,7 +1518,9 @@ impl Buckets for PloAbstraction {
              fit_hands: {}, equity_samples: {}, seed: {} }}",
             c.hole_cards, c.preflop, c.flop, c.turn, c.river, c.fit_hands, c.equity_samples, c.seed
         );
-        if c.nut_aware {
+        if c.nut_first {
+            format!("{text}|plo-features-v3")
+        } else if c.nut_aware {
             format!("{text}|plo-features-v2")
         } else {
             format!("{text}|plo-features-v1")
