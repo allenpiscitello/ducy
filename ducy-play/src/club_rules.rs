@@ -454,6 +454,12 @@ pub struct Club {
     /// Reserved seats, by table, oldest first.
     #[serde(default)]
     pub waitlist: BTreeMap<String, Vec<Reservation>>,
+    /// Outside servers that may give members chips, by their key's id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub services: BTreeMap<String, Service>,
+    /// Requests refused from keys that are no service of the club's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_refused: Option<Refusals>,
 }
 
 fn one() -> u32 {
@@ -784,6 +790,8 @@ impl Club {
             stay_hands: None,
             rathole_hours: None,
             waitlist: BTreeMap::new(),
+            services: BTreeMap::new(),
+            service_refused: None,
         })
     }
 
@@ -1594,6 +1602,612 @@ impl Club {
             .filter(|e| !self.still_at(e))
             .map(|e| e.until)
             .min()
+    }
+}
+
+// ---- services ----
+//
+// Outside servers an always-on club's owner lets give members chips, within
+// limits (a rewards server paying for a league). A service signs its
+// requests with its own key; the caller checks the signature, and moves the
+// chips through the money model. Amounts here are hundredths, as in the
+// club; services count in chips, so their answers do too.
+
+/// How far a request's time may be from the club's.
+pub const SKEW_MS: u64 = 5 * 60_000;
+/// The most services a club has at once.
+pub const MAX_SERVICES: usize = 10;
+const DAY_MS: u64 = 86_400_000;
+const MAX_DONE: usize = 500;
+const MAX_SERVICE_NAME: usize = 40;
+const MAX_SERVICE_NOTE: usize = 100;
+const MAX_KEY: usize = 64;
+
+/// What a service may do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Perms {
+    /// Give members chips.
+    pub give: bool,
+    /// Take chips back.
+    pub take: bool,
+    /// List the members.
+    pub read: bool,
+}
+
+/// Chips a service gave, and when.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Given {
+    /// When.
+    pub at: u64,
+    /// Hundredths.
+    pub amount: u64,
+}
+
+/// A give or take done with a key, and its answer, to give again.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Done {
+    /// When.
+    pub at: u64,
+    /// The answer.
+    pub value: Value,
+}
+
+/// A refused request, and why.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Failure {
+    /// When.
+    pub at: u64,
+    /// Why.
+    pub reason: String,
+}
+
+/// Requests refused from unknown keys.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Refusals {
+    /// How many.
+    pub count: u64,
+    /// The last, when.
+    pub at: u64,
+}
+
+/// Whether a service still works.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ServiceStatus {
+    /// Its requests are taken.
+    Active,
+    /// Its key is forgotten.
+    Revoked,
+}
+
+/// An outside server that may give members chips.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Service {
+    /// Its key's id.
+    pub id: String,
+    /// Its name.
+    pub name: String,
+    /// Its key's algorithm.
+    pub alg: String,
+    /// Its public key; gone once it's revoked.
+    #[serde(rename = "pub", default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// Whether it still works.
+    pub status: ServiceStatus,
+    /// When it was added.
+    pub added_at: u64,
+    /// What it may do.
+    pub perms: Perms,
+    /// Chips it may still give, in hundredths.
+    pub budget: u64,
+    /// The most in one give; 0 for no cap.
+    pub per_give: u64,
+    /// The most given in any 24 hours; 0 for no cap.
+    pub per_day: u64,
+    /// When it stops working.
+    pub expires: Option<u64>,
+    /// What it gave in the last day.
+    #[serde(default)]
+    pub gives: Vec<Given>,
+    /// The request times seen lately (each once), and when.
+    #[serde(default)]
+    pub seen: BTreeMap<String, u64>,
+    /// Gives and takes done with a key, by the key.
+    #[serde(default)]
+    pub done: BTreeMap<String, Done>,
+    /// How many of its requests were refused.
+    #[serde(default)]
+    pub failures: u64,
+    /// The last one.
+    #[serde(default)]
+    pub last_failure: Option<Failure>,
+    /// When it was last used.
+    #[serde(default)]
+    pub last_used: Option<u64>,
+    /// When it was revoked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<u64>,
+}
+
+impl Service {
+    /// Chips given in the 24 hours to `now`.
+    pub fn given_today(&self, now: u64) -> u64 {
+        self.gives
+            .iter()
+            .filter(|g| now.saturating_sub(g.at) < DAY_MS)
+            .map(|g| g.amount)
+            .sum()
+    }
+}
+
+/// A request a service may not make: the HTTP status to answer, and why.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Refused {
+    /// The HTTP status.
+    pub status: u16,
+    /// Why.
+    pub reason: String,
+}
+
+fn refused<T>(status: u16, reason: impl Into<String>) -> Result<T, Refused> {
+    Err(Refused {
+        status,
+        reason: reason.into(),
+    })
+}
+
+/// What a service's request comes to, once it's checked.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Prepared {
+    /// The answer, with nothing more to do.
+    Value(Value),
+    /// The members, for the caller to list.
+    Members,
+    /// Chips to give or take back: the caller moves them, then calls
+    /// [`Club::service_done`].
+    Move {
+        /// "give" or "take".
+        op: String,
+        /// The member.
+        member: String,
+        /// Hundredths.
+        amount: u64,
+        /// The ledger note.
+        note: String,
+        /// What they wrote, if anything.
+        said: String,
+        /// The key that makes it once only, if any.
+        key: Option<String>,
+    },
+}
+
+/// An amount for people: "200", "1,234.50".
+pub fn chip_text(n: u64) -> String {
+    let whole = (n / 100).to_string();
+    let mut grouped = String::new();
+    for (i, c) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(c);
+    }
+    match n % 100 {
+        0 => grouped,
+        c => format!("{grouped}.{c:02}"),
+    }
+}
+
+/// A number as JavaScript's `Number()` reads it, for the owner's form.
+fn number(v: &Value) -> f64 {
+    match v {
+        Value::Number(n) => n.as_f64().unwrap_or(f64::NAN),
+        Value::String(s) if s.trim().is_empty() => 0.0,
+        Value::String(s) => s.trim().parse().unwrap_or(f64::NAN),
+        Value::Bool(b) => f64::from(u8::from(*b)),
+        Value::Null => 0.0,
+        _ => f64::NAN,
+    }
+}
+
+/// Whether JavaScript takes `v` as true.
+fn truthy(v: &Value) -> bool {
+    match v {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => n.as_f64().is_some_and(|n| n != 0.0 && !n.is_nan()),
+        Value::String(s) => !s.is_empty(),
+        _ => true,
+    }
+}
+
+fn given(o: &Value, key: &str) -> Option<Value> {
+    o.get(key).filter(|v| !v.is_null()).cloned()
+}
+
+/// A service's limits from the owner's form, over `old`'s.
+fn limits_from(
+    o: &Value,
+    old: Option<&Service>,
+) -> Result<(Perms, u64, u64, u64, Option<u64>), RuleError> {
+    let perms = match given(o, "perms") {
+        Some(p) => {
+            let on = |k: &str| p.get(k).is_some_and(truthy);
+            Perms {
+                give: on("give"),
+                take: on("take"),
+                read: on("read"),
+            }
+        }
+        None => old.map_or(
+            Perms {
+                give: true,
+                take: false,
+                read: true,
+            },
+            |s| s.perms,
+        ),
+    };
+    let mut caps = [0u64; 3];
+    for (i, (k, was)) in [
+        ("budget", old.map(|s| s.budget)),
+        ("perGive", old.map(|s| s.per_give)),
+        ("perDay", old.map(|s| s.per_day)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let n = given(o, k).map_or(was.unwrap_or(0) as f64, |v| number(&v));
+        if !whole(n) {
+            return refuse("Budgets and caps are whole numbers of chips (0 for no cap).");
+        }
+        caps[i] = n as u64;
+    }
+    let expires = match o.get("expires") {
+        None => old.and_then(|s| s.expires),
+        Some(Value::Null) => None,
+        Some(Value::String(s)) if s.is_empty() => None,
+        Some(v) => {
+            let n = number(v);
+            if !whole(n) {
+                return refuse("Not a valid expiry.");
+            }
+            Some(n as u64)
+        }
+    };
+    Ok((perms, caps[0], caps[1], caps[2], expires))
+}
+
+impl Club {
+    /// The owner adds a service by its key (`id`, `alg`, `key`, from its
+    /// service line), with `{name, perms, budget, perGive, perDay, expires}`.
+    pub fn add_service(
+        &mut self,
+        id: &str,
+        alg: &str,
+        key: &str,
+        o: &Value,
+        now: u64,
+    ) -> Result<&Service, RuleError> {
+        if self.owner_id.is_none() {
+            return refuse("Only an always-on club can have services.");
+        }
+        let active = |s: &Service| s.status == ServiceStatus::Active;
+        if self.services.get(id).is_some_and(active) {
+            return refuse("That service is already added.");
+        }
+        if self.services.values().filter(|s| active(s)).count() >= MAX_SERVICES {
+            return refuse(format!("A club can have at most {MAX_SERVICES} services."));
+        }
+        if self.members.contains_key(id) {
+            return refuse("That key is a member’s, not a service’s.");
+        }
+        let name = cut(text_of(o.get("name")).trim(), MAX_SERVICE_NAME);
+        if name.is_empty() {
+            return refuse("Give the service a name.");
+        }
+        let (perms, budget, per_give, per_day, expires) = limits_from(o, None)?;
+        let s = Service {
+            id: id.into(),
+            name,
+            alg: alg.into(),
+            key: Some(key.into()),
+            status: ServiceStatus::Active,
+            added_at: now,
+            perms,
+            budget,
+            per_give,
+            per_day,
+            expires,
+            gives: vec![],
+            seen: BTreeMap::new(),
+            done: BTreeMap::new(),
+            failures: 0,
+            last_failure: None,
+            last_used: None,
+            revoked_at: None,
+        };
+        self.services.insert(id.into(), s);
+        Ok(&self.services[id])
+    }
+
+    fn active_service(&mut self, id: &str) -> Result<&mut Service, RuleError> {
+        match self.services.get_mut(id) {
+            Some(s) if s.status == ServiceStatus::Active => Ok(s),
+            _ => refuse("No such service."),
+        }
+    }
+
+    /// The owner changes a service's limits (`{name, perms, budget, perGive,
+    /// perDay, expires}`, each optional); `addBudget` tops its budget up.
+    pub fn update_service(&mut self, id: &str, o: &Value) -> Result<&Service, RuleError> {
+        let add = given(o, "addBudget").map_or(0.0, |v| number(&v));
+        if !whole(add) {
+            return refuse("Add a whole number of chips.");
+        }
+        let s = self.active_service(id)?;
+        let (perms, budget, per_give, per_day, expires) = limits_from(o, Some(s))?;
+        s.perms = perms;
+        s.budget = budget + add as u64;
+        s.per_give = per_give;
+        s.per_day = per_day;
+        s.expires = expires;
+        let name = cut(text_of(o.get("name")).trim(), MAX_SERVICE_NAME);
+        if !name.is_empty() {
+            s.name = name;
+        }
+        Ok(s)
+    }
+
+    /// Revoking: the key is forgotten at once. The record stays, for the
+    /// history.
+    pub fn revoke_service(&mut self, id: &str, now: u64) -> Result<&Service, RuleError> {
+        let s = self.active_service(id)?;
+        s.status = ServiceStatus::Revoked;
+        s.revoked_at = Some(now);
+        s.key = None;
+        s.seen.clear();
+        s.done.clear();
+        Ok(s)
+    }
+
+    /// What the owner's page shows of each service.
+    pub fn services_view(&self, now: u64) -> Vec<Value> {
+        self.services
+            .values()
+            .map(|s| {
+                json!({
+                    "id": s.id, "name": s.name, "status": s.status, "perms": s.perms, "budget": s.budget,
+                    "perGive": s.per_give, "perDay": s.per_day, "expires": s.expires,
+                    "givenToday": s.given_today(now), "failures": s.failures, "lastFailure": s.last_failure,
+                    "lastUsed": s.last_used, "addedAt": s.added_at,
+                })
+            })
+            .collect()
+    }
+
+    fn fail(&mut self, id: Option<&str>, status: u16, reason: &str, now: u64) -> Refused {
+        match id.and_then(|id| self.services.get_mut(id)) {
+            Some(s) => {
+                s.failures += 1;
+                s.last_failure = Some(Failure {
+                    at: now,
+                    reason: reason.into(),
+                });
+            }
+            None => {
+                let count = self.service_refused.as_ref().map_or(0, |r| r.count) + 1;
+                self.service_refused = Some(Refusals { count, at: now });
+            }
+        }
+        Refused {
+            status,
+            reason: reason.into(),
+        }
+    }
+
+    /// Checks a request's envelope from key `from` (`alg`, `key`, signed at
+    /// `seq`, with `body`): from an active service of this club, by its key,
+    /// for this club, fresh, and not seen before. `sig` is what the caller
+    /// found wrong with the signature ("" if nothing), or None when it
+    /// hasn't checked yet: then Ok(false) means "check it, and ask again".
+    /// Ok(true): go ahead. A refusal is counted against the service.
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_service_request(
+        &mut self,
+        from: &str,
+        alg: &str,
+        key: &str,
+        seq: u64,
+        body: &Value,
+        sig: Option<&str>,
+        now: u64,
+    ) -> Result<bool, Refused> {
+        let Some(s) = self.services.get(from) else {
+            return Err(self.fail(None, 401, "This club has no such service.", now));
+        };
+        let why = if s.status != ServiceStatus::Active {
+            Some((401, "This service was revoked.".to_string()))
+        } else if s.key.as_deref() != Some(key) || s.alg != alg {
+            Some((401, "Not this service’s key.".into()))
+        } else {
+            None
+        };
+        if let Some((status, why)) = why {
+            return Err(self.fail(Some(from), status, &why, now));
+        }
+        let Some(sig) = sig else { return Ok(false) };
+        let expires = s.expires;
+        let why = if !sig.is_empty() {
+            Some((401, format!("The signature doesn’t check out ({sig}).")))
+        } else if body.get("type").and_then(Value::as_str) != Some("service")
+            || body.get("club").and_then(Value::as_str) != Some(self.code.as_str())
+        {
+            Some((400, "Not a request for this club.".into()))
+        } else if now.abs_diff(seq) > SKEW_MS {
+            Some((
+                401,
+                "The request is too old or from the future: check the server’s clock.".into(),
+            ))
+        } else if expires.is_some_and(|e| now >= e) {
+            Some((401, "This service has expired.".into()))
+        } else {
+            None
+        };
+        if let Some((status, why)) = why {
+            return Err(self.fail(Some(from), status, &why, now));
+        }
+        let s = self.services.get_mut(from).expect("found above");
+        // Each request once, while it's within the window.
+        s.seen
+            .retain(|_, at| now.saturating_sub(*at) <= 2 * SKEW_MS);
+        if s.seen.contains_key(&seq.to_string()) {
+            return Err(self.fail(Some(from), 401, "This request was already received.", now));
+        }
+        s.seen.insert(seq.to_string(), now);
+        Ok(true)
+    }
+
+    /// What service `id`'s checked request (`body`) comes to. `member` is
+    /// the member it names, found by the caller (by their id, or the one
+    /// members see).
+    pub fn prepare_service_request(
+        &mut self,
+        id: &str,
+        body: &Value,
+        member: Option<&str>,
+        now: u64,
+    ) -> Result<Prepared, Refused> {
+        let Some(s) = self.services.get_mut(id) else {
+            return refused(401, "This club has no such service.");
+        };
+        s.last_used = Some(now);
+        let s = s.clone();
+        let args = body
+            .get("args")
+            .filter(|a| a.is_object())
+            .cloned()
+            .unwrap_or(json!({}));
+        let op = text_of(body.get("op"));
+        let chips = |n: u64| n as f64 / 100.0;
+        match op.as_str() {
+            "status" => {
+                return Ok(Prepared::Value(json!({
+                    "name": s.name, "perms": s.perms, "budget": chips(s.budget), "perGive": chips(s.per_give),
+                    "perDay": chips(s.per_day), "givenToday": chips(s.given_today(now)), "expires": s.expires,
+                })));
+            }
+            "members" if !s.perms.read => {
+                return refused(403, "This service may not list members.");
+            }
+            "members" => return Ok(Prepared::Members),
+            "give" | "take" => {}
+            _ => return refused(400, format!("No service action {op}.")),
+        }
+        if !(if op == "give" {
+            s.perms.give
+        } else {
+            s.perms.take
+        }) {
+            return refused(403, format!("This service may not {op} chips."));
+        }
+        let key = args
+            .get("key")
+            .filter(|k| !k.is_null())
+            .map(|k| cut(&text_of(Some(k)), MAX_KEY));
+        if let Some(done) = key.as_ref().and_then(|k| s.done.get(k)) {
+            let mut v = done.value.clone();
+            v["repeat"] = true.into();
+            return Ok(Prepared::Value(v));
+        }
+        let Some(member) = member.filter(|m| self.member(m).is_some()) else {
+            return refused(404, "No such member.");
+        };
+        let n = args.get("amount").map_or(f64::NAN, number);
+        let amount = (n * 100.0).round();
+        if !(amount > 0.0 && amount <= 9e15 && (amount - n * 100.0).abs() <= 1e-6) {
+            return refused(
+                400,
+                "The amount is a number of chips above 0, with at most two decimals.",
+            );
+        }
+        let amount = amount as u64;
+        if op == "give" {
+            if s.per_give > 0 && amount > s.per_give {
+                return refused(
+                    403,
+                    format!("At most {} in one give.", chip_text(s.per_give)),
+                );
+            }
+            if s.per_day > 0 && s.given_today(now) + amount > s.per_day {
+                return refused(
+                    403,
+                    format!(
+                        "That would be over the {} a day this service may give.",
+                        chip_text(s.per_day)
+                    ),
+                );
+            }
+            if amount > s.budget {
+                return refused(
+                    403,
+                    format!("The service’s budget has {} left.", chip_text(s.budget)),
+                );
+            }
+        }
+        let said = cut(&text_of(args.get("note")), MAX_SERVICE_NOTE);
+        Ok(Prepared::Move {
+            op,
+            member: member.into(),
+            amount,
+            note: if said.is_empty() {
+                s.name.clone()
+            } else {
+                format!("{}: {said}", s.name)
+            },
+            said,
+            key,
+        })
+    }
+
+    /// Service `id` gave (or took back) `amount`, answered with `value`:
+    /// its budget and the day's gives follow, and a key keeps the answer.
+    pub fn service_done(
+        &mut self,
+        id: &str,
+        op: &str,
+        amount: u64,
+        key: Option<&str>,
+        value: &Value,
+        now: u64,
+    ) {
+        let Some(s) = self.services.get_mut(id) else {
+            return;
+        };
+        if op == "give" {
+            s.budget = s.budget.saturating_sub(amount);
+            s.gives.push(Given { at: now, amount });
+            s.gives.retain(|g| now.saturating_sub(g.at) < DAY_MS);
+        }
+        if let Some(k) = key {
+            s.done.insert(
+                k.into(),
+                Done {
+                    at: now,
+                    value: value.clone(),
+                },
+            );
+            s.done.retain(|_, d| now.saturating_sub(d.at) <= DAY_MS);
+            while s.done.len() > MAX_DONE {
+                let oldest = s
+                    .done
+                    .iter()
+                    .min_by_key(|(_, d)| d.at)
+                    .map(|(k, _)| k.clone());
+                oldest.map(|k| s.done.remove(&k));
+            }
+        }
     }
 }
 
@@ -2430,6 +3044,291 @@ mod tests {
         assert!(c.reservations(&a, 0).is_empty());
         assert!(c.drop_reservation(&b, "bob"));
         assert!(!c.drop_reservation(&b, "bob"));
+    }
+
+    fn always_on() -> Club {
+        let mut c = with_members(&["ann", "bob"]);
+        c.owner_id = Some("OWNER".into());
+        c
+    }
+
+    fn give(c: &mut Club, args: Value, now: u64) -> Result<Prepared, Refused> {
+        let member = args["member"].as_str().map(String::from);
+        c.prepare_service_request(
+            "SVC",
+            &json!({"op": "give", "args": args}),
+            member.as_deref(),
+            now,
+        )
+    }
+
+    #[test]
+    fn the_owner_adds_a_service_to_an_always_on_club_named_once() {
+        let mut c = with_members(&["ann"]);
+        let o = json!({"name": "Rewards server", "budget": 100_000, "perGive": 30_000, "perDay": 50_000});
+        assert!(
+            c.add_service("SVC", "ed25519", "KEY", &o, 0)
+                .unwrap_err()
+                .0
+                .contains("always-on")
+        );
+        c.owner_id = Some("OWNER".into());
+        assert!(
+            c.add_service("SVC", "ed25519", "KEY", &json!({"name": " "}), 0)
+                .unwrap_err()
+                .0
+                .contains("name")
+        );
+        assert!(
+            c.add_service("ann", "ed25519", "KEY", &json!({"name": "Ann?"}), 0)
+                .unwrap_err()
+                .0
+                .contains("member’s")
+        );
+        let s = c.add_service("SVC", "ed25519", "KEY", &o, 0).unwrap();
+        assert_eq!(
+            s.perms,
+            Perms {
+                give: true,
+                take: false,
+                read: true
+            }
+        );
+        assert!(
+            c.add_service("SVC", "ed25519", "KEY", &json!({"name": "Again"}), 0)
+                .unwrap_err()
+                .0
+                .contains("already added")
+        );
+    }
+
+    #[test]
+    fn a_service_gives_within_its_budget_and_caps() {
+        let mut c = always_on();
+        c.add_service(
+            "SVC",
+            "ed25519",
+            "KEY",
+            &json!({"name": "Rewards", "budget": 100_000, "perGive": 30_000, "perDay": 50_000}),
+            0,
+        )
+        .unwrap();
+        let Prepared::Move { amount, note, .. } = give(
+            &mut c,
+            json!({"member": "ann", "amount": 200, "note": "League week 1"}),
+            0,
+        )
+        .unwrap() else {
+            panic!("a move")
+        };
+        assert_eq!((amount, note.as_str()), (20_000, "Rewards: League week 1"));
+        c.service_done("SVC", "give", amount, None, &json!({}), 0);
+        let Prepared::Move { amount, .. } =
+            give(&mut c, json!({"member": "bob", "amount": 100.5}), 0).unwrap()
+        else {
+            panic!("a move")
+        };
+        assert_eq!(amount, 10_050);
+        c.service_done("SVC", "give", amount, None, &json!({}), 0);
+        let why = |r: Result<Prepared, Refused>| {
+            let e = r.unwrap_err();
+            (e.status, e.reason)
+        };
+        let (s, r) = why(give(&mut c, json!({"member": "ann", "amount": 301}), 0));
+        assert_eq!(s, 403);
+        assert!(r.contains("At most 300"), "{r}");
+        assert!(
+            why(give(&mut c, json!({"member": "ann", "amount": 250}), 0))
+                .1
+                .contains("500 a day")
+        );
+        assert_eq!(
+            why(give(&mut c, json!({"member": "ann", "amount": 0}), 0)).0,
+            400
+        );
+        assert!(
+            why(give(&mut c, json!({"member": "ann", "amount": 1.234}), 0))
+                .1
+                .contains("two decimals")
+        );
+        assert_eq!(
+            why(give(&mut c, json!({"member": "nobody", "amount": 5}), 0)).0,
+            404
+        );
+        assert_eq!(c.services_view(0)[0]["givenToday"], 30_050);
+        c.update_service("SVC", &json!({"perDay": 0, "perGive": 0}))
+            .unwrap();
+        assert!(
+            why(give(&mut c, json!({"member": "ann", "amount": 700}), 0))
+                .1
+                .contains("budget has 699.50 left")
+        );
+        c.update_service("SVC", &json!({"addBudget": 30_000}))
+            .unwrap();
+        assert_eq!(c.services["SVC"].budget, 99_950);
+    }
+
+    #[test]
+    fn a_give_with_a_key_is_answered_again_not_paid_again() {
+        let mut c = always_on();
+        c.add_service(
+            "SVC",
+            "ed25519",
+            "KEY",
+            &json!({"name": "Rewards", "budget": 100_000}),
+            0,
+        )
+        .unwrap();
+        let args = json!({"member": "ann", "amount": 100, "key": "week-1-ann"});
+        let Prepared::Move { amount, key, .. } = give(&mut c, args.clone(), 0).unwrap() else {
+            panic!("a move")
+        };
+        c.service_done(
+            "SVC",
+            "give",
+            amount,
+            key.as_deref(),
+            &json!({"entry": 7}),
+            0,
+        );
+        assert_eq!(
+            give(&mut c, args, 1).unwrap(),
+            Prepared::Value(json!({"entry": 7, "repeat": true}))
+        );
+    }
+
+    #[test]
+    fn requests_copied_stale_misaddressed_or_by_another_key_are_refused_and_counted() {
+        let mut c = always_on();
+        c.add_service("SVC", "ed25519", "KEY", &json!({"name": "Rewards"}), 0)
+            .unwrap();
+        let body = json!({"type": "service", "club": c.code, "op": "status"});
+        let now = 10 * SKEW_MS;
+        assert_eq!(
+            c.check_service_request("SVC", "ed25519", "KEY", now, &body, None, now),
+            Ok(false),
+            "check the signature"
+        );
+        assert_eq!(
+            c.check_service_request("SVC", "ed25519", "KEY", now, &body, Some(""), now),
+            Ok(true)
+        );
+        let again = c
+            .check_service_request("SVC", "ed25519", "KEY", now, &body, Some(""), now)
+            .unwrap_err();
+        assert!(again.reason.contains("already received"));
+        let stale = c
+            .check_service_request("SVC", "ed25519", "KEY", 1, &body, Some(""), now)
+            .unwrap_err();
+        assert!(stale.reason.contains("too old"));
+        let bad = c
+            .check_service_request(
+                "SVC",
+                "ed25519",
+                "KEY",
+                now + 1,
+                &body,
+                Some("bad signature"),
+                now,
+            )
+            .unwrap_err();
+        assert!(bad.reason.contains("signature"));
+        let other = json!({"type": "service", "club": "OTHR", "op": "status"});
+        assert_eq!(
+            c.check_service_request("SVC", "ed25519", "KEY", now + 2, &other, Some(""), now)
+                .unwrap_err()
+                .status,
+            400
+        );
+        let forged = c
+            .check_service_request("SVC", "ed25519", "OTHER", now, &body, None, now)
+            .unwrap_err();
+        assert!(forged.reason.contains("Not this service’s key"));
+        assert!(
+            c.check_service_request("NOPE", "ed25519", "K", now, &body, None, now)
+                .unwrap_err()
+                .reason
+                .contains("no such service")
+        );
+        assert_eq!(c.service_refused.as_ref().unwrap().count, 1);
+        assert_eq!(c.services["SVC"].failures, 5);
+    }
+
+    #[test]
+    fn permissions_expiry_and_revoking() {
+        let mut c = always_on();
+        c.add_service("SVC", "ed25519", "KEY", &json!({"name": "Rewards", "budget": 100_000, "perms": {"give": true, "take": false, "read": false}}), 0).unwrap();
+        let take = json!({"op": "take", "args": {"member": "ann", "amount": 50}});
+        assert!(
+            c.prepare_service_request("SVC", &take, Some("ann"), 0)
+                .unwrap_err()
+                .reason
+                .contains("may not take")
+        );
+        let list = json!({"op": "members"});
+        assert!(
+            c.prepare_service_request("SVC", &list, None, 0)
+                .unwrap_err()
+                .reason
+                .contains("may not list")
+        );
+        let status = c
+            .prepare_service_request("SVC", &json!({"op": "status"}), None, 0)
+            .unwrap();
+        let Prepared::Value(v) = status else {
+            panic!("a value")
+        };
+        assert_eq!(v["budget"], 1000.0);
+        c.update_service(
+            "SVC",
+            &json!({"perms": {"give": true, "take": true, "read": true}}),
+        )
+        .unwrap();
+        assert_eq!(
+            c.prepare_service_request("SVC", &list, None, 0),
+            Ok(Prepared::Members)
+        );
+        assert!(matches!(
+            c.prepare_service_request("SVC", &take, Some("ann"), 0),
+            Ok(Prepared::Move { .. })
+        ));
+        c.update_service("SVC", &json!({"expires": 5})).unwrap();
+        let body = json!({"type": "service", "club": c.code});
+        assert!(
+            c.check_service_request("SVC", "ed25519", "KEY", 10, &body, Some(""), 10)
+                .unwrap_err()
+                .reason
+                .contains("expired")
+        );
+        c.update_service("SVC", &json!({"expires": null})).unwrap();
+        assert_eq!(c.services["SVC"].expires, None);
+        c.revoke_service("SVC", 20).unwrap();
+        assert_eq!(c.services["SVC"].key, None);
+        assert!(
+            c.check_service_request("SVC", "ed25519", "KEY", 20, &body, None, 20)
+                .unwrap_err()
+                .reason
+                .contains("revoked")
+        );
+        c.add_service(
+            "SVC",
+            "ed25519",
+            "KEY",
+            &json!({"name": "Rewards 2", "budget": 500}),
+            30,
+        )
+        .unwrap();
+        assert_eq!(
+            c.services["SVC"].budget, 500,
+            "added again, it starts fresh"
+        );
+    }
+
+    #[test]
+    fn chip_text_reads_like_the_page() {
+        assert_eq!(chip_text(30_000), "300");
+        assert_eq!(chip_text(69_950), "699.50");
+        assert_eq!(chip_text(123_456_789), "1,234,567.89");
     }
 
     #[test]

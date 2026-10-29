@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use ducy_play::club_rules::{self, Club, HOLD_MS, RuleError};
+use ducy_play::club_rules::{self, Club, HOLD_MS, Refused, RuleError};
 use rand::rngs::StdRng;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -141,6 +141,41 @@ enum Op {
     },
     PruneReservations,
     NextLapse,
+    AddService {
+        id: String,
+        alg: String,
+        key: String,
+        o: Value,
+    },
+    UpdateService {
+        id: String,
+        o: Value,
+    },
+    RevokeService {
+        id: String,
+    },
+    ServicesView,
+    CheckService {
+        from: String,
+        alg: String,
+        key: String,
+        seq: u64,
+        body: Value,
+        sig: Option<String>,
+    },
+    PrepareService {
+        id: String,
+        body: Value,
+        member: Option<String>,
+    },
+    ServiceDone {
+        id: String,
+        #[serde(rename = "do")]
+        what: String,
+        amount: u64,
+        key: Option<String>,
+        value: Value,
+    },
 }
 
 fn yes() -> bool {
@@ -153,6 +188,15 @@ fn rng() -> StdRng {
 
 fn value(v: impl serde::Serialize) -> Result<Value, RuleError> {
     serde_json::to_value(v).map_err(|e| RuleError(e.to_string()))
+}
+
+/// A service's request answered, or refused (`{refused: {status, reason}}`,
+/// with the refusal counted, so the club still changes).
+fn answer<T: serde::Serialize>(r: Result<T, Refused>) -> Result<Value, RuleError> {
+    match r {
+        Ok(v) => value(v),
+        Err(refused) => Ok(json!({"refused": refused})),
+    }
 }
 
 /// Runs `op` on the club whose rules' part is `club` (JSON; ignored for
@@ -294,6 +338,36 @@ pub fn club_rules(club: &str, op: JsValue, now: f64) -> Result<JsValue, JsError>
         Op::NextLapse => {
             changes = false;
             value(c.next_lapse())
+        }
+        Op::AddService { id, alg, key, o } => {
+            c.add_service(&id, &alg, &key, &o, now).and_then(value)
+        }
+        Op::UpdateService { id, o } => c.update_service(&id, &o).and_then(value),
+        Op::RevokeService { id } => c.revoke_service(&id, now).and_then(value),
+        Op::ServicesView => {
+            changes = false;
+            value(c.services_view(now))
+        }
+        Op::CheckService {
+            from,
+            alg,
+            key,
+            seq,
+            body,
+            sig,
+        } => answer(c.check_service_request(&from, &alg, &key, seq, &body, sig.as_deref(), now)),
+        Op::PrepareService { id, body, member } => {
+            answer(c.prepare_service_request(&id, &body, member.as_deref(), now))
+        }
+        Op::ServiceDone {
+            id,
+            what,
+            amount,
+            key,
+            value: v,
+        } => {
+            c.service_done(&id, &what, amount, key.as_deref(), &v, now);
+            Ok(Value::Null)
         }
     };
     to_js(&match r {
