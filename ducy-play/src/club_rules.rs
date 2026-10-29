@@ -73,7 +73,7 @@ impl fmt::Display for RuleError {
 
 impl std::error::Error for RuleError {}
 
-fn refuse<T>(why: impl Into<String>) -> Result<T, RuleError> {
+pub(crate) fn refuse<T>(why: impl Into<String>) -> Result<T, RuleError> {
     Err(RuleError(why.into()))
 }
 
@@ -159,7 +159,7 @@ impl Member {
         }
     }
 
-    fn is(&self, status: Status) -> bool {
+    pub(crate) fn is(&self, status: Status) -> bool {
         self.status == status
     }
 
@@ -652,7 +652,7 @@ fn base36(mut n: u64) -> String {
     out.iter().rev().collect()
 }
 
-fn random36(rng: &mut StdRng, len: usize) -> String {
+pub(crate) fn random36(rng: &mut StdRng, len: usize) -> String {
     (0..len)
         .map(|_| std::char::from_digit(u32::from(rng.random::<u8>()) % 36, 36).unwrap_or('0'))
         .collect()
