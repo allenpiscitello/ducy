@@ -9,6 +9,7 @@ mod rules;
 mod seat_bot;
 mod shuffle;
 mod tournament;
+mod tourneys;
 pub use play::{BotTable, MultiTable};
 
 use ducy::deck::{Card, Deck};
