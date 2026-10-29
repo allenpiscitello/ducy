@@ -205,6 +205,7 @@ impl ClubState {
         if a.status != "paid" || a.entry.is_some() {
             return Ok(());
         }
+        self.book.ensure_links(now)?;
         let entries = self
             .book
             .money
@@ -428,6 +429,7 @@ impl ClubState {
                 let v = self.with_promos(|p| p.void_award(&id, now, &why, rng))?;
                 if v.take > 0 {
                     let a = &v.award;
+                    self.book.ensure_links(now)?;
                     let entries = self
                         .book
                         .money

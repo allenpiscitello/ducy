@@ -1233,6 +1233,7 @@ impl Book {
             _ => return Err(RuleError("The club pays prizes and refunds.".into()).into()),
         };
         let amt = amount(amt)?;
+        self.ensure_links(now)?;
         let entries = self
             .money
             .pay(id, kind, about, amt, now)
@@ -1260,6 +1261,7 @@ impl Book {
             ))
             .into());
         }
+        self.ensure_links(now)?;
         let entries = self
             .money
             .void(id, promo, amt, now)
