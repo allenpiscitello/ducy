@@ -4,6 +4,7 @@ mod club;
 mod fair;
 mod money;
 mod play;
+mod rules;
 mod seat_bot;
 mod shuffle;
 mod tournament;
