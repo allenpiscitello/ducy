@@ -64,6 +64,7 @@ pub mod fair_deal;
 pub mod features;
 pub mod generic;
 mod hand;
+pub mod hands;
 mod host;
 mod matchup;
 pub mod net;
