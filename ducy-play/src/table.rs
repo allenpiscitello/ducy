@@ -382,24 +382,7 @@ impl Table {
     /// dealt now (with everyone who would play), or `None` if fewer than two
     /// seats would be dealt in.
     pub fn next_positions(&self) -> Option<(usize, usize, usize)> {
-        let n = self.seats.len();
-        let dealt: Vec<usize> = (0..n).filter(|&s| self.will_play(s)).collect();
-        if dealt.len() < 2 {
-            return None;
-        }
-        let next_after = |from: usize| {
-            (1..=n)
-                .map(|k| (from + k) % n)
-                .find(|s| dealt.contains(s))
-                .expect("two players are in")
-        };
-        let button = next_after(self.button);
-        let small_blind = if dealt.len() == 2 {
-            button
-        } else {
-            next_after(button)
-        };
-        Some((button, small_blind, next_after(small_blind)))
+        next_positions(self.seats.len(), self.button, |s| self.will_play(s))
     }
 
     /// Someone new has just sat in `seat` (e.g. moved from another table in
@@ -1028,6 +1011,35 @@ impl Table {
     }
 }
 
+/// The button, small blind and big blind seats of the next hand at a table
+/// of `n` seats whose button is on `button`, where `plays` says which seats
+/// would be dealt in; `None` if fewer than two would. The button moves to
+/// the next seat dealt in; heads-up it posts the small blind and the other
+/// player the big, otherwise the two seats after it do.
+pub(crate) fn next_positions(
+    n: usize,
+    button: usize,
+    plays: impl Fn(usize) -> bool,
+) -> Option<(usize, usize, usize)> {
+    let dealt: Vec<usize> = (0..n).filter(|&s| plays(s)).collect();
+    if dealt.len() < 2 {
+        return None;
+    }
+    let next_after = |from: usize| {
+        (1..=n)
+            .map(|k| (from + k) % n)
+            .find(|s| dealt.contains(s))
+            .expect("two players are in")
+    };
+    let button = next_after(button);
+    let small_blind = if dealt.len() == 2 {
+        button
+    } else {
+        next_after(button)
+    };
+    Some((button, small_blind, next_after(small_blind)))
+}
+
 impl TableView {
     /// What a bot playing the viewer's seat decides from, built from this
     /// view alone: for a bot that sits at a table the way a person does and
@@ -1042,30 +1054,7 @@ impl TableView {
         let legal = self.legal?;
         let street = self.street?;
         let n = self.seats.len();
-        let mut contributed = vec![0u64; n];
-        let mut bet = vec![0u64; n];
-        for e in &self.events {
-            let (seat, total, street_bet) = match *e {
-                Event::Ante { seat, amount } => (seat, amount, None),
-                Event::SmallBlind { seat, amount }
-                | Event::BigBlind { seat, amount }
-                | Event::Call { seat, amount, .. } => (seat, amount, Some(amount)),
-                Event::Post { seat, dead, live } => (seat, dead + live, Some(live)),
-                Event::Bet { seat, to, .. } | Event::Raise { seat, to, .. } => {
-                    let more = to.saturating_sub(bet.get(seat).copied().unwrap_or(0));
-                    (seat, more, Some(more))
-                }
-                Event::Board { .. } => {
-                    bet.fill(0);
-                    continue;
-                }
-                _ => continue,
-            };
-            if seat < n {
-                contributed[seat] += total;
-                bet[seat] += street_bet.unwrap_or(0);
-            }
-        }
+        let (contributed, _) = crate::hands::contributions(&self.events, n);
         // The hand's players: seats taken and in this hand (a seat out of it
         // sits out, or has no chips in front of it and none in the pot).
         let dealt: Vec<usize> = (0..n)
