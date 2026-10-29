@@ -4,6 +4,7 @@ mod club;
 mod fair;
 mod hands;
 mod money;
+mod oneoff;
 mod play;
 mod promos;
 mod rules;
