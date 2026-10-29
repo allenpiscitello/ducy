@@ -57,6 +57,8 @@ mod bot;
 pub mod bots;
 pub mod club_money;
 #[cfg(feature = "club")]
+pub mod club_promos;
+#[cfg(feature = "club")]
 pub mod club_rules;
 #[cfg(feature = "club")]
 pub mod club_tourneys;

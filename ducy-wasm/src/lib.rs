@@ -5,6 +5,7 @@ mod fair;
 mod hands;
 mod money;
 mod play;
+mod promos;
 mod rules;
 mod seat_bot;
 mod shuffle;
