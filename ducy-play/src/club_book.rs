@@ -11,9 +11,9 @@
 
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Number, Value, json};
 
-use crate::club_money::{CLUB, Entry, Money};
+use crate::club_money::{CLUB, Entry, EntryKind, Money, MoneyError};
 use crate::club_rules::{Club, RuleError, Status, chip_text, new_invite, refuse};
 
 /// The most chips in one move.
@@ -855,6 +855,421 @@ impl Book {
     }
 }
 
+/// A table move refused: why, and whether it's for want of chips (the
+/// table then offers to ask the manager for more).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TableRefusal {
+    /// Why, in the player's words.
+    pub message: String,
+    /// Too little available.
+    pub short: bool,
+}
+
+impl From<RuleError> for TableRefusal {
+    fn from(e: RuleError) -> Self {
+        Self {
+            message: e.0,
+            short: false,
+        }
+    }
+}
+
+fn short<T>(message: String) -> Result<T, TableRefusal> {
+    Err(TableRefusal {
+        message,
+        short: true,
+    })
+}
+
+/// A table's buy-in limits, in chips.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+pub struct Limits {
+    /// The least buy-in.
+    pub min: u64,
+    /// The most.
+    pub max: u64,
+}
+
+impl Book {
+    fn seat(&self, id: &str) -> Option<&serde_json::Map<String, Value>> {
+        self.club.members.get(id)?.seat()
+    }
+
+    fn seat_num(&self, id: &str, k: &str) -> Option<u64> {
+        self.seat(id)?.get(k)?.as_u64()
+    }
+
+    fn set_seat(&mut self, id: &str, seat: Value) {
+        self.set(id, "seat", seat);
+    }
+
+    /// The least buy-in at `table` for `id` because of the rathole rule: who
+    /// left with S chips comes back with at least S until the club's window
+    /// has passed. 0 when the rule doesn't apply.
+    pub fn rathole_min(&self, id: &str, table: &str, now: u64) -> u64 {
+        let Some(left) = self.get(id, "left").and_then(|l| l.get(table)).cloned() else {
+            return 0;
+        };
+        let hours = self
+            .club
+            .rathole_hours
+            .as_ref()
+            .and_then(Number::as_f64)
+            .unwrap_or(2.0);
+        let at = left["at"].as_u64().unwrap_or(0);
+        if (now.saturating_sub(at) as f64) < hours * 3_600_000.0 {
+            left["stack"].as_u64().unwrap_or(0)
+        } else {
+            0
+        }
+    }
+
+    /// Refused, in the player's words, when `amt` is more than they have
+    /// available.
+    fn too_much(&self, id: &str, amt: u64) -> Result<(), TableRefusal> {
+        let avail = self.available(id);
+        if amt <= avail {
+            return Ok(());
+        }
+        let own = (self.balance(id) + self.credit(id) as i64).max(0) as u64;
+        if avail < own {
+            return short(format!(
+                "You have {} available: your agent can’t back more right now.",
+                chip_text(avail)
+            ));
+        }
+        if self.credit(id) == 0 {
+            return short(format!(
+                "You have {} chips in the club.",
+                chip_text(self.balance(id).max(0) as u64)
+            ));
+        }
+        short(format!(
+            "You have {} available (your chips and credit).",
+            chip_text(avail)
+        ))
+    }
+
+    /// The money model's refusal, in the player's words.
+    fn refusal(&self, id: &str, e: MoneyError) -> TableRefusal {
+        match e {
+            MoneyError::Room { .. } => TableRefusal {
+                message: format!(
+                    "You have {} available: your agent can’t back more right now.",
+                    chip_text(self.available(id))
+                ),
+                short: true,
+            },
+            MoneyError::Overdue { .. } => TableRefusal {
+                message: "What you owe is overdue: pay it back to play.".into(),
+                short: false,
+            },
+            other => TableRefusal {
+                message: other.to_string(),
+                short: false,
+            },
+        }
+    }
+
+    fn own(entries: Vec<Entry>, id: &str) -> Option<Entry> {
+        entries.into_iter().find(|e| e.member == id)
+    }
+
+    /// Sits a member at `table` with `amt` chips down their path, within
+    /// the table's limits and the rathole rule.
+    pub fn buy_in(
+        &mut self,
+        id: &str,
+        table: &str,
+        amt: Option<i64>,
+        limits: Limits,
+        now: u64,
+    ) -> Result<Option<Entry>, TableRefusal> {
+        self.member(id)?;
+        let amt = amount(amt)?;
+        if self.seat(id).is_some() {
+            return Err(RuleError("Already seated at a table.".into()).into());
+        }
+        let floor = limits.min.max(self.rathole_min(id, table, now));
+        if amt < floor {
+            let msg = if floor > limits.min {
+                let hours = self
+                    .club
+                    .rathole_hours
+                    .as_ref()
+                    .and_then(Number::as_f64)
+                    .unwrap_or(2.0);
+                format!(
+                    "You left this table with {} chips less than {hours} hours ago, so buy in for at least that.",
+                    chip_text(floor)
+                )
+            } else {
+                format!("The minimum buy-in is {}.", limits.min)
+            };
+            return Err(RuleError(msg).into());
+        }
+        if amt > limits.max {
+            return Err(
+                RuleError(format!("The maximum buy-in is {}.", chip_text(limits.max))).into(),
+            );
+        }
+        self.too_much(id, amt)?;
+        self.ensure_links(now)?;
+        let entries = self
+            .money
+            .buy_in(id, table, amt, now)
+            .map_err(|e| self.refusal(id, e))?;
+        self.set_seat(id, json!({"table": table, "stack": amt, "put": amt}));
+        self.sync();
+        Ok(Self::own(entries, id))
+    }
+
+    /// Adds chips to a seated member's stack between hands, so it doesn't
+    /// go over `max`. None if nothing moved. More than is available is
+    /// refused, not cut down.
+    pub fn top_up(
+        &mut self,
+        id: &str,
+        amt: Option<i64>,
+        max: u64,
+        now: u64,
+    ) -> Result<Option<Entry>, TableRefusal> {
+        self.member(id)?;
+        let amt = amount(amt)?;
+        let Some(stack) = self
+            .seat_num(id, "stack")
+            .or_else(|| self.seat(id).map(|_| 0))
+        else {
+            return Err(RuleError("Not seated.".into()).into());
+        };
+        let moved = amt.min(max.saturating_sub(stack));
+        if moved == 0 {
+            return Ok(None);
+        }
+        self.too_much(id, moved)?;
+        let entries = self
+            .money
+            .top_up(id, moved, now)
+            .map_err(|e| self.refusal(id, e))?;
+        let mut seat = self.seat(id).cloned().unwrap_or_default();
+        seat.insert("stack".into(), (stack + moved).into());
+        if let Some(put) = seat.get("put").and_then(Value::as_u64) {
+            seat.insert("put".into(), (put + moved).into());
+        }
+        self.set_seat(id, Value::Object(seat));
+        self.sync();
+        Ok(Self::own(entries, id))
+    }
+
+    /// The table handed back part of a top-up: those chips leave the seat
+    /// and go back up the path.
+    pub fn refund_top_up(
+        &mut self,
+        id: &str,
+        amt: Option<i64>,
+        now: u64,
+    ) -> Result<Option<Entry>, TableRefusal> {
+        self.member(id)?;
+        let amt = amount(amt)?;
+        let Some(mut seat) = self.seat(id).cloned() else {
+            return Ok(None);
+        };
+        for k in ["stack", "put"] {
+            if let Some(v) = seat.get(k).and_then(Value::as_u64) {
+                seat.insert(k.into(), v.saturating_sub(amt).into());
+            }
+        }
+        self.set_seat(id, Value::Object(seat));
+        let entries = self
+            .money
+            .refund_top_up(id, amt, now)
+            .map_err(|e| self.refusal(id, e))?;
+        self.sync();
+        Ok(Self::own(entries, id))
+    }
+
+    /// Stands a member up: their stack goes back up their path, and the
+    /// rathole rule starts for that table. What they owed is paid back first.
+    /// With nothing left, the cash-out is still an entry, at 0.
+    pub fn cash_out(&mut self, id: &str, now: u64) -> Result<Option<Entry>, TableRefusal> {
+        let Some(seat) = self.seat(id).cloned() else {
+            return Err(RuleError("Not seated.".into()).into());
+        };
+        let table = seat
+            .get("table")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let stack = seat.get("stack").and_then(Value::as_u64).unwrap_or(0);
+        self.money
+            .set_stack(id, stack)
+            .map_err(|e| self.refusal(id, e))?;
+        let entries = self
+            .money
+            .cash_out(id, 0, now)
+            .map_err(|e| self.refusal(id, e))?;
+        self.set_seat(id, Value::Null);
+        let mut left = self
+            .get(id, "left")
+            .cloned()
+            .filter(Value::is_object)
+            .unwrap_or_else(|| json!({}));
+        left[table.as_str()] = json!({"stack": stack, "at": now});
+        self.set(id, "left", left);
+        self.sync();
+        Ok(Self::own(entries, id))
+    }
+
+    /// A member at `table` asks for `amount` chips (the engine has checked
+    /// the table's limits for their stack): a buy-in, or a top-up.
+    pub fn chips_for_table(
+        &mut self,
+        id: &str,
+        table: &str,
+        amount: Option<i64>,
+        limits: Limits,
+        now: u64,
+    ) -> Result<Option<Entry>, TableRefusal> {
+        self.member(id)?;
+        match self
+            .seat(id)
+            .and_then(|s| s.get("table"))
+            .and_then(Value::as_str)
+        {
+            Some(t) if t != table => {
+                Err(RuleError("Already seated at another table.".into()).into())
+            }
+            Some(_) => self.top_up(id, amount, u64::MAX, now),
+            None => self.buy_in(id, table, amount, limits, now),
+        }
+    }
+
+    /// Someone left a table with `chips` (the engine's count): back to their
+    /// balance. None if they weren't seated.
+    pub fn left_table(
+        &mut self,
+        id: &str,
+        chips: u64,
+        now: u64,
+    ) -> Result<Option<Entry>, TableRefusal> {
+        let Some(mut seat) = self.seat(id).cloned() else {
+            return Ok(None);
+        };
+        seat.insert("stack".into(), chips.into());
+        self.set_seat(id, Value::Object(seat));
+        self.cash_out(id, now)
+    }
+
+    /// Everyone seated at a table but those in `keep` (or only at `only`)
+    /// gets back the stack the ledger last had for them.
+    pub fn cash_out_seated(
+        &mut self,
+        keep: &[String],
+        only: Option<&str>,
+        now: u64,
+    ) -> Result<Vec<Entry>, TableRefusal> {
+        let ids: Vec<String> = self
+            .club
+            .members
+            .values()
+            .filter(|m| {
+                let t = m.seat_table();
+                t.is_some_and(|t| only.map_or(!keep.iter().any(|k| k == t), |o| o == t))
+            })
+            .map(|m| m.id.clone())
+            .collect();
+        let mut out = vec![];
+        for id in ids {
+            out.extend(self.cash_out(&id, now)?);
+        }
+        Ok(out)
+    }
+
+    /// A tournament buy-in: `amt` down the member's path.
+    pub fn tourney_buy_in(
+        &mut self,
+        id: &str,
+        tourney: &str,
+        amt: Option<i64>,
+        now: u64,
+    ) -> Result<Option<Entry>, TableRefusal> {
+        self.member(id)?;
+        let amt = amount(amt)?;
+        let avail = self.available(id);
+        if amt > avail {
+            return Err(RuleError(format!(
+                "The buy-in is {} chips; you have {}.",
+                chip_text(amt),
+                chip_text(avail)
+            ))
+            .into());
+        }
+        self.ensure_links(now)?;
+        let entries = self
+            .money
+            .tourney_buy_in(id, tourney, amt, now)
+            .map_err(|e| self.refusal(id, e))?;
+        self.sync();
+        Ok(Self::own(entries, id))
+    }
+
+    /// The club pays a member up their path: a prize (a tournament's or a
+    /// promotion's) or a refund (a tournament buy-in back).
+    pub fn pay(
+        &mut self,
+        id: &str,
+        what: &str,
+        amt: Option<i64>,
+        about: &str,
+        now: u64,
+    ) -> Result<Option<Entry>, TableRefusal> {
+        // Removed since they entered, they're paid all the same.
+        if !self.club.members.contains_key(id) {
+            return Err(RuleError("No such member.".into()).into());
+        }
+        let kind = match what {
+            "prize" => EntryKind::Prize,
+            "refund" => EntryKind::Refund,
+            _ => return Err(RuleError("The club pays prizes and refunds.".into()).into()),
+        };
+        let amt = amount(amt)?;
+        let entries = self
+            .money
+            .pay(id, kind, about, amt, now)
+            .map_err(|e| self.refusal(id, e))?;
+        self.sync();
+        Ok(Self::own(entries, id))
+    }
+
+    /// A promotion prize taken back, down the path it came up.
+    pub fn void_prize(
+        &mut self,
+        id: &str,
+        amt: Option<i64>,
+        promo: &str,
+        now: u64,
+    ) -> Result<Option<Entry>, TableRefusal> {
+        self.member(id)?;
+        let amt = amount(amt)?;
+        let bal = self.balance(id);
+        if (amt as i64) > bal {
+            return Err(RuleError(format!(
+                "{} has only {} chips in the club now; take what’s left from their balance first, or leave the award.",
+                self.name(id),
+                chip_text(bal.max(0) as u64)
+            ))
+            .into());
+        }
+        let entries = self
+            .money
+            .void(id, promo, amt, now)
+            .map_err(|e| self.refusal(id, e))?;
+        self.chips.reclaimed += amt as i64;
+        self.sync();
+        Ok(Self::own(entries, id))
+    }
+}
+
 /// The parts of the club a book changes, to write back.
 pub fn written(book: &Book) -> Value {
     json!({
@@ -988,6 +1403,121 @@ mod tests {
         assert_eq!(b.through("bo").as_deref(), Some(CLUB));
         assert!(b.club.members["bo"].agent_of.is_none());
         assert_eq!(b.log.last().unwrap()["text"], "Al is no longer an agent");
+    }
+
+    const LIMITS: Limits = Limits {
+        min: 100,
+        max: 1000,
+    };
+
+    #[test]
+    fn buy_in_play_and_cash_out_with_the_rathole_rule() {
+        let mut b = book(&["ann"]);
+        b.issue("ann", Some(2000), "", 1).unwrap();
+        assert!(
+            b.buy_in("ann", "t1", Some(50), LIMITS, 2)
+                .unwrap_err()
+                .message
+                .contains("The minimum buy-in is 100.")
+        );
+        assert!(
+            b.buy_in("ann", "t1", Some(5000), LIMITS, 2)
+                .unwrap_err()
+                .message
+                .contains("maximum")
+        );
+        b.buy_in("ann", "t1", Some(500), LIMITS, 2).unwrap();
+        assert_eq!(
+            (b.balance("ann"), b.seat_num("ann", "stack")),
+            (1500, Some(500))
+        );
+        assert!(
+            b.buy_in("ann", "t2", Some(500), LIMITS, 3)
+                .unwrap_err()
+                .message
+                .contains("Already seated")
+        );
+        // A top-up capped at the table's maximum.
+        b.top_up("ann", Some(800), 1000, 4).unwrap();
+        assert_eq!(b.seat_num("ann", "stack"), Some(1000));
+        // They win, and stand up with 1,300.
+        b.left_table("ann", 1300, 5).unwrap();
+        assert_eq!(b.balance("ann"), 2300);
+        assert!(b.seat("ann").is_none());
+        // Back within the window: at least what they left with.
+        assert_eq!(b.rathole_min("ann", "t1", 6), 1300);
+        let e = b
+            .buy_in(
+                "ann",
+                "t1",
+                Some(500),
+                Limits {
+                    min: 100,
+                    max: 2000,
+                },
+                6,
+            )
+            .unwrap_err();
+        assert!(
+            e.message
+                .contains("You left this table with 13 chips less than 2 hours ago")
+        );
+        assert_eq!(b.rathole_min("ann", "t1", 6 + 2 * 3_600_000), 0);
+    }
+
+    #[test]
+    fn short_of_chips_the_table_offers_to_ask() {
+        let mut b = book(&["ann"]);
+        b.issue("ann", Some(300), "", 1).unwrap();
+        let e = b.buy_in("ann", "t1", Some(500), LIMITS, 2).unwrap_err();
+        assert!(e.short);
+        assert_eq!(e.message, "You have 3 chips in the club.");
+        b.set_credit("ann", Some(100), 3).unwrap();
+        let e = b.buy_in("ann", "t1", Some(500), LIMITS, 4).unwrap_err();
+        assert_eq!(e.message, "You have 4 available (your chips and credit).");
+        // Within credit: a buy-in on credit.
+        b.buy_in("ann", "t1", Some(400), LIMITS, 5).unwrap();
+        assert_eq!(b.balance("ann"), -100);
+    }
+
+    #[test]
+    fn tournaments_and_prizes_go_along_the_path() {
+        let mut b = book(&["ann"]);
+        b.issue("ann", Some(1000), "", 1).unwrap();
+        assert!(
+            b.tourney_buy_in("ann", "T", Some(2000), 2)
+                .unwrap_err()
+                .message
+                .contains("The buy-in is 20 chips; you have 10.")
+        );
+        b.tourney_buy_in("ann", "T", Some(400), 2).unwrap();
+        assert_eq!(b.balance("ann"), 600);
+        b.pay("ann", "refund", Some(400), "T", 3).unwrap();
+        b.pay("ann", "prize", Some(1000), "P", 4).unwrap();
+        assert_eq!(b.balance("ann"), 2000);
+        assert!(
+            b.void_prize("ann", Some(5000), "P", 5)
+                .unwrap_err()
+                .message
+                .contains("Ann has only 20 chips")
+        );
+        b.void_prize("ann", Some(1000), "P", 5).unwrap();
+        assert_eq!((b.balance("ann"), b.chips.reclaimed), (1000, 1000));
+    }
+
+    #[test]
+    fn a_restart_cashes_out_everyone_but_the_tables_kept() {
+        let mut b = book(&["ann", "bo"]);
+        for id in ["ann", "bo"] {
+            b.issue(id, Some(1000), "", 1).unwrap();
+        }
+        b.buy_in("ann", "t1", Some(500), LIMITS, 2).unwrap();
+        b.buy_in("bo", "t2", Some(500), LIMITS, 2).unwrap();
+        let out = b.cash_out_seated(&["t2".into()], None, 3).unwrap();
+        assert_eq!(out.len(), 1);
+        assert!(b.seat("ann").is_none() && b.seat("bo").is_some());
+        b.cash_out_seated(&[], Some("t2"), 4).unwrap();
+        assert!(b.seat("bo").is_none());
     }
 
     #[test]
