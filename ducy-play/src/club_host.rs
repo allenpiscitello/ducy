@@ -73,6 +73,10 @@ pub struct Outcome {
     pub help_to: Vec<String>,
     /// Promotions changed: re-arm the timer for the next period's end.
     pub arm_promos: bool,
+    /// New tournaments: time their starts.
+    pub schedule: Vec<String>,
+    /// Tournaments cancelled: stop their tables.
+    pub stop_tourneys: Vec<String>,
 }
 
 impl Outcome {
@@ -81,6 +85,21 @@ impl Outcome {
             id: id.into(),
             since,
         });
+    }
+}
+
+impl ClubState {
+    /// Member `id`'s account, from their latest ledger entry.
+    fn account_latest(&self, id: &str, out: &mut Outcome) {
+        let n = self
+            .book
+            .money
+            .ledger()
+            .iter()
+            .rev()
+            .find(|e| e.member == id)
+            .map(|e| e.n - 1);
+        out.account(id, n);
     }
 }
 
@@ -460,6 +479,73 @@ impl ClubState {
                 };
                 out.value = p.admin(now);
             }
+            // Tournaments (#77): a new one, timed to start; cancelling one,
+            // every buy-in back. `limits`: the plan's (#265, tourneysPerDay).
+            "new_tourney" => {
+                let s = args.get("tourney").cloned().unwrap_or_else(|| json!({}));
+                let most = args
+                    .get("limits")
+                    .and_then(|l| l.get("tourneysPerDay"))
+                    .and_then(Value::as_u64);
+                let t = self.with_tourneys(|t| t.new_tourney(&s, now, most, rng))?;
+                out.schedule.push(t.id.clone());
+                out.value = t.id.into();
+                out.tell.push(Tell::Tourneys);
+            }
+            "cancel_tourney" => {
+                if !self.tourneys.iter().any(|t| t.id == id) {
+                    return refuse("No such tournament.");
+                }
+                let mut step = crate::club_tourney_host::TourneyStep::default();
+                self.tourney_abandon(&id, "the manager cancelled it", true, now, &mut step)?;
+                for m in &step.chips_changed {
+                    self.account_latest(m, &mut out);
+                }
+                out.stop_tourneys.push(id);
+                out.tell.push(Tell::Tourneys);
+            }
+            // A member registering or unregistering before the start (#77):
+            // the buy-in down their path, or back up it. `tid`: the tournament.
+            "register" | "unregister" => {
+                let tid = text(args, "tid");
+                if op == "register" {
+                    let buy_in = self.with_tourneys(|t| t.check_register(&tid, &id, now))?;
+                    if buy_in > 0 {
+                        self.book
+                            .tourney_buy_in(&id, &tid, Some(buy_in as i64), now)
+                            .map_err(|e| RuleError(e.message))?;
+                    }
+                    self.with_tourneys(|t| t.register(&tid, &id, now))?;
+                } else {
+                    let back = self.with_tourneys(|t| t.unregister(&tid, &id))?;
+                    if back.amount > 0 {
+                        self.book
+                            .pay(&id, "refund", Some(back.amount as i64), &tid, now)
+                            .map_err(|e| RuleError(e.message))?;
+                    }
+                }
+                self.account_latest(&id, &mut out);
+                out.tell.push(Tell::Tourneys);
+            }
+            // Grouped tables with must-move (#501): a group with `table` as
+            // its main table, its minimum to start a new table, ending it.
+            "make_group" => {
+                let min = num(args, "min").map(|m| m.clamp(0, u32::MAX as i64) as u32);
+                let g = self
+                    .book
+                    .club
+                    .make_group(&text(args, "table"), min, now, rng)?;
+                out.value = g.id.clone().into();
+                out.tell.push(Tell::Tables);
+            }
+            "set_group_min" => {
+                let min = num(args, "min").unwrap_or(0).clamp(0, u32::MAX as i64) as u32;
+                self.book.club.set_group_min(&id, min)?;
+            }
+            "end_group" => {
+                self.book.club.end_group(&id)?;
+                out.tell.push(Tell::Tables);
+            }
             _ => return refuse(format!("no host action {op}")),
         }
         Ok(out)
@@ -654,5 +740,69 @@ mod tests {
         run(&mut c, "void_award", json!({"id": "a1", "why": "misdeal"})).unwrap();
         assert_eq!(c.book.balance("ann"), 0);
         assert_eq!(c.book.chips.reclaimed, 1000);
+    }
+
+    #[test]
+    fn tournaments_registering_and_cancelling() {
+        let mut c = club(&["ann", "bob"]);
+        for id in ["ann", "bob"] {
+            run(&mut c, "give", json!({"id": id, "amount": 1000})).unwrap();
+        }
+        let s = json!({"name": "Sunday", "buyIn": 100, "stack": 1500, "opensAt": 0, "startsAt": 1000,
+                       "structure": [{"sb": 10, "bb": 20, "minutes": 10}]});
+        // The plan's limit on tournaments a day.
+        let o = run(
+            &mut c,
+            "new_tourney",
+            json!({"tourney": s, "limits": {"tourneysPerDay": 1}}),
+        )
+        .unwrap();
+        let tid = o.value.as_str().unwrap().to_string();
+        assert_eq!(o.schedule, std::slice::from_ref(&tid));
+        assert_eq!(o.tell, [Tell::Tourneys]);
+        assert!(
+            run(
+                &mut c,
+                "new_tourney",
+                json!({"tourney": s, "limits": {"tourneysPerDay": 1}})
+            )
+            .is_err()
+        );
+        // Registering takes the buy-in; unregistering gives it back.
+        for id in ["ann", "bob"] {
+            let o = run(&mut c, "register", json!({"tid": tid, "id": id})).unwrap();
+            assert_eq!(o.accounts[0].id, id);
+            assert!(o.accounts[0].since.is_some());
+        }
+        assert_eq!(c.book.balance("ann"), 900);
+        run(&mut c, "unregister", json!({"tid": tid, "id": "bob"})).unwrap();
+        assert_eq!(c.book.balance("bob"), 1000);
+        // Cancelling refunds, logs, and stops it.
+        let o = run(&mut c, "cancel_tourney", json!({"id": tid})).unwrap();
+        assert_eq!(o.stop_tourneys, std::slice::from_ref(&tid));
+        assert_eq!(
+            o.accounts.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+            ["ann"]
+        );
+        assert_eq!(c.book.balance("ann"), 1000);
+        assert!(run(&mut c, "cancel_tourney", json!({"id": "nope"})).is_err());
+    }
+
+    #[test]
+    fn groups_are_made_changed_and_ended() {
+        let mut c = club(&["ann"]);
+        c.book.club.tables = serde_json::from_value(json!([
+            {"id": "t1", "name": "Main", "game": "nlhe", "sb": 1, "bb": 2, "minBB": 20, "maxBB": 100, "seats": 6, "status": "open"}
+        ]))
+        .unwrap();
+        let o = run(&mut c, "make_group", json!({"table": "t1"})).unwrap();
+        let gid = o.value.as_str().unwrap().to_string();
+        assert_eq!(o.tell, [Tell::Tables]);
+        assert_eq!(c.book.club.groups[0].min, 4);
+        run(&mut c, "set_group_min", json!({"id": gid, "min": 3})).unwrap();
+        assert_eq!(c.book.club.groups[0].min, 3);
+        assert!(run(&mut c, "set_group_min", json!({"id": gid, "min": 9})).is_err());
+        run(&mut c, "end_group", json!({"id": gid})).unwrap();
+        assert!(c.book.club.groups.is_empty());
     }
 }
