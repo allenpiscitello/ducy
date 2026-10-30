@@ -125,7 +125,7 @@ impl ClubState {
             .unwrap_or_else(|| self.book.club.host_id.clone())
     }
 
-    fn with_tourneys<T>(
+    pub(crate) fn with_tourneys<T>(
         &mut self,
         f: impl FnOnce(&mut Tourneys) -> Result<T, RuleError>,
     ) -> Result<T, RuleError> {
