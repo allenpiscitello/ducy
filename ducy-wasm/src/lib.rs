@@ -12,6 +12,7 @@ mod promos;
 mod rules;
 mod seat_bot;
 mod seats;
+mod service;
 mod shuffle;
 mod tournament;
 mod tourney_host;

@@ -71,6 +71,8 @@ pub mod club_rules;
 #[cfg(feature = "club")]
 pub mod club_seats;
 #[cfg(feature = "club")]
+pub mod club_service;
+#[cfg(feature = "club")]
 pub mod club_tourney_host;
 #[cfg(feature = "club")]
 pub mod club_tourneys;
