@@ -459,6 +459,9 @@ pub struct Club {
     /// Reserved seats, by table, oldest first.
     #[serde(default)]
     pub waitlist: BTreeMap<String, Vec<Reservation>>,
+    /// Grouped tables with must-move (ducy-web #501).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<crate::club_groups::Group>,
     /// Outside servers that may give members chips, by their key's id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub services: BTreeMap<String, Service>,
@@ -795,6 +798,7 @@ impl Club {
             stay_hands: None,
             rathole_hours: None,
             waitlist: BTreeMap::new(),
+            groups: vec![],
             services: BTreeMap::new(),
             service_refused: None,
         })
@@ -1412,6 +1416,11 @@ impl Club {
                 // The hit-and-run rule, so members know before they sit.
                 if t.stay_hands > 0 {
                     v["stayHands"] = t.stay_hands.into();
+                }
+                // Its place in a group: the main table, or must-move 1, 2, 3 (#501).
+                let g = self.group_label(&t.id);
+                if !g.is_null() {
+                    v["group"] = g;
                 }
                 v
             })
