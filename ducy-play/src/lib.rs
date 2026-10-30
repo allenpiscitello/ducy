@@ -65,6 +65,8 @@ pub mod club_money;
 #[cfg(feature = "club")]
 pub mod club_oneoff;
 #[cfg(feature = "club")]
+pub mod club_overview;
+#[cfg(feature = "club")]
 pub mod club_promos;
 #[cfg(feature = "club")]
 pub mod club_rules;
