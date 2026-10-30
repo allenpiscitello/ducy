@@ -141,6 +141,47 @@ enum Op {
     },
     PruneReservations,
     NextLapse,
+    MakeGroup {
+        table: String,
+        min: Option<u32>,
+    },
+    SetGroupMin {
+        id: String,
+        min: u32,
+    },
+    EndGroup {
+        id: String,
+    },
+    SatInGroup {
+        id: String,
+        table: String,
+    },
+    LeftGroup {
+        id: String,
+        table: String,
+        to: Option<String>,
+    },
+    PruneGroups,
+    MovesUp {
+        id: String,
+        #[serde(default)]
+        seated: BTreeMap<String, Vec<String>>,
+        #[serde(default)]
+        held: BTreeMap<String, usize>,
+    },
+    AskGroup {
+        id: String,
+        online: Vec<String>,
+    },
+    AnswerGroup {
+        id: String,
+        who: String,
+        yes: bool,
+    },
+    EndAsk {
+        id: String,
+        most: Option<u64>,
+    },
     AddService {
         id: String,
         alg: String,
@@ -339,6 +380,28 @@ pub fn club_rules(club: &str, op: JsValue, now: f64) -> Result<JsValue, JsError>
             changes = false;
             value(c.next_lapse())
         }
+        Op::MakeGroup { table, min } => c.make_group(&table, min, now, &mut rng()).and_then(value),
+        Op::SetGroupMin { id, min } => c.set_group_min(&id, min).and_then(value),
+        Op::EndGroup { id } => c.end_group(&id).and_then(value),
+        Op::SatInGroup { id, table } => {
+            c.sat_in_group(&id, &table, now);
+            Ok(Value::Null)
+        }
+        Op::LeftGroup { id, table, to } => {
+            c.left_group(&id, &table, to.as_deref());
+            Ok(Value::Null)
+        }
+        Op::PruneGroups => {
+            c.prune_groups();
+            Ok(Value::Null)
+        }
+        Op::MovesUp { id, seated, held } => {
+            changes = false;
+            value(c.moves_up(&id, &seated, &held))
+        }
+        Op::AskGroup { id, online } => c.ask_group(&id, &online, now).and_then(value),
+        Op::AnswerGroup { id, who, yes } => c.answer_group(&id, &who, yes, now).and_then(value),
+        Op::EndAsk { id, most } => c.end_ask(&id, now, most, &mut rng()).and_then(value),
         Op::AddService { id, alg, key, o } => {
             c.add_service(&id, &alg, &key, &o, now).and_then(value)
         }
