@@ -25,6 +25,25 @@ pub fn club_overview(club: &str, op: &str, args: &str, now: f64) -> Result<JsVal
     })
 }
 
+/// What a member may buy in for at table `t` (JSON, `{id, min, max}`) by
+/// the rathole rule, from their own `entries` (JSON): `{min, max, rathole}`.
+#[wasm_bindgen(js_name = buyInRange)]
+pub fn buy_in_range_js(
+    t: &str,
+    entries: &str,
+    rathole_hours: f64,
+    now: f64,
+) -> Result<JsValue, JsError> {
+    let t: Value = serde_json::from_str(t).map_err(err)?;
+    let entries: Vec<Value> = serde_json::from_str(entries).map_err(err)?;
+    to_js(&ducy_play::club_book::buy_in_range(
+        &t,
+        &entries,
+        rathole_hours,
+        now as u64,
+    ))
+}
+
 /// A table's dealing clock (`clock`, JSON or null) after it is (`on`) or
 /// isn't dealing at `now`.
 #[wasm_bindgen(js_name = dealClock)]

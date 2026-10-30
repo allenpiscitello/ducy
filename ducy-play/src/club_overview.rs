@@ -388,7 +388,19 @@ impl ClubState {
         out
     }
 
-    /// Runs Overview op `op` with `args`: "totals", "numbers", "filter"
+    /// The size from which a chip move in the log counts as big (#190): a
+    /// full buy-in at the club's biggest open table (its maximum in big
+    /// blinds times its big blind), or none with no table open.
+    pub fn big_move(&self) -> Option<u64> {
+        self.book
+            .club
+            .open_tables()
+            .filter(|t| t.bb > 0)
+            .map(|t| t.bb * if t.max_bb > 0 { t.max_bb } else { 100 })
+            .max()
+    }
+
+    /// Runs Overview op `op` with `args`: "totals", "numbers", "bigMove", "filter"
     /// {filter, agent}, "lastPlayed", "lastActive" {seen}, "tables"
     /// {seated}, "creditNotices" {keep}, "notices" {cleared, seated}.
     pub fn overview(&self, op: &str, args: &Value, now: u64) -> Result<Value, RuleError> {
@@ -404,6 +416,7 @@ impl ClubState {
         Ok(match op {
             "totals" => to(&self.totals()),
             "numbers" => self.overview_numbers(now),
+            "bigMove" => to(&self.big_move()),
             "filter" => to(&self.member_filter(
                 &text(args.get("filter")),
                 now,
@@ -544,6 +557,8 @@ mod tests {
             json!({"tablesActive": 1, "tables": 2, "chipsOut": 165_000, "members": 4, "joined": 1, "inactive": 1,
                    "owedToClub": 15_000, "owedToPlayers": 165_000})
         );
+        // A big move is a full buy-in at the biggest open table.
+        assert_eq!(c.big_move(), Some(200 * 100));
         let played = c.last_played();
         assert_eq!(played.get("cy"), Some(&(NOW - 10 * DAY)));
         assert_eq!(played.get("dee"), Some(&(NOW - DAY)));

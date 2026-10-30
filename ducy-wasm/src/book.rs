@@ -162,6 +162,10 @@ enum Op {
         amount: Option<f64>,
         promo: String,
     },
+    RatholeMin {
+        id: String,
+        table: String,
+    },
 }
 
 /// A whole number from JavaScript, or none (refused as an amount).
@@ -304,6 +308,10 @@ fn rule_op(b: &mut Book, op: Op, now: u64, changes: &mut bool) -> Result<Value, 
         Op::LogAction { by, text, amount } => {
             b.log_action(&by, &text, now, whole(amount));
             Ok(Value::Null)
+        }
+        Op::RatholeMin { id, table } => {
+            *changes = false;
+            Ok(b.rathole_min(&id, &table, now).into())
         }
         _ => unreachable!("table moves are handled in club_book"),
     }
