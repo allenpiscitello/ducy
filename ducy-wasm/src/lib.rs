@@ -19,6 +19,7 @@ mod shuffle;
 mod tournament;
 mod tourney_host;
 mod tourneys;
+mod views;
 pub use play::{BotTable, MultiTable};
 
 use ducy::deck::{Card, Deck};
