@@ -88,7 +88,119 @@ pub struct AskEnd {
     pub moves: Vec<MoveUp>,
 }
 
+/// What the caller tells members about a group's question, and does.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupNews {
+    /// Messages to send now: `{to, kind, …}` (kind "ask", "closed" or "open").
+    pub sends: Vec<Value>,
+    /// The table that opened: start it, then send `after_open`.
+    pub opened: Option<String>,
+    /// Messages to send once the new table runs.
+    pub after_open: Vec<Value>,
+    /// Those seated elsewhere to move to the new table, by [`GROUP_BY`].
+    pub moves: Vec<MoveUp>,
+    /// When the question closes: time it.
+    pub until: Option<u64>,
+    /// Enough said yes: close the question now.
+    pub finish: bool,
+}
+
 impl Club {
+    /// Asks about a new table for group `id` (see [`Club::ask_group`]): the
+    /// question for each member asked. Refused, with why, if too few are
+    /// online to ask.
+    pub fn ask_about(
+        &mut self,
+        id: &str,
+        online: &[String],
+        now: u64,
+    ) -> Result<GroupNews, RuleError> {
+        let min = self.group(id).map_or(0, |g| g.min);
+        let asked = self.ask_group(id, online, now)?;
+        if asked.is_empty() {
+            return refuse(format!("Fewer than {min} players are online to ask."));
+        }
+        let g = self.group(id).expect("asked");
+        let until = g.ask.as_ref().map(|a| a.until);
+        let name = g
+            .tables
+            .first()
+            .and_then(|t| self.table(t))
+            .map_or(String::new(), |t| t.name.clone());
+        Ok(GroupNews {
+            sends: asked
+                .iter()
+                .map(|m| json!({"to": m, "kind": "ask", "name": name, "until": until}))
+                .collect(),
+            until,
+            ..GroupNews::default()
+        })
+    }
+
+    /// Member `who` answers group `id`'s question: `finish` once enough said
+    /// yes; a closed question or someone not asked is told it's closed.
+    pub fn group_answer(&mut self, id: &str, who: &str, yes: bool, now: u64) -> GroupNews {
+        match self.answer_group(id, who, yes, now) {
+            Ok(finish) => GroupNews {
+                finish,
+                ..GroupNews::default()
+            },
+            Err(e) => GroupNews {
+                sends: vec![json!({"to": who, "kind": "closed", "reason": e.0})],
+                ..GroupNews::default()
+            },
+        }
+    }
+
+    /// Closes group `id`'s question (see [`Club::end_ask`]). Everyone asked
+    /// hears how it ended: with no table, those who said yes hear why; with
+    /// one, those who said no hear it's closed, and those who said yes and
+    /// aren't moving are told to sit down there once it runs.
+    pub fn finish_ask(
+        &mut self,
+        id: &str,
+        now: u64,
+        most: Option<u64>,
+        rng: &mut StdRng,
+    ) -> GroupNews {
+        let asked = self
+            .group(id)
+            .and_then(|g| g.ask.as_ref())
+            .map(|a| a.asked.clone())
+            .unwrap_or_default();
+        let end = self.end_ask(id, now, most, rng).unwrap_or_default();
+        let mut out = GroupNews::default();
+        let opened = end
+            .opened
+            .as_deref()
+            .and_then(|t| self.table(t))
+            .map(|t| (t.id.clone(), t.name.clone()));
+        for m in &asked {
+            let said_yes = end.yes.contains(m);
+            match (&opened, said_yes) {
+                (None, true) => out.sends.push(
+                    json!({"to": m, "kind": "closed", "reason": "Not enough players for a new table."}),
+                ),
+                (None, false) | (Some(_), false) => {
+                    out.sends.push(json!({"to": m, "kind": "closed"}))
+                }
+                (Some(_), true) => {}
+            }
+        }
+        if let Some((tid, name)) = opened {
+            for m in &end.yes {
+                if !end.moves.iter().any(|x| &x.id == m) {
+                    out.after_open
+                        .push(json!({"to": m, "kind": "open", "table": tid, "name": name}));
+                }
+            }
+            out.opened = Some(tid);
+            out.moves = end.moves;
+        }
+        out
+    }
+
     /// The group with id `id`.
     pub fn group(&self, id: &str) -> Option<&Group> {
         self.groups.iter().find(|g| g.id == id)
@@ -568,6 +680,83 @@ mod tests {
         assert!(
             c.moves_up(&gid, &BTreeMap::new(), &BTreeMap::new())
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn who_hears_what_about_a_new_table() {
+        let mut c = club(&["a", "b", "c", "d"]);
+        let gid = c
+            .make_group("t0", Some(2), 0, &mut rng())
+            .unwrap()
+            .id
+            .clone();
+        c.tables.push(
+            c.table("t0")
+                .map(|t| Table {
+                    id: "other".into(),
+                    ..t.clone()
+                })
+                .unwrap(),
+        );
+        sit(&mut c, "b", "other");
+        assert!(
+            c.ask_about(&gid, &ids(&["a"]), 100)
+                .unwrap_err()
+                .0
+                .contains("Fewer than 2")
+        );
+        let n = c.ask_about(&gid, &ids(&["a", "b", "c"]), 100).unwrap();
+        assert_eq!(n.until, Some(100 + ASK_MS));
+        assert_eq!(
+            n.sends[0],
+            json!({"to": "a", "kind": "ask", "name": "Main", "until": 100 + ASK_MS})
+        );
+        assert_eq!(n.sends.len(), 3);
+        // Someone not asked hears it's closed to them.
+        let n = c.group_answer(&gid, "d", true, 101);
+        assert_eq!(n.sends[0]["kind"], "closed");
+        assert!(!n.finish);
+        assert!(!c.group_answer(&gid, "a", false, 101).finish);
+        assert!(!c.group_answer(&gid, "b", true, 102).finish);
+        assert!(c.group_answer(&gid, "c", true, 103).finish);
+        let n = c.finish_ask(&gid, 103, None, &mut rng());
+        let new = n.opened.clone().unwrap();
+        // A said no: closed. B moves; C sits down there once it runs.
+        assert_eq!(n.sends, vec![json!({"to": "a", "kind": "closed"})]);
+        assert_eq!(n.moves.len(), 1);
+        assert_eq!(n.moves[0].id, "b");
+        let name = c.table(&new).unwrap().name.clone();
+        assert_eq!(
+            n.after_open,
+            vec![json!({"to": "c", "kind": "open", "table": new, "name": name})]
+        );
+    }
+
+    #[test]
+    fn time_up_those_who_said_yes_hear_why() {
+        let mut c = club(&["a", "b", "c"]);
+        let gid = c
+            .make_group("t0", Some(3), 0, &mut rng())
+            .unwrap()
+            .id
+            .clone();
+        c.ask_about(&gid, &ids(&["a", "b", "c"]), 100).unwrap();
+        c.group_answer(&gid, "a", true, 101);
+        let n = c.finish_ask(&gid, 100 + ASK_MS, None, &mut rng());
+        assert!(n.opened.is_none() && n.after_open.is_empty());
+        assert_eq!(
+            n.sends,
+            vec![
+                json!({"to": "a", "kind": "closed", "reason": "Not enough players for a new table."}),
+                json!({"to": "b", "kind": "closed"}),
+                json!({"to": "c", "kind": "closed"}),
+            ]
+        );
+        // Closed now: answering late is told so.
+        assert_eq!(
+            c.group_answer(&gid, "b", true, 100 + ASK_MS).sends[0]["reason"],
+            "That question has closed."
         );
     }
 
