@@ -208,6 +208,62 @@ impl Book {
         Ok(())
     }
 
+    /// Starts the club's money: a club saved before links (no money yet) is
+    /// moved onto them, balances and seats carried over; members without a
+    /// link get one; and each member's balance, credit and room follow.
+    /// A player under an agent gets a link with the agent at their balance;
+    /// an agent, one with the club at their own chips plus their players';
+    /// everyone else, one with the club. Anyone seated has a session on
+    /// their path. Each link's balance is its first entry ("opening").
+    pub fn start_money(&mut self, now: u64) -> Result<(), RuleError> {
+        let fresh = self.money.links().is_empty() && self.money.ledger().is_empty();
+        self.ensure_links(now)?;
+        if fresh {
+            let members: Vec<String> = self
+                .club
+                .members
+                .values()
+                .filter(|m| m.status == Status::Member)
+                .map(|m| m.id.clone())
+                .collect();
+            for id in &members {
+                let Some(backer) = self.through(id) else {
+                    continue;
+                };
+                // An agent's link is their account as the club saw it: their
+                // own chips and their players' shares.
+                let shares: i64 = if self.is_agent(id) {
+                    members
+                        .iter()
+                        .filter(|p| self.backer_of(p) == *id)
+                        .map(|p| self.balance(p))
+                        .sum()
+                } else {
+                    0
+                };
+                let balance = self.balance(id) + shares;
+                if balance != 0 {
+                    self.money
+                        .open_balance(id, &backer, balance, now)
+                        .map_err(money_err)?;
+                }
+            }
+            for id in &members {
+                let Some(seat) = self.get(id, "seat").and_then(Value::as_object).cloned() else {
+                    continue;
+                };
+                let table = seat.get("table").and_then(Value::as_str).unwrap_or("");
+                let stack = seat.get("stack").and_then(Value::as_u64).unwrap_or(0);
+                let put = seat.get("put").and_then(Value::as_u64).unwrap_or(stack);
+                self.money
+                    .open_session(id, table, stack, put)
+                    .map_err(money_err)?;
+            }
+        }
+        self.sync();
+        Ok(())
+    }
+
     /// Each member's balance, credit and room, from the money.
     pub fn sync(&mut self) {
         let ids: Vec<String> = self.club.members.keys().cloned().collect();
@@ -1592,5 +1648,42 @@ mod tests {
         let mut theirs = left(9000, 0);
         theirs["player"] = "bob".into();
         assert_eq!(buy_in_range(&t, &[theirs], 2.0, hour)["min"], 4000.0);
+    }
+
+    #[test]
+    fn a_club_from_before_links_moves_onto_them() {
+        let mut b: Book = serde_json::from_value(json!({
+            "code": "ABCD-EFGH", "hostId": "HOST",
+            "members": {
+                "al": {"id": "al", "name": "Al", "status": "member", "agent": "yes", "balance": 300},
+                "bo": {"id": "bo", "name": "Bo", "status": "member", "agentOf": "al", "balance": 200,
+                       "seat": {"table": "t1", "stack": 150, "put": 100}},
+                "di": {"id": "di", "name": "Di", "status": "member", "balance": -50, "credit": 100},
+                "ed": {"id": "ed", "name": "Ed", "status": "pending"},
+            },
+        }))
+        .unwrap();
+        b.start_money(5).unwrap();
+        // Bo's link is with Al; Al's with the club carries Bo's too.
+        assert_eq!(b.money.link("bo", "al").unwrap().balance, 200);
+        assert_eq!(b.money.link("al", CLUB).unwrap().balance, 500);
+        assert_eq!(b.money.link("di", CLUB).unwrap().balance, -50);
+        assert_eq!(b.money.link("di", CLUB).unwrap().credit, 100);
+        assert!(
+            b.money
+                .ledger()
+                .iter()
+                .all(|e| e.kind == EntryKind::Opening)
+        );
+        // Bo's seat is a session on his path: standing up moves both links.
+        b.cash_out("bo", 6).unwrap();
+        assert_eq!(b.money.link("bo", "al").unwrap().balance, 350);
+        assert_eq!(b.money.link("al", CLUB).unwrap().balance, 650);
+        // The mirrors follow, and starting again moves nothing.
+        assert_eq!(b.balance("al"), 650);
+        let n = b.money.ledger().len();
+        b.start_money(7).unwrap();
+        assert_eq!(b.money.ledger().len(), n);
+        assert!(b.money.link("ed", CLUB).is_none());
     }
 }
