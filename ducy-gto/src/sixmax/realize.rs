@@ -28,10 +28,18 @@ pub struct Realization {
 }
 
 impl Default for Realization {
+    /// For the 169 hold'em classes.
     fn default() -> Self {
+        Self::uniform(C)
+    }
+}
+
+impl Realization {
+    /// The default rates for `classes` hand classes (PLO preflop buckets).
+    pub fn uniform(classes: usize) -> Self {
         Self {
-            ip: vec![DEFAULT_IP as f32; C],
-            oop: vec![DEFAULT_OOP as f32; C],
+            ip: vec![DEFAULT_IP as f32; classes],
+            oop: vec![DEFAULT_OOP as f32; classes],
         }
     }
 }
@@ -46,16 +54,22 @@ pub struct Tally {
 }
 
 impl Default for Tally {
+    /// For the 169 hold'em classes.
     fn default() -> Self {
-        Self {
-            won: vec![0.0; C],
-            owed: vec![0.0; C],
-            hands: vec![0; C],
-        }
+        Self::new(C)
     }
 }
 
 impl Tally {
+    /// Empty sums for `classes` hand classes.
+    pub fn new(classes: usize) -> Self {
+        Self {
+            won: vec![0.0; classes],
+            owed: vec![0.0; classes],
+            hands: vec![0; classes],
+        }
+    }
+
     /// One hand that saw the flop: `class` with `equity` against the other
     /// hand, a flop pot of `pot`, and `won` chips from that point on (its
     /// stack at the end less its stack at the flop; the two players' sum to
@@ -67,7 +81,7 @@ impl Tally {
     }
 
     pub fn merge(&mut self, other: &Tally) {
-        for c in 0..C {
+        for c in 0..self.won.len() {
             self.won[c] += other.won[c];
             self.owed[c] += other.owed[c];
             self.hands[c] += other.hands[c];
@@ -91,7 +105,7 @@ impl Tally {
         let all = self.overall();
         let mean_owed =
             self.owed.iter().sum::<f64>() / self.hands.iter().sum::<u64>().max(1) as f64;
-        (0..C)
+        (0..self.won.len())
             .map(|c| {
                 let k = prior * mean_owed;
                 // Aces win far more than their equity's share of the flop
@@ -118,31 +132,37 @@ impl Realization {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(16 + 8 * C);
+        let n = self.ip.len();
+        let mut out = Vec::with_capacity(16 + 8 * n);
         out.extend_from_slice(MAGIC);
         out.extend_from_slice(&VERSION.to_le_bytes());
-        out.extend_from_slice(&(C as u32).to_le_bytes());
+        out.extend_from_slice(&(n as u32).to_le_bytes());
         for x in self.ip.iter().chain(&self.oop) {
             out.extend_from_slice(&x.to_le_bytes());
         }
         out
     }
 
+    /// Reads [`Self::to_bytes`], for any number of classes.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        if bytes.len() != 16 + 8 * C || &bytes[..8] != MAGIC {
+        if bytes.len() < 16 || &bytes[..8] != MAGIC {
             return Err("not a realization table".into());
         }
         let word = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().expect("4 bytes"));
-        if word(8) != VERSION || word(12) as usize != C {
+        if word(8) != VERSION {
             return Err("realization table of another version".into());
+        }
+        let n = word(12) as usize;
+        if n == 0 || bytes.len() != 16 + 8 * n {
+            return Err("not a realization table".into());
         }
         let floats: Vec<f32> = bytes[16..]
             .chunks_exact(4)
             .map(|c| f32::from_le_bytes(c.try_into().expect("4 bytes")))
             .collect();
         Ok(Self {
-            ip: floats[..C].to_vec(),
-            oop: floats[C..].to_vec(),
+            ip: floats[..n].to_vec(),
+            oop: floats[n..].to_vec(),
         })
     }
 }

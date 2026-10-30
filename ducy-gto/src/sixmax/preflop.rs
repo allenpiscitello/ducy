@@ -7,8 +7,14 @@
 //! blind 2. Seats are numbered by position: 0 UTG, 1 HJ, 2 CO, 3 BTN, 4 SB,
 //! 5 BB. Preflop, UTG acts first; after the flop the small blind does, and
 //! the button acts last.
+//!
+//! Pot-limit Omaha (#290) uses the same tree with pot-sized raises
+//! ([`PreflopGame::pot_limit`]) over the PLO abstraction's preflop buckets
+//! instead of the 169 classes: a game's `classes` is how many hand classes
+//! its strategies, equity and realization tables have.
 
 use super::{equity::PreflopEquity, realize::Realization};
+use crate::holdem::iso::NUM_PREFLOP_CLASSES;
 
 pub const SEATS: usize = 6;
 pub const POSITIONS: [&str; SEATS] = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];
@@ -25,6 +31,9 @@ const OPEN: u32 = 5;
 const OPEN_SB: u32 = 6;
 /// Limpers the tree allows before the next player must raise or fold.
 const MAX_LIMPERS: u32 = 2;
+/// Pot limit: raises allowed (open, 3-bet, 4-bet, 5-bet), each the size of
+/// the pot; one that reaches the stack is the all-in.
+const MAX_POT_RAISES: u32 = 4;
 
 /// An action at a decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +95,10 @@ pub struct PreflopGame {
     /// How much of its equity each hand realizes after the flop, when it
     /// isn't all-in: in position (last to act after the flop) or not.
     pub realize: Realization,
+    /// Hand classes: 169 for hold'em, the preflop buckets for PLO.
+    pub classes: usize,
+    /// Pot-limit raises (PLO) rather than the no-limit sizes.
+    pub pot_limit: bool,
 }
 
 impl PreflopGame {
@@ -97,11 +110,24 @@ impl PreflopGame {
 
     /// The tree with realization fitted for this depth (`sixmax_realize`).
     pub fn with_realization(big_blinds: u32, realize: Realization) -> Self {
+        assert_eq!(realize.ip.len(), NUM_PREFLOP_CLASSES, "hold'em classes");
+        Self::build_game(big_blinds, realize, false)
+    }
+
+    /// Pot-limit Omaha: pot-sized raises, over as many hand classes (preflop
+    /// buckets) as `realize` has.
+    pub fn pot_limit(big_blinds: u32, realize: Realization) -> Self {
+        Self::build_game(big_blinds, realize, true)
+    }
+
+    fn build_game(big_blinds: u32, realize: Realization, pot_limit: bool) -> Self {
         let mut g = Self {
             stack: 2 * big_blinds,
             nodes: Vec::new(),
             decisions: 0,
+            classes: realize.ip.len(),
             realize,
+            pot_limit,
         };
         let mut put_in = [0; SEATS];
         put_in[SB] = 1;
@@ -170,8 +196,20 @@ impl PreflopGame {
             acts.push(Act::Call);
         }
         let cap = self.stack;
-        // Raising over limpers costs a big blind more per limper.
-        if !s.all_in && s.bet < cap {
+        if self.pot_limit {
+            // One raise size, the pot: call, then raise by the pot that
+            // makes. A pot raise the stack can't cover is the all-in.
+            if !s.all_in && s.bet < cap && s.raises < MAX_POT_RAISES {
+                let pot: u32 = s.put_in.iter().sum();
+                let to = s.bet + pot + (s.bet - s.put_in[seat]);
+                acts.push(if to >= cap {
+                    Act::AllIn
+                } else {
+                    Act::Raise(to)
+                });
+            }
+        } else if !s.all_in && s.bet < cap {
+            // Raising over limpers costs a big blind more per limper.
             let to = match s.raises {
                 0 if seat == SB => Some(OPEN_SB + 2 * limpers),
                 0 => Some(OPEN + 2 * limpers),
@@ -295,6 +333,54 @@ mod tests {
             assert!(g.decisions > 100, "{bb} BB: {} decisions", g.decisions);
             assert!(g.decisions < 200_000, "{bb} BB: {} decisions", g.decisions);
         }
+    }
+
+    #[test]
+    fn pot_limit_raises_are_pot_sized() {
+        let g = PreflopGame::pot_limit(100, Realization::uniform(500));
+        assert_eq!(g.classes, 500);
+        assert!(
+            g.decisions > 100 && g.decisions < 200_000,
+            "{}",
+            g.decisions
+        );
+        // UTG opens to the pot: 3.5 BB (7 half blinds).
+        let Node::Decision { actions, .. } = &g.nodes[g.root()] else {
+            panic!("root");
+        };
+        let open = actions
+            .iter()
+            .find_map(|(a, c)| matches!(a, Act::Raise(_)).then_some((*a, *c)))
+            .expect("an open");
+        assert_eq!(open.0, Act::Raise(7));
+        assert!(
+            !actions.iter().any(|(a, _)| *a == Act::AllIn),
+            "no shove at 100 BB"
+        );
+        // Folds to the button, which 3-bets the pot: 3.5 + 3.5 + 1.5 called
+        // = 8.5 BB pot, so to 3.5 + 8.5 = 12 BB (24 half blinds).
+        let mut node = open.1 as usize;
+        loop {
+            let Node::Decision { seat, actions, .. } = &g.nodes[node] else {
+                panic!("decision");
+            };
+            if *seat == 3 {
+                let r = actions.iter().find(|(a, _)| matches!(a, Act::Raise(_)));
+                assert_eq!(r.map(|x| x.0), Some(Act::Raise(24)));
+                break;
+            }
+            node = actions.iter().find(|(a, _)| *a == Act::Fold).unwrap().1 as usize;
+        }
+        // At 10 BB the open's 3-bet is already the all-in.
+        let short = PreflopGame::pot_limit(10, Realization::uniform(4));
+        let Node::Decision { actions, .. } = &short.nodes[short.root()] else {
+            panic!("root");
+        };
+        let open = actions.iter().find(|(a, _)| *a == Act::Raise(7)).unwrap().1;
+        let Node::Decision { actions, .. } = &short.nodes[open as usize] else {
+            panic!("decision");
+        };
+        assert!(actions.iter().any(|(a, _)| *a == Act::AllIn));
     }
 
     #[test]
