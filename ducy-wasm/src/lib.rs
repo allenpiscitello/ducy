@@ -11,6 +11,7 @@ mod play;
 mod promos;
 mod rules;
 mod seat_bot;
+mod seats;
 mod shuffle;
 mod tournament;
 mod tourneys;
