@@ -350,6 +350,131 @@ impl ClubState {
             .push(json!({"type": "cmd", "id": id, "cmd": {"type": "leave"}}));
     }
 
+    /// Member `id`, at table `tid` (its seating `s`), reserves a seat at
+    /// table `to`, or a manager (`by`) does it for them: up and owing hands
+    /// at `tid` (and not moved by a manager), or short of the buy-in there,
+    /// they can't. Otherwise the seat is held, the move marked and (by a
+    /// manager, not a group) logged, and they leave after the hand they're
+    /// in (`in_hand`), at once if they're in none. `seated`: how many are
+    /// at `to`. Refused, the value is `{refused}`, and their page is told.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reserve_move(
+        &mut self,
+        s: &mut Seating,
+        tid: &str,
+        id: &str,
+        to: &str,
+        by: Option<&str>,
+        seated: usize,
+        in_hand: bool,
+        now: u64,
+        hold_ms: u64,
+    ) -> TableStep {
+        let mut out = TableStep::default();
+        let refuse = |out: &mut TableStep, why: String| {
+            out.send(id, json!({"type": "reserve", "table": to, "refused": why}));
+            out.value = json!({"refused": why});
+        };
+        // The hit-and-run rule holds for a move as for leaving; a manager's
+        // move overrides it, as their removal does.
+        let stay = self.book.club.table(tid).map_or(0, |t| t.stay_hands);
+        let owed = if by.is_none() && stay > 0 {
+            self.book.club.hands_to_stay(id, tid, s.completed())
+        } else {
+            0
+        };
+        if owed > 0 {
+            refuse(&mut out, stay_text(owed));
+            return out;
+        }
+        // In a hand, by their stack before it; it's checked again when it's over.
+        let chips = s.player(id).map(|p| {
+            if in_hand {
+                self.seat_of(id).map_or(0, |st| count(st.get("stack")))
+            } else {
+                p.chips()
+            }
+        });
+        if let Some(chips) = chips {
+            let short = self.too_short(id, to, chips, now);
+            if !short.is_empty() {
+                refuse(&mut out, short);
+                return out;
+            }
+        }
+        let until = match self
+            .book
+            .club
+            .reserve_seat(id, to, seated, Some(tid), by, now, hold_ms)
+        {
+            Ok(r) => r.until,
+            Err(e) => {
+                refuse(&mut out, e.0);
+                return out;
+            }
+        };
+        let seat = self
+            .book
+            .club
+            .members
+            .get_mut(id)
+            .and_then(|m| m.other.get_mut("seat"))
+            .and_then(Value::as_object_mut);
+        match seat {
+            Some(seat) => {
+                let mut mv = json!({"to": to});
+                if let Some(b) = by {
+                    mv["by"] = b.into();
+                }
+                seat.insert("moving".into(), mv);
+            }
+            None => {
+                s.moves.insert(id.into(), to.into());
+            }
+        }
+        let to_name = self
+            .book
+            .club
+            .table(to)
+            .map_or(String::new(), |t| t.name.clone());
+        if let Some(b) = by {
+            // A group's move up is no one's to log.
+            if b != crate::club_groups::GROUP_BY {
+                let who = if self.manager(b) {
+                    "The manager".to_string()
+                } else {
+                    self.member_name(b)
+                };
+                let from_name = self
+                    .book
+                    .club
+                    .table(tid)
+                    .map_or("a table".to_string(), |t| t.name.clone());
+                let text = format!(
+                    "{who} moved {} from {from_name} to {to_name}",
+                    self.member_name(id)
+                );
+                self.book.log_action(b, &text, now, None);
+            }
+            out.events
+                .push(json!({"type": "mustPlay", "id": id, "on": false}));
+        }
+        out.save = true;
+        out.arm_holds = true;
+        out.tables_changed = true;
+        out.send(
+            id,
+            json!({"type": "reserve", "table": to, "name": to_name, "until": until}),
+        );
+        if s.player(id).is_some() && !in_hand {
+            self.leave_to_move(s, tid, id, now, &mut out);
+        } else {
+            // Watchers see "Moving to …".
+            out.events.push(json!({"type": "state"}));
+        }
+        out
+    }
+
     /// Member `id` was removed from table `t` with `chips`: the log, and
     /// their page (if it hasn't left yet). `how`: {by, idle?}; `put`, what
     /// they brought.
@@ -626,6 +751,26 @@ impl ClubState {
                 self.leave_to_move(s, tid, &id, now, &mut out);
                 Ok(out)
             }
+            "reserve" => {
+                let to = args.get("to").and_then(Value::as_str).unwrap_or("");
+                let by = args
+                    .get("by")
+                    .and_then(Value::as_str)
+                    .filter(|b| !b.is_empty());
+                let seated = args.get("seated").and_then(Value::as_u64).unwrap_or(0) as usize;
+                let hold = args.get("holdMs").and_then(Value::as_u64).unwrap_or(60_000);
+                Ok(self.reserve_move(
+                    s,
+                    tid,
+                    &id,
+                    to,
+                    by,
+                    seated,
+                    truthy(args.get("inHand")),
+                    now,
+                    hold,
+                ))
+            }
             "tooShort" => {
                 let to = args.get("to").and_then(Value::as_str).unwrap_or("");
                 Ok(TableStep {
@@ -863,6 +1008,61 @@ mod tests {
             out.sends,
             vec![json!({"to": "bob", "update": {"type": "removed", "name": "Main", "idle": true}})]
         );
+    }
+
+    #[test]
+    fn reserving_a_seat_at_another_table() {
+        let mut c = club(&["ann", "bob"], 3);
+        sit(&mut c, "ann", 100);
+        sit(&mut c, "bob", 100);
+        let mut s = Seating::default();
+        // Bob is up at the table and owes hands: he can't move himself.
+        result(
+            &mut c,
+            &mut s,
+            json!({"players": [player("ann", 0, 100), player("bob", 1, 150)], "state": {"complete": true, "hand_number": 1}}),
+        );
+        let o = c.reserve_move(&mut s, T, "bob", "t2", None, 0, false, 10, 60_000);
+        assert!(
+            o.value["refused"]
+                .as_str()
+                .unwrap()
+                .starts_with("You’re up")
+        );
+        assert_eq!(o.sends[0]["update"]["type"], "reserve");
+        // A manager moves him: no hit-and-run, logged, and he leaves at once.
+        let o = c.reserve_move(&mut s, T, "bob", "t2", Some("HOST"), 0, false, 10, 60_000);
+        assert!(o.value.is_null());
+        assert_eq!(
+            c.move_of("bob", T),
+            Some(
+                json!({"to": "t2", "by": "HOST"})
+                    .as_object()
+                    .unwrap()
+                    .clone()
+            )
+        );
+        assert!(
+            o.events
+                .contains(&json!({"type": "mustPlay", "id": "bob", "on": false}))
+        );
+        assert!(
+            o.events
+                .contains(&json!({"type": "cmd", "id": "bob", "cmd": {"type": "leave"}}))
+        );
+        assert_eq!(o.sends[0]["update"]["name"], "Side");
+        assert!(text_logged(&c, "The manager moved Bob from Main to Side"));
+        // Ann, in a hand, moves herself: she leaves after it; not logged.
+        let o = c.reserve_move(&mut s, T, "ann", "t2", None, 1, true, 11, 60_000);
+        assert!(o.value.is_null() && o.events == vec![json!({"type": "state"})]);
+        // A table that's full is refused.
+        let mut s2 = Seating::default();
+        let o = c.reserve_move(&mut s2, T, "ann", "t2", None, 6, false, 12, 60_000);
+        assert!(o.value["refused"].is_string());
+    }
+
+    fn text_logged(c: &ClubState, s: &str) -> bool {
+        c.book.log.iter().any(|l| l["text"] == s)
     }
 
     #[test]

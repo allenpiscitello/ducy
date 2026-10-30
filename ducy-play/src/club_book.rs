@@ -1272,6 +1272,31 @@ impl Book {
     }
 }
 
+/// What a member may buy in for at table `t` (`{id, min, max}` as the host
+/// tells members), by the rathole rule as their page sees it: having left
+/// it within the last `rathole_hours`, they come back with what they left
+/// with (their own last cash-out from it, in `entries`), up to its
+/// maximum. `{min, max, rathole}`.
+pub fn buy_in_range(t: &Value, entries: &[Value], rathole_hours: f64, now: u64) -> Value {
+    let num = |v: Option<&Value>| v.and_then(Value::as_f64).unwrap_or(0.0);
+    let (min, max) = (num(t.get("min")), num(t.get("max")));
+    let left = entries.iter().rev().find(|e| {
+        e.get("kind").and_then(Value::as_str) == Some("cash_out")
+            && e.get("player")
+                .is_none_or(|p| p.is_null() || p == &Value::Bool(false) || p == "")
+            && e.get("about") == t.get("id")
+    });
+    let rathole = match left {
+        Some(e)
+            if rathole_hours > 0.0 && (now as f64 - num(e.get("at"))) < rathole_hours * 3.6e6 =>
+        {
+            num(e.get("amount"))
+        }
+        _ => 0.0,
+    };
+    json!({"min": max.min(min.max(rathole)), "max": max, "rathole": rathole})
+}
+
 /// The parts of the club a book changes, to write back.
 pub fn written(book: &Book) -> Value {
     json!({
@@ -1541,5 +1566,31 @@ mod tests {
             err(b.run_agent("al", &json!({"op": "approve", "id": "cy"}), 3))
                 .contains("No such request.")
         );
+    }
+
+    #[test]
+    fn a_members_buy_in_range_by_the_rathole_rule() {
+        let t = json!({"id": "t1", "min": 4000, "max": 20000});
+        let hour = 3_600_000;
+        let left = |amount: u64, at: u64| json!({"kind": "cash_out", "about": "t1", "amount": amount, "at": at});
+        // Left with 300 an hour ago, the window 2 hours: back with 300.
+        let r = buy_in_range(&t, &[left(30000, 0)], 2.0, hour);
+        assert_eq!(
+            r,
+            json!({"min": 20000.0, "max": 20000.0, "rathole": 30000.0})
+        );
+        let r = buy_in_range(&t, &[left(9000, 0)], 2.0, hour);
+        assert_eq!(r["min"], 9000.0);
+        // After the window, or at another table, or someone else's move: the table's own.
+        assert_eq!(
+            buy_in_range(&t, &[left(9000, 0)], 2.0, 3 * hour)["min"],
+            4000.0
+        );
+        let mut other = left(9000, 0);
+        other["about"] = "t2".into();
+        assert_eq!(buy_in_range(&t, &[other], 2.0, hour)["min"], 4000.0);
+        let mut theirs = left(9000, 0);
+        theirs["player"] = "bob".into();
+        assert_eq!(buy_in_range(&t, &[theirs], 2.0, hour)["min"], 4000.0);
     }
 }
