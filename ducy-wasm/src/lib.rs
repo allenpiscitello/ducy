@@ -14,6 +14,7 @@ mod seat_bot;
 mod seats;
 mod shuffle;
 mod tournament;
+mod tourney_host;
 mod tourneys;
 pub use play::{BotTable, MultiTable};
 
