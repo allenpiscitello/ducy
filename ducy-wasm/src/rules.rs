@@ -169,16 +169,16 @@ enum Op {
         #[serde(default)]
         held: BTreeMap<String, usize>,
     },
-    AskGroup {
+    AskAbout {
         id: String,
         online: Vec<String>,
     },
-    AnswerGroup {
+    GroupAnswer {
         id: String,
         who: String,
         yes: bool,
     },
-    EndAsk {
+    FinishAsk {
         id: String,
         most: Option<u64>,
     },
@@ -399,9 +399,9 @@ pub fn club_rules(club: &str, op: JsValue, now: f64) -> Result<JsValue, JsError>
             changes = false;
             value(c.moves_up(&id, &seated, &held))
         }
-        Op::AskGroup { id, online } => c.ask_group(&id, &online, now).and_then(value),
-        Op::AnswerGroup { id, who, yes } => c.answer_group(&id, &who, yes, now).and_then(value),
-        Op::EndAsk { id, most } => c.end_ask(&id, now, most, &mut rng()).and_then(value),
+        Op::AskAbout { id, online } => c.ask_about(&id, &online, now).and_then(value),
+        Op::GroupAnswer { id, who, yes } => value(c.group_answer(&id, &who, yes, now)),
+        Op::FinishAsk { id, most } => value(c.finish_ask(&id, now, most, &mut rng())),
         Op::AddService { id, alg, key, o } => {
             c.add_service(&id, &alg, &key, &o, now).and_then(value)
         }
