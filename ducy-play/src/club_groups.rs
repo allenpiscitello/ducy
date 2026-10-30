@@ -223,9 +223,15 @@ impl Club {
             let at = |tid: &str| seated.get(tid).map_or(0, Vec::len);
             let mut free = (t.seats as usize)
                 .saturating_sub(at(upper) + held.get(upper.as_str()).copied().unwrap_or(0));
+            // Those with chips at the table below (a seat in the ledger),
+            // not on their way somewhere already.
             let mut below: Vec<&String> = seated
                 .get(lower.as_str())
-                .map(|v| v.iter().filter(|m| !self.moving(m)).collect())
+                .map(|v| {
+                    v.iter()
+                        .filter(|m| self.seated_at(m, lower) && !self.moving(m))
+                        .collect()
+                })
                 .unwrap_or_default();
             below.sort_by_key(|m| {
                 (
@@ -246,6 +252,10 @@ impl Club {
             }
         }
         out
+    }
+
+    fn seated_at(&self, id: &str, table: &str) -> bool {
+        self.members.get(id).and_then(|m| m.seat_table()) == Some(table)
     }
 
     /// Whether member `id` is on their way to a seat held at another table.
@@ -517,8 +527,11 @@ mod tests {
             x.id = t.into();
             c.tables.push(x);
         }
-        // t0: 4 of 6, 1 held: 1 free. t1 (full): b, c, a, and d on its way
-        // elsewhere. t2: e.
+        // t0: 4 of 6, 1 held: 1 free. t1 (full): b, c, a, d on its way
+        // elsewhere, and two with no chips there yet. t2: e.
+        for (id, t) in [("a", "t1"), ("b", "t1"), ("c", "t1"), ("e", "t2")] {
+            sit(&mut c, id, t);
+        }
         let mut seated = BTreeMap::new();
         seated.insert("t0".to_string(), ids(&["x1", "x2", "x3", "x4"]));
         seated.insert("t1".to_string(), ids(&["a", "b", "c", "d", "x5", "x6"]));
