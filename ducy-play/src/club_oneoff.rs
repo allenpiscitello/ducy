@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::club_rules::{Member, RuleError, refuse};
-use crate::club_tourneys::{MAX_ENTRIES, Tourney};
+use crate::club_tourneys::{MAX_ENTRIES, Tourney, TourneyStatus};
 
 /// The most points in a buy-in or a prize.
 pub const MAX_POINTS: u64 = 1_000_000_000;
@@ -418,6 +418,186 @@ impl Ledger {
     }
 }
 
+/// The stand-in club's side of a one-off tournament (#456): making it,
+/// players registering and leaving before the start, and the host's prizes.
+impl crate::club_host::ClubState {
+    fn the_tourney(&mut self) -> Result<&mut Tourney, RuleError> {
+        match self.tourneys.first_mut() {
+            Some(t) => Ok(t),
+            None => refuse("No tournament here."),
+        }
+    }
+
+    /// The tournament, from the host's setup `s`: {name, game, stack,
+    /// tableSize, structure, buyIn (points)}, and `payout`: a list of
+    /// shares, a payout table {rows}, or null for the defaults. It starts
+    /// when the host starts it; anyone may register till then, the host
+    /// too. Nothing is kept if the settings won't do.
+    pub fn private_new(
+        &mut self,
+        s: &Value,
+        payout: &Value,
+        now: u64,
+        rng: &mut rand::rngs::StdRng,
+    ) -> Result<Tourney, RuleError> {
+        if !self.tourneys.is_empty() {
+            return refuse("This game has a tournament already.");
+        }
+        let buy_in = check_buy_in(s.get("buyIn").unwrap_or(&Value::Null))?;
+        let host = self
+            .book
+            .club
+            .members
+            .get(HOST_ID)
+            .map_or("Host".into(), |m| m.name.clone());
+        let name = s
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map_or(format!("{host}’s tournament"), str::to_string);
+        let spec = json!({
+            "name": name, "game": s.get("game"), "buyIn": 0, "added": 0, "stack": s.get("stack"),
+            "structure": s.get("structure"), "tableSize": s.get("tableSize"),
+            "opensAt": now, "startsAt": now, "minPlayers": 2, "maxPlayers": MAX_ENTRIES,
+        });
+        let made = self.with_tourneys(|ts| {
+            let t = ts.new_tourney(&spec, now, None, rng)?;
+            if !payout.is_null() {
+                ts.set_payout(&t.id, payout)?;
+            }
+            Ok(t.id)
+        });
+        let id = match made {
+            Ok(id) => id,
+            Err(e) => {
+                self.tourneys.clear();
+                return Err(e);
+            }
+        };
+        let t = self.the_tourney()?;
+        t.other
+            .insert("points".into(), json!({"buyIn": buy_in, "prizes": null}));
+        debug_assert_eq!(t.id, id);
+        Ok(t.clone())
+    }
+
+    /// Player `id` registers as `name` before the start. Asking again (a
+    /// reconnect) keeps their entry and takes the new name, made unique.
+    pub fn private_join(&mut self, id: &str, name: &str, now: u64) -> Result<Member, RuleError> {
+        let clean = clean_name(name);
+        if clean.is_empty() {
+            return refuse("Enter your name: it’s what the others see.");
+        }
+        let t = self.the_tourney()?;
+        let (tid, scheduled) = (t.id.clone(), t.status == TourneyStatus::Scheduled);
+        let entered = t.entries.iter().any(|e| e.member == id);
+        let taken: Vec<String> = self
+            .book
+            .club
+            .members
+            .values()
+            .filter(|m| m.id != id)
+            .map(|m| m.name.clone())
+            .collect();
+        let name = unique_name(&taken, &clean);
+        if entered && let Some(m) = self.book.club.members.get_mut(id) {
+            if scheduled {
+                m.name = name;
+            }
+            return Ok(m.clone());
+        }
+        if !scheduled {
+            return refuse("This tournament has started: registration is closed.");
+        }
+        let m: Member = serde_json::from_value(
+            json!({"id": id, "name": name, "status": "member", "balance": 0}),
+        )
+        .map_err(|e| RuleError(e.to_string()))?;
+        self.book.club.members.insert(id.into(), m.clone());
+        if let Err(e) = self.with_tourneys(|ts| ts.register(&tid, id, now)) {
+            self.book.club.members.remove(id);
+            return Err(e);
+        }
+        Ok(m)
+    }
+
+    /// Player `id` unregisters (or the host takes them off) before the
+    /// start; the host keeps their name and goes on running it. Whether
+    /// they were registered.
+    pub fn private_leave(&mut self, id: &str) -> Result<bool, RuleError> {
+        let Some(t) = self.tourneys.first() else {
+            return Ok(false);
+        };
+        if t.status != TourneyStatus::Scheduled || !t.entries.iter().any(|e| e.member == id) {
+            return Ok(false);
+        }
+        let tid = t.id.clone();
+        self.with_tourneys(|ts| ts.unregister(&tid, id))?;
+        if id != HOST_ID {
+            self.book.club.members.remove(id);
+        }
+        Ok(true)
+    }
+
+    /// The host sets the prizes, whole points by place from first; null
+    /// goes back to the split of the buy-ins. Until the end.
+    pub fn private_prizes(&mut self, list: &Value) -> Result<Tourney, RuleError> {
+        let prizes = if list.is_null() {
+            Value::Null
+        } else {
+            json!(check_prizes(list)?)
+        };
+        let t = self.the_tourney()?;
+        if matches!(t.status, TourneyStatus::Finished | TourneyStatus::Cancelled) {
+            return refuse("It’s over already.");
+        }
+        let p = t
+            .other
+            .entry("points")
+            .or_insert_with(|| json!({"buyIn": 0, "prizes": null}));
+        p["prizes"] = prizes;
+        Ok(t.clone())
+    }
+
+    /// Runs one-off op `op` with `args`: "new" {setup, payout}, "join" {id,
+    /// name}, "leave" {id}, "prizes" {list}.
+    pub fn private_tourney(
+        &mut self,
+        op: &str,
+        args: &Value,
+        now: u64,
+        rng: &mut rand::rngs::StdRng,
+    ) -> Result<Value, RuleError> {
+        let s = |k: &str| {
+            args.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        };
+        let null = Value::Null;
+        let v = |x: Result<Value, serde_json::Error>| x.map_err(|e| RuleError(e.to_string()));
+        match op {
+            "new" => v(serde_json::to_value(self.private_new(
+                args.get("setup").unwrap_or(&null),
+                args.get("payout").unwrap_or(&null),
+                now,
+                rng,
+            )?)),
+            "join" => v(serde_json::to_value(self.private_join(
+                &s("id"),
+                &s("name"),
+                now,
+            )?)),
+            "leave" => Ok(self.private_leave(&s("id"))?.into()),
+            "prizes" => v(serde_json::to_value(
+                self.private_prizes(args.get("list").unwrap_or(&null))?,
+            )),
+            _ => refuse(format!("no one-off op {op}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -652,6 +832,76 @@ mod tests {
                 pay[0]["amount"].clone()
             ),
             (json!("Ann"), json!("P0"), json!(200))
+        );
+    }
+
+    // The stand-in club, with the host as its first member.
+    fn stand_in() -> crate::club_host::ClubState {
+        serde_json::from_value(json!({
+            "code": "ABCD-EFGH", "hostId": HOST_ID, "name": "Private game",
+            "members": {HOST_ID: {"id": HOST_ID, "name": "Ann", "status": "member", "balance": 0}},
+        }))
+        .unwrap()
+    }
+
+    fn rng() -> rand::rngs::StdRng {
+        use rand::SeedableRng;
+        rand::rngs::StdRng::seed_from_u64(3)
+    }
+
+    const LEVELS: &str = r#"[{"sb": 10, "bb": 20, "minutes": 10}]"#;
+
+    #[test]
+    fn a_one_off_tournament_is_made_joined_and_left() {
+        let mut c = stand_in();
+        let setup = json!({"game": "nlhe", "stack": 1500, "tableSize": 6, "buyIn": 20,
+                           "structure": serde_json::from_str::<Value>(LEVELS).unwrap()});
+        // Settings that won't do leave nothing behind.
+        assert!(
+            c.private_new(&setup, &json!([5000]), 0, &mut rng())
+                .is_err()
+        );
+        assert!(c.tourneys.is_empty());
+        let t = c
+            .private_new(&setup, &json!([7000, 3000]), 0, &mut rng())
+            .unwrap();
+        assert_eq!(t.name, "Ann’s tournament");
+        assert_eq!(t.other["points"], json!({"buyIn": 20, "prizes": null}));
+        assert!(
+            c.private_new(&setup, &Value::Null, 0, &mut rng())
+                .unwrap_err()
+                .0
+                .contains("already")
+        );
+        // Names are cleaned and made unique; asking again renames.
+        assert!(c.private_join("b", "   ", 1).is_err());
+        assert_eq!(c.private_join("b", "  ann  ", 1).unwrap().name, "ann 2");
+        assert_eq!(c.private_join("b", "Bo", 2).unwrap().name, "Bo");
+        assert_eq!(c.tourneys[0].entries.len(), 1);
+        c.private_join(HOST_ID, "Ann", 2).unwrap();
+        // Leaving: the player goes; the host stays a member.
+        assert!(c.private_leave("b").unwrap());
+        assert!(!c.book.club.members.contains_key("b"));
+        assert!(c.private_leave(HOST_ID).unwrap());
+        assert!(c.book.club.members.contains_key(HOST_ID));
+        assert!(!c.private_leave("nobody").unwrap());
+        // Prizes, until the end.
+        let t = c.private_prizes(&json!([30, 10])).unwrap();
+        assert_eq!(t.other["points"]["prizes"], json!([30, 10]));
+        assert!(c.private_prizes(&json!(["x"])).is_err());
+        c.tourneys[0].status = TourneyStatus::Running;
+        assert!(
+            c.private_join("d", "Di", 3)
+                .unwrap_err()
+                .0
+                .contains("started")
+        );
+        c.tourneys[0].status = TourneyStatus::Finished;
+        assert!(
+            c.private_prizes(&Value::Null)
+                .unwrap_err()
+                .0
+                .contains("over")
         );
     }
 }

@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 
+use ducy_play::club_host::ClubState;
 use ducy_play::club_oneoff::{self, Ledger, Seated};
 use ducy_play::club_rules::{Member, RuleError};
 use ducy_play::club_tourneys::Tourney;
@@ -88,6 +89,22 @@ enum Op {
 
 fn value(v: impl serde::Serialize) -> Result<Value, RuleError> {
     serde_json::to_value(v).map_err(|e| RuleError(e.to_string()))
+}
+
+/// Runs one-off tournament op `op` ("new", "join", "leave", "prizes"; see
+/// `ClubState::private_tourney`) with `args` (JSON) on the stand-in club.
+/// Returns `{ok: true, value, club}`, or `{ok: false, message}` with
+/// nothing changed.
+#[wasm_bindgen(js_name = privateTourney)]
+pub fn private_tourney(club: &str, op: &str, args: &str, now: f64) -> Result<JsValue, JsError> {
+    let mut c: ClubState = serde_json::from_str(club).map_err(err)?;
+    let args: Value = serde_json::from_str(args).map_err(err)?;
+    to_js(
+        &match c.private_tourney(op, &args, now as u64, &mut rand::make_rng()) {
+            Ok(value) => json!({"ok": true, "value": value, "club": c}),
+            Err(e) => json!({"ok": false, "message": e.0}),
+        },
+    )
 }
 
 /// Runs `op`. Throws only for an op it can't read.
