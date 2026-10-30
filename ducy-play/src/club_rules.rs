@@ -530,7 +530,7 @@ fn squash(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn cut(s: &str, max: usize) -> String {
+pub(crate) fn cut(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
@@ -671,7 +671,7 @@ fn line_id(now: u64, rng: &mut StdRng) -> String {
 
 /// Text as kept: line endings as `\n`, other whitespace runs as one space, at
 /// most one blank line in a row, trimmed and cut to `max`.
-fn info_text(s: &str, max: usize) -> String {
+pub(crate) fn info_text(s: &str, max: usize) -> String {
     let s = s.replace("\r\n", "\n").replace('\r', "\n");
     let mut out = String::new();
     for c in s.chars() {
