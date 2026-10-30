@@ -21,11 +21,15 @@ use super::{
 };
 use crate::{
     Rng,
-    holdem::{cards::Card, iso::NUM_PREFLOP_CLASSES, iso::preflop_class},
+    holdem::{cards::Card, iso::preflop_class},
 };
 
-const C: usize = NUM_PREFLOP_CLASSES;
 const MAGIC: &[u8; 8] = b"DUCY6PF\0";
+
+/// Deals six hands as hand classes, one per seat (by position). Hold'em
+/// deals two cards each and takes their class; PLO deals four to six and
+/// takes their preflop bucket (`sixmax::plo::PloDealer`).
+pub type Dealer<'a> = &'a (dyn Fn(&mut Rng) -> [usize; SEATS] + Sync);
 const VERSION: u32 = 1;
 
 fn load(a: &AtomicU32) -> f32 {
@@ -48,6 +52,8 @@ pub struct PreflopSolver<'a> {
     /// When set, every seat but the one being trained plays this fixed
     /// strategy (`against_field`).
     field: Option<&'a PreflopStrategy>,
+    /// How hands are dealt; hold'em's two cards when unset.
+    dealer: Option<Dealer<'a>>,
 }
 
 impl<'a> PreflopSolver<'a> {
@@ -68,13 +74,28 @@ impl<'a> PreflopSolver<'a> {
         }
     }
 
+    /// A solver whose hands come from `dealer` (PLO's preflop buckets), with
+    /// tables for the game's number of classes.
+    pub fn with_dealer(
+        game: &'a PreflopGame,
+        eq: &'a PreflopEquity,
+        dealer: Dealer<'a>,
+        seed: u64,
+    ) -> Self {
+        Self {
+            dealer: Some(dealer),
+            ..Self::new(game, eq, seed)
+        }
+    }
+
     pub fn new(game: &'a PreflopGame, eq: &'a PreflopEquity, seed: u64) -> Self {
+        assert_eq!(eq.classes(), game.classes, "equity for the game's classes");
         let mut offsets = vec![(0, 0); game.decisions as usize];
         let mut total = 0;
         for node in &game.nodes {
             if let Node::Decision { id, actions, .. } = node {
                 offsets[*id as usize] = (total, actions.len());
-                total += actions.len() * C;
+                total += actions.len() * game.classes;
             }
         }
         let zeros = |n: usize| (0..n).map(|_| AtomicU32::new(0)).collect();
@@ -87,6 +108,7 @@ impl<'a> PreflopSolver<'a> {
             iterations: AtomicU64::new(0),
             seed,
             field: None,
+            dealer: None,
         }
     }
 
@@ -211,7 +233,10 @@ impl<'a> PreflopSolver<'a> {
                     let mut i = start + t;
                     while i < start + iterations {
                         let mut rng = Rng::for_iteration(self.seed, i);
-                        let classes = Self::deal(&mut rng);
+                        let classes = match self.dealer {
+                            Some(deal) => deal(&mut rng),
+                            None => Self::deal(&mut rng),
+                        };
                         let weight = (i + 1) as f32;
                         for player in 0..SEATS {
                             self.traverse(
@@ -267,10 +292,15 @@ impl<'a> PreflopSolver<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{holdem::chart::class_name, sixmax::preflop::Act};
+    use crate::{
+        holdem::{chart::class_name, iso::NUM_PREFLOP_CLASSES},
+        sixmax::preflop::Act,
+    };
 
     fn class(name: &str) -> usize {
-        (0..C).find(|&c| class_name(c) == name).expect("class")
+        (0..NUM_PREFLOP_CLASSES)
+            .find(|&c| class_name(c) == name)
+            .expect("class")
     }
 
     #[test]
