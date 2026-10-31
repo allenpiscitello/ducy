@@ -512,6 +512,14 @@ pub struct Club {
     /// Each game's waitlist, by [`Table::game_key`] (ducy-web #518).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub lists: BTreeMap<String, Vec<crate::club_lists::OnList>>,
+    /// The games the club offers, running or not: players can join their
+    /// lists, and one opens once enough are interested.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub menu: Vec<crate::club_interest::MenuGame>,
+    /// The "We're starting a new table. Join?" question for an offered game
+    /// that isn't running, by its key, while it's open.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub interest: BTreeMap<String, crate::club_interest::InterestAsk>,
     /// Outside servers that may give members chips, by their key's id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub services: BTreeMap<String, Service>,
@@ -850,6 +858,8 @@ impl Club {
             waitlist: BTreeMap::new(),
             groups: vec![],
             lists: BTreeMap::new(),
+            menu: Vec::new(),
+            interest: BTreeMap::new(),
             services: BTreeMap::new(),
             service_refused: None,
         })
@@ -1491,8 +1501,9 @@ impl Club {
             .collect();
         // The rathole rule's window, so members see it before they sit (#187).
         // How many are on each game's list (#518).
+        // And the games offered that aren't running, to sign up for.
         json!({"type": "tables", "club": self.code, "tables": tables, "rathole": self.rathole_hours.clone().unwrap_or(0.into()),
-               "lists": self.list_counts()})
+               "lists": self.list_counts(), "menu": self.menu_body()})
     }
 
     /// May member `id` join table `table`? "" if so, else why not. `at` is
@@ -2874,6 +2885,7 @@ mod tests {
                    "key": "plo4:1/2:6", "stakes": "micro"})
         );
         assert_eq!(body["lists"], json!({}));
+        assert_eq!(body["menu"], json!([]));
     }
 
     #[test]
