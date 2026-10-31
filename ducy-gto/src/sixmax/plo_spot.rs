@@ -412,3 +412,85 @@ impl PloSpotBot {
         Some(realize(&game.tree, node, n.actions[pick], obs))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        Config, Mccfr,
+        omaha::abstraction::PloAbstractionConfig,
+        sixmax::{preflop::PreflopGame, realize::Realization},
+    };
+
+    #[test]
+    fn a_plo_spot_deals_from_its_ranges_and_trains() {
+        let cards = PloAbstraction::build(
+            PloAbstractionConfig {
+                preflop: 12,
+                flop: 6,
+                turn: 6,
+                river: 6,
+                fit_hands: 400,
+                equity_samples: 40,
+                ..PloAbstractionConfig::default()
+            },
+            |_| {},
+        );
+        let n = cards.bucket_count(0);
+        let game = PreflopGame::pot_limit(100, Realization::uniform(n));
+        // Everyone mixes evenly, except the big blind never calls with
+        // bucket 0.
+        let mut n_of = vec![0; game.decisions as usize];
+        let mut bb_facing = Vec::new();
+        for x in &game.nodes {
+            if let Node::Decision { id, actions, seat } = x {
+                n_of[*id as usize] = actions.len();
+                if *seat == 5 {
+                    bb_facing.push(*id);
+                }
+            }
+        }
+        let strategy = PreflopStrategy::from_fn(&game, |id, b| {
+            let k = n_of[id as usize];
+            if bb_facing.contains(&id) && b == 0 {
+                let Node::Decision { actions, .. } = game
+                    .nodes
+                    .iter()
+                    .find(|x| matches!(x, Node::Decision { id: i, .. } if *i == id))
+                    .expect("decision")
+                else {
+                    unreachable!()
+                };
+                actions
+                    .iter()
+                    .map(|(a, _)| if *a == Act::Fold { 1.0 } else { 0.0 })
+                    .collect()
+            } else {
+                vec![1.0 / k as f32; k]
+            }
+        });
+        let spot = PloSpotGame::from_line(&strategy, "fffrfc", &cards).expect("BTN v BB");
+        assert_eq!(spot.positions, [3, 5], "the button is in position");
+        assert_eq!(spot.dead, 1, "the small blind's chip");
+        assert_eq!(spot.name, "SRP BTN v BB");
+        let mut rng = Rng::new(5);
+        let root = spot.root();
+        for _ in 0..300 {
+            let s = spot.sample_chance(&root, &mut rng);
+            assert_eq!(spot.turn(&s), Turn::Player(1), "out of position first");
+            let mut seen = 0u64;
+            for c in s.hole.iter().flat_map(|h| &h[..4]).chain(&s.board) {
+                assert_eq!(seen & bit(*c), 0, "no card twice");
+                seen |= bit(*c);
+            }
+            assert_ne!(
+                cards.preflop_bucket(&s.hole[1][..4]),
+                0,
+                "out of the big blind's range"
+            );
+        }
+        let mut solver = Mccfr::new(&spot, Config::default());
+        solver.run(3000);
+        assert!(solver.num_infosets() > 0);
+    }
+}
