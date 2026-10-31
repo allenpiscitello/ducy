@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value, json};
 
 use crate::club_book::{AccountTo, Book};
+use crate::club_groups::MustMove;
 use crate::club_money::{CLUB, EntryKind};
 use crate::club_promos::{PromoState, Promos};
 use crate::club_rules::{RuleError, refuse};
@@ -77,6 +78,8 @@ pub struct Outcome {
     pub schedule: Vec<String>,
     /// Tournaments cancelled: stop their tables.
     pub stop_tourneys: Vec<String>,
+    /// Members whose waitlists changed: send them theirs.
+    pub lists_to: Vec<String>,
 }
 
 impl Outcome {
@@ -527,24 +530,23 @@ impl ClubState {
                 self.account_latest(&id, &mut out);
                 out.tell.push(Tell::Tourneys);
             }
-            // Grouped tables with must-move (#501): a group with `table` as
-            // its main table, its minimum to start a new table, ending it.
-            "make_group" => {
-                let min = num(args, "min").map(|m| m.clamp(0, u32::MAX as i64) as u32);
-                let g = self
-                    .book
-                    .club
-                    .make_group(&text(args, "table"), min, now, rng)?;
-                out.value = g.id.clone().into();
+            // Must move (#501, #518), set for a game (`key`): on or off, its
+            // main tables, and whether must-move tables open and become main
+            // tables by themselves.
+            "set_must_move" => {
+                let s: MustMove = serde_json::from_value(args.clone())
+                    .map_err(|_| RuleError("Not a valid must move.".into()))?;
+                let key = text(args, "key");
+                let g = self.book.club.set_must_move(&key, &s, rng)?;
+                out.value = g.map_or(Value::Null, Value::from);
                 out.tell.push(Tell::Tables);
             }
-            "set_group_min" => {
-                let min = num(args, "min").unwrap_or(0).clamp(0, u32::MAX as i64) as u32;
-                self.book.club.set_group_min(&id, min)?;
-            }
-            "end_group" => {
-                self.book.club.end_group(&id)?;
-                out.tell.push(Tell::Tables);
+            // Taking a no-show off a game's list (#518).
+            "list_remove" => {
+                if self.book.club.leave_list(&id, &text(args, "key")) {
+                    out.tell.push(Tell::Tables);
+                    out.lists_to.push(id);
+                }
             }
             _ => return refuse(format!("no host action {op}")),
         }
@@ -789,20 +791,37 @@ mod tests {
     }
 
     #[test]
-    fn groups_are_made_changed_and_ended() {
+    fn must_move_is_set_per_game_and_no_shows_come_off_lists() {
         let mut c = club(&["ann"]);
         c.book.club.tables = serde_json::from_value(json!([
-            {"id": "t1", "name": "Main", "game": "nlhe", "sb": 1, "bb": 2, "minBB": 20, "maxBB": 100, "seats": 6, "status": "open"}
+            {"id": "t1", "name": "Main", "game": "nlhe", "sb": 1, "bb": 2, "minBB": 20, "maxBB": 100, "seats": 6, "status": "open"},
+            {"id": "t2", "name": "Side", "game": "nlhe", "sb": 1, "bb": 2, "minBB": 20, "maxBB": 100, "seats": 6, "status": "open", "createdAt": 1}
         ]))
         .unwrap();
-        let o = run(&mut c, "make_group", json!({"table": "t1"})).unwrap();
-        let gid = o.value.as_str().unwrap().to_string();
+        let key = "nlhe:1/2:6";
+        let o = run(
+            &mut c,
+            "set_must_move",
+            json!({"key": key, "on": true, "mains": 1, "autoOpen": true, "min": 4}),
+        )
+        .unwrap();
+        assert!(o.value.is_string());
         assert_eq!(o.tell, [Tell::Tables]);
-        assert_eq!(c.book.club.groups[0].min, 4);
-        run(&mut c, "set_group_min", json!({"id": gid, "min": 3})).unwrap();
-        assert_eq!(c.book.club.groups[0].min, 3);
-        assert!(run(&mut c, "set_group_min", json!({"id": gid, "min": 9})).is_err());
-        run(&mut c, "end_group", json!({"id": gid})).unwrap();
+        let g = &c.book.club.groups[0];
+        assert_eq!((g.mains, g.min, g.auto_open), (1, 4, true));
+        assert!(
+            run(
+                &mut c,
+                "set_must_move",
+                json!({"key": key, "on": true, "mains": 1, "min": 9})
+            )
+            .is_err()
+        );
+        run(&mut c, "set_must_move", json!({"key": key, "on": false})).unwrap();
         assert!(c.book.club.groups.is_empty());
+        c.book.club.join_list("ann", key, 5).unwrap();
+        let o = run(&mut c, "list_remove", json!({"key": key, "id": "ann"})).unwrap();
+        assert_eq!(o.lists_to, ["ann"]);
+        assert!(c.book.club.lists.is_empty());
     }
 }

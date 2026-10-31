@@ -1075,7 +1075,12 @@ impl Book {
             .money
             .buy_in(id, table, amt, now)
             .map_err(|e| self.refusal(id, e))?;
-        self.set_seat(id, json!({"table": table, "stack": amt, "put": amt}));
+        // When they sat: at a must-move table, who sat first moves up first
+        // (ducy-web #518).
+        self.set_seat(
+            id,
+            json!({"table": table, "stack": amt, "put": amt, "satAt": now}),
+        );
         self.sync();
         Ok(Self::own(entries, id))
     }

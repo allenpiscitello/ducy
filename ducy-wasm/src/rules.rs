@@ -141,26 +141,6 @@ enum Op {
     },
     PruneReservations,
     NextLapse,
-    MakeGroup {
-        table: String,
-        min: Option<u32>,
-    },
-    SetGroupMin {
-        id: String,
-        min: u32,
-    },
-    EndGroup {
-        id: String,
-    },
-    SatInGroup {
-        id: String,
-        table: String,
-    },
-    LeftGroup {
-        id: String,
-        table: String,
-        to: Option<String>,
-    },
     PruneGroups,
     MovesUp {
         id: String,
@@ -169,9 +149,46 @@ enum Op {
         #[serde(default)]
         held: BTreeMap<String, usize>,
     },
+    Promote {
+        id: String,
+        #[serde(default)]
+        taken: BTreeMap<String, usize>,
+    },
+    WantsTable {
+        id: String,
+        #[serde(default)]
+        taken: BTreeMap<String, usize>,
+    },
     AskAbout {
         id: String,
-        online: Vec<String>,
+    },
+    ExtendAbout {
+        id: String,
+    },
+    JoinList {
+        id: String,
+        key: String,
+    },
+    LeaveList {
+        id: String,
+        key: String,
+    },
+    BackOnList {
+        id: String,
+        key: String,
+    },
+    SatDown {
+        id: String,
+        table: String,
+    },
+    OfferSeats {
+        #[serde(default)]
+        taken: BTreeMap<String, usize>,
+    },
+    LapseLists,
+    NextListDue,
+    ListsFor {
+        id: String,
     },
     GroupAnswer {
         id: String,
@@ -380,17 +397,6 @@ pub fn club_rules(club: &str, op: JsValue, now: f64) -> Result<JsValue, JsError>
             changes = false;
             value(c.next_lapse())
         }
-        Op::MakeGroup { table, min } => c.make_group(&table, min, now, &mut rng()).and_then(value),
-        Op::SetGroupMin { id, min } => c.set_group_min(&id, min).and_then(value),
-        Op::EndGroup { id } => c.end_group(&id).and_then(value),
-        Op::SatInGroup { id, table } => {
-            c.sat_in_group(&id, &table, now);
-            Ok(Value::Null)
-        }
-        Op::LeftGroup { id, table, to } => {
-            c.left_group(&id, &table, to.as_deref());
-            Ok(Value::Null)
-        }
         Op::PruneGroups => {
             c.prune_groups();
             Ok(Value::Null)
@@ -399,7 +405,27 @@ pub fn club_rules(club: &str, op: JsValue, now: f64) -> Result<JsValue, JsError>
             changes = false;
             value(c.moves_up(&id, &seated, &held))
         }
-        Op::AskAbout { id, online } => c.ask_about(&id, &online, now).and_then(value),
+        Op::Promote { id, taken } => value(c.promote(&id, &taken)),
+        Op::WantsTable { id, taken } => {
+            changes = false;
+            value(c.wants_table(&id, &taken))
+        }
+        Op::AskAbout { id } => c.ask_about(&id, now).and_then(value),
+        Op::ExtendAbout { id } => value(c.extend_about(&id, now)),
+        Op::JoinList { id, key } => c.join_list(&id, &key, now).and_then(value),
+        Op::LeaveList { id, key } => value(c.leave_list(&id, &key)),
+        Op::BackOnList { id, key } => c.back_on_list(&id, &key, now).and_then(value),
+        Op::SatDown { id, table } => value(c.sat_down(&id, &table)),
+        Op::OfferSeats { taken } => value(c.offer_seats(&taken, now)),
+        Op::LapseLists => value(c.lapse_lists(now)),
+        Op::NextListDue => {
+            changes = false;
+            value(c.next_list_due())
+        }
+        Op::ListsFor { id } => {
+            changes = false;
+            Ok(c.lists_for(&id))
+        }
         Op::GroupAnswer { id, who, yes } => value(c.group_answer(&id, &who, yes, now)),
         Op::FinishAsk { id, most } => value(c.finish_ask(&id, now, most, &mut rng())),
         Op::AddService { id, alg, key, o } => {

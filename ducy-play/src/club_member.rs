@@ -232,6 +232,8 @@ pub fn take_host_message(mem: &mut Map<String, Value>, env: &Value) -> bool {
         "info",
         "promo_event",
         "group",
+        "lists",
+        "list",
         "tourney_error",
         "host_key",
         "table_error",
@@ -267,6 +269,33 @@ pub fn take_host_message(mem: &mut Map<String, Value>, env: &Value) -> bool {
             set(
                 "temporary",
                 (b.get("temporary") == Some(&Value::Bool(true))).into(),
+            );
+            // How many wait on each game's list (#518).
+            set(
+                "listCounts",
+                b.get("lists")
+                    .filter(|l| l.is_object())
+                    .cloned()
+                    .unwrap_or_else(|| json!({})),
+            );
+        }
+        // The waitlists you're on (#518): each with its count and your
+        // place, a seat offered, or when your place goes.
+        "lists" => set("lists", list(b.get("lists"))),
+        // A seat offered (offer), an offer missed (missed), off a list
+        // (off), or a list refused (refused).
+        "list" => {
+            let k = b.get("kind").and_then(Value::as_str).unwrap_or("");
+            let k = if ["offer", "missed", "off", "refused"].contains(&k) {
+                k
+            } else {
+                "off"
+            };
+            set(
+                "listEvent",
+                json!({"kind": k, "key": short(b.get("key"), 60), "table": text(b.get("table")),
+                       "name": short(b.get("name"), 60), "until": number(b.get("until")),
+                       "reason": short(b.get("reason"), 200)}),
             );
         }
         "help" => {
@@ -550,6 +579,26 @@ mod tests {
         assert_eq!(m["groupEvent"]["kind"], "closed");
         assert_eq!(m["groupEvent"]["reason"].as_str().unwrap().len(), 200);
         assert_eq!(m["groupAsk"], Value::Null);
+        // Waitlists (#518): yours, and a seat offered.
+        take_host_message(
+            &mut m,
+            &env(
+                1,
+                json!({"type": "lists", "club": "ABCD-EFGH", "lists": [{"key": "nlhe:1/2:9", "count": 3, "place": 2}]}),
+            ),
+        );
+        assert_eq!(m["lists"][0]["place"], 2);
+        take_host_message(
+            &mut m,
+            &env(
+                1,
+                json!({"type": "list", "club": "ABCD-EFGH", "kind": "offer", "key": "nlhe:1/2:9", "table": "t1", "name": "Main", "until": 5}),
+            ),
+        );
+        assert_eq!(
+            m["listEvent"],
+            json!({"kind": "offer", "key": "nlhe:1/2:9", "table": "t1", "name": "Main", "until": 5.0, "reason": ""})
+        );
         take_host_message(
             &mut m,
             &env(
