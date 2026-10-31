@@ -42,6 +42,10 @@ pub struct OnList {
     /// When they missed an offer: passed over until they're back.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub missed: Option<u64>,
+    /// For a game that isn't running: the fewest players they'd start a new
+    /// table with (none: a full table).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<u32>,
 }
 
 impl OnList {
@@ -92,6 +96,19 @@ impl Club {
     /// Member `id` joins game `key`'s list (back in line, if they were passed
     /// over); their place.
     pub fn join_list(&mut self, id: &str, key: &str, now: u64) -> Result<usize, RuleError> {
+        self.join_list_with(id, key, None, now)
+    }
+
+    /// As [`Club::join_list`]; for an offered game that isn't running (its
+    /// interest list), `min` is the fewest players they'd start a table with
+    /// (none: a full one).
+    pub fn join_list_with(
+        &mut self,
+        id: &str,
+        key: &str,
+        min: Option<u32>,
+        now: u64,
+    ) -> Result<usize, RuleError> {
         if !self
             .members
             .get(id)
@@ -99,8 +116,13 @@ impl Club {
         {
             return refuse("Only club members can join a list.");
         }
-        if self.game_tables(key).is_empty() {
-            return refuse("That game isn’t running.");
+        let seats = match (self.game_tables(key).first(), self.offered(key)) {
+            (Some(t), _) => t.seats,
+            (None, Some(g)) => g.seats,
+            (None, None) => return refuse("That game isn’t running."),
+        };
+        if min.is_some_and(|m| !(2..=seats).contains(&m)) {
+            return refuse(format!("Pick 2 to {seats} players."));
         }
         let at = self
             .members
@@ -112,12 +134,18 @@ impl Club {
         }
         let list = self.lists.entry(key.into()).or_default();
         match list.iter_mut().find(|e| e.member == id) {
-            Some(e) => e.missed = None,
+            Some(e) => {
+                e.missed = None;
+                if min.is_some() {
+                    e.min = min;
+                }
+            }
             None => list.push(OnList {
                 member: id.into(),
                 at: now,
                 offer: None,
                 missed: None,
+                min,
             }),
         }
         Ok(self.place_on_list(id, key).unwrap_or(1))
@@ -266,7 +294,9 @@ impl Club {
         let code = self.code.clone();
         let keys: Vec<String> = self.lists.keys().cloned().collect();
         for key in keys {
-            let running = !self.game_tables(&key).is_empty();
+            // An offered game's list stays while it isn't running: it's its
+            // interest list.
+            let running = !self.game_tables(&key).is_empty() || self.offered(&key).is_some();
             let list = self.lists.remove(&key).unwrap_or_default();
             let tell = |to: &str, kind: &str, until: Option<u64>| {
                 let mut b = json!({"type": "list", "club": code, "kind": kind, "key": key});
@@ -333,6 +363,9 @@ impl Club {
             .filter_map(|(key, list)| {
                 let e = list.iter().find(|e| e.member == id)?;
                 let mut v = json!({"key": key, "count": list.len()});
+                if let Some(m) = e.min {
+                    v["min"] = m.into();
+                }
                 if let Some(o) = &e.offer {
                     let name = self.table(&o.table).map_or("", |t| t.name.as_str());
                     v["offer"] = json!({"table": o.table, "name": name, "until": o.until});

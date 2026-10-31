@@ -548,6 +548,20 @@ impl ClubState {
                     out.lists_to.push(id);
                 }
             }
+            // The club's menu: offering a game (`table`, a table's settings)
+            // even when none of it is running, so players can sign up, and
+            // no longer offering one (`key`).
+            "offer_game" => {
+                let spec = args.get("table").cloned().unwrap_or_else(|| json!({}));
+                let g = self.book.club.offer_game(&spec, rng)?;
+                out.value = g.key.clone().into();
+                out.tell.push(Tell::Tables);
+            }
+            "remove_offer" => {
+                if self.book.club.remove_offer(&text(args, "key")) {
+                    out.tell.push(Tell::Tables);
+                }
+            }
             _ => return refuse(format!("no host action {op}")),
         }
         Ok(out)
@@ -823,5 +837,21 @@ mod tests {
         let o = run(&mut c, "list_remove", json!({"key": key, "id": "ann"})).unwrap();
         assert_eq!(o.lists_to, ["ann"]);
         assert!(c.book.club.lists.is_empty());
+    }
+
+    #[test]
+    fn games_are_offered_and_no_longer_offered() {
+        let mut c = club(&["ann"]);
+        let o = run(
+            &mut c,
+            "offer_game",
+            json!({"table": {"game": "plo4", "sb": 1, "bb": 2, "seats": 6}}),
+        )
+        .unwrap();
+        assert_eq!(o.value, "plo4:1/2:6");
+        assert_eq!(o.tell, [Tell::Tables]);
+        assert!(run(&mut c, "offer_game", json!({"table": {"seats": 40}})).is_err());
+        run(&mut c, "remove_offer", json!({"key": "plo4:1/2:6"})).unwrap();
+        assert!(c.book.club.menu.is_empty());
     }
 }

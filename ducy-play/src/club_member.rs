@@ -270,6 +270,8 @@ pub fn take_host_message(mem: &mut Map<String, Value>, env: &Value) -> bool {
                 "temporary",
                 (b.get("temporary") == Some(&Value::Bool(true))).into(),
             );
+            // The games offered that aren't running, to sign up for.
+            set("menu", list(b.get("menu")));
             // How many wait on each game's list (#518).
             set(
                 "listCounts",

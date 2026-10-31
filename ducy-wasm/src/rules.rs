@@ -168,6 +168,25 @@ enum Op {
     JoinList {
         id: String,
         key: String,
+        min: Option<u32>,
+    },
+    WantsInterest {
+        key: String,
+    },
+    AskInterest {
+        key: String,
+    },
+    ExtendInterest {
+        key: String,
+    },
+    InterestAnswer {
+        key: String,
+        who: String,
+        yes: bool,
+    },
+    FinishInterest {
+        key: String,
+        most: Option<u64>,
     },
     LeaveList {
         id: String,
@@ -412,7 +431,15 @@ pub fn club_rules(club: &str, op: JsValue, now: f64) -> Result<JsValue, JsError>
         }
         Op::AskAbout { id } => c.ask_about(&id, now).and_then(value),
         Op::ExtendAbout { id } => value(c.extend_about(&id, now)),
-        Op::JoinList { id, key } => c.join_list(&id, &key, now).and_then(value),
+        Op::JoinList { id, key, min } => c.join_list_with(&id, &key, min, now).and_then(value),
+        Op::WantsInterest { key } => {
+            changes = false;
+            value(c.wants_interest(&key))
+        }
+        Op::AskInterest { key } => c.ask_interest(&key, now).and_then(value),
+        Op::ExtendInterest { key } => value(c.extend_interest(&key, now)),
+        Op::InterestAnswer { key, who, yes } => value(c.interest_answer(&key, &who, yes)),
+        Op::FinishInterest { key, most } => value(c.finish_interest(&key, now, most, &mut rng())),
         Op::LeaveList { id, key } => value(c.leave_list(&id, &key)),
         Op::BackOnList { id, key } => c.back_on_list(&id, &key, now).and_then(value),
         Op::SatDown { id, table } => value(c.sat_down(&id, &table)),
