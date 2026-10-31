@@ -15,6 +15,8 @@
 //! - `seq`: a number that only goes up;
 //! - `sig`: the signature (base64url) over the canonical JSON of the rest.
 
+pub mod backup;
+
 use std::collections::BTreeMap;
 
 use base64::Engine;
