@@ -103,13 +103,16 @@ fn share(hands: &[[Card; 2]], board: u64) -> f64 {
     1.0 / scores.iter().filter(|&&s| s == best).count() as f64
 }
 
-/// Preflop equity tables.
+/// Preflop equity tables, over the 169 hold'em classes or, for PLO, the
+/// preflop buckets (`sixmax::plo`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreflopEquity {
-    /// `[a * 169 + b]`: class `a`'s pot share against class `b`.
+    /// Hand classes.
+    n: usize,
+    /// `[a * n + b]`: class `a`'s pot share against class `b`.
     heads_up: Vec<f32>,
     /// `[k - 1][class]`: the pot share against `k` random hands.
-    vs_random: Vec<[f32; NUM_PREFLOP_CLASSES]>,
+    vs_random: Vec<Vec<f32>>,
 }
 
 impl PreflopEquity {
@@ -144,14 +147,23 @@ impl PreflopEquity {
                 .collect()
         });
         let mut heads_up = vec![0f32; n * n];
-        let mut vs_random = vec![[0f32; NUM_PREFLOP_CLASSES]; MAX_OPPONENTS];
+        let mut vs_random = vec![vec![0f32; n]; MAX_OPPONENTS];
         for (a, row, multi) in rows {
             heads_up[a * n..(a + 1) * n].copy_from_slice(&row);
             for k in 0..MAX_OPPONENTS {
                 vs_random[k][a] = multi[k];
             }
         }
-        // Make each pair add up to one exactly: average the two estimates.
+        Self::from_tables(n, heads_up, vs_random)
+    }
+
+    /// Tables sampled elsewhere (PLO buckets): `heads_up[a * n + b]` and
+    /// `vs_random[k - 1][a]`. Each pair is made to add up to one exactly, by
+    /// averaging the two estimates.
+    pub fn from_tables(n: usize, mut heads_up: Vec<f32>, vs_random: Vec<Vec<f32>>) -> Self {
+        assert_eq!(heads_up.len(), n * n, "an n × n table");
+        assert_eq!(vs_random.len(), MAX_OPPONENTS, "one row per opponent count");
+        assert!(vs_random.iter().all(|r| r.len() == n), "n per row");
         for a in 0..n {
             for b in a..n {
                 let x = (heads_up[a * n + b] + 1.0 - heads_up[b * n + a]) / 2.0;
@@ -160,9 +172,15 @@ impl PreflopEquity {
             }
         }
         Self {
+            n,
             heads_up,
             vs_random,
         }
+    }
+
+    /// Hand classes the tables cover.
+    pub fn classes(&self) -> usize {
+        self.n
     }
 
     fn sample_pair(a: usize, b: usize, samples: u32, rng: &mut Rng) -> f32 {
@@ -206,7 +224,7 @@ impl PreflopEquity {
 
     /// Class `a`'s pot share against class `b`, heads-up.
     pub fn heads_up(&self, a: usize, b: usize) -> f64 {
-        self.heads_up[a * NUM_PREFLOP_CLASSES + b] as f64
+        self.heads_up[a * self.n + b] as f64
     }
 
     /// Class `a`'s pot share against `opponents` random hands (1 to 5).
@@ -215,10 +233,10 @@ impl PreflopEquity {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(16 + 4 * (self.heads_up.len() + 5 * 169));
+        let mut out = Vec::with_capacity(16 + 4 * (self.heads_up.len() + 5 * self.n));
         out.extend_from_slice(MAGIC);
         out.extend_from_slice(&VERSION.to_le_bytes());
-        out.extend_from_slice(&(NUM_PREFLOP_CLASSES as u32).to_le_bytes());
+        out.extend_from_slice(&(self.n as u32).to_le_bytes());
         for x in self
             .heads_up
             .iter()
@@ -229,15 +247,18 @@ impl PreflopEquity {
         out
     }
 
+    /// Reads [`Self::to_bytes`]: any number of classes (169 for hold'em).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        let n = NUM_PREFLOP_CLASSES;
-        let want = 16 + 4 * (n * n + MAX_OPPONENTS * n);
-        if bytes.len() != want || &bytes[..8] != MAGIC {
+        if bytes.len() < 16 || &bytes[..8] != MAGIC {
             return Err("not a preflop equity table".into());
         }
         let word = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().expect("4 bytes"));
-        if word(8) != VERSION || word(12) as usize != n {
+        if word(8) != VERSION {
             return Err("preflop equity table of another version".into());
+        }
+        let n = word(12) as usize;
+        if n == 0 || bytes.len() != 16 + 4 * (n * n + MAX_OPPONENTS * n) {
+            return Err("not a preflop equity table".into());
         }
         let floats: Vec<f32> = bytes[16..]
             .chunks_exact(4)
@@ -246,9 +267,10 @@ impl PreflopEquity {
         let heads_up = floats[..n * n].to_vec();
         let vs_random = floats[n * n..]
             .chunks_exact(n)
-            .map(|c| c.try_into().expect("169"))
+            .map(|c| c.to_vec())
             .collect();
         Ok(Self {
+            n,
             heads_up,
             vs_random,
         })

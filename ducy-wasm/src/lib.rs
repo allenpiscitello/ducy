@@ -1,9 +1,24 @@
 use wasm_bindgen::prelude::*;
 
+mod book;
+mod club;
 mod fair;
+mod hands;
+mod host;
+mod member;
+mod money;
+mod oneoff;
+mod overview;
 mod play;
+mod promos;
+mod rules;
+mod seat_bot;
+mod seats;
+mod service;
 mod shuffle;
 mod tournament;
+mod tourney_host;
+mod tourneys;
 pub use play::{BotTable, MultiTable};
 
 use ducy::deck::{Card, Deck};

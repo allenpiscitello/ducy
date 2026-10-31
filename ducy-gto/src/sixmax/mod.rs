@@ -13,11 +13,14 @@
 //! - [`bot`]: a six-handed bot playing the solve before the flop.
 //! - [`field`]: how a field of players actually plays preflop, recorded on
 //!   the tree, for solving against that field.
+//! - [`plo`]: six-handed pot-limit Omaha (#290): the PLO abstraction's
+//!   preflop buckets as hand classes, their equity, and the dealer.
 
 pub mod bot;
 pub mod chart;
 pub mod equity;
 pub mod field;
+pub mod plo;
 pub mod preflop;
 pub mod realize;
 pub mod solver;

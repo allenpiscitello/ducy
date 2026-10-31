@@ -55,11 +55,38 @@ pub struct ReadmeDoctests;
 
 mod bot;
 pub mod bots;
+#[cfg(feature = "club")]
+pub mod club_book;
+#[cfg(feature = "club")]
+pub mod club_groups;
+#[cfg(feature = "club")]
+pub mod club_host;
+#[cfg(feature = "club")]
+pub mod club_member;
+pub mod club_money;
+#[cfg(feature = "club")]
+pub mod club_oneoff;
+#[cfg(feature = "club")]
+pub mod club_overview;
+#[cfg(feature = "club")]
+pub mod club_promos;
+#[cfg(feature = "club")]
+pub mod club_rules;
+#[cfg(feature = "club")]
+pub mod club_seats;
+#[cfg(feature = "club")]
+pub mod club_service;
+#[cfg(feature = "club")]
+pub mod club_tourney_host;
+#[cfg(feature = "club")]
+pub mod club_tourneys;
 mod deal;
 mod error;
 pub mod fair_deal;
 pub mod features;
+pub mod generic;
 mod hand;
+pub mod hands;
 mod host;
 mod matchup;
 pub mod net;
@@ -70,6 +97,7 @@ mod process;
 pub mod ranges;
 pub mod replay;
 mod rules;
+pub mod runner;
 mod showdown;
 pub mod snapshot;
 pub mod stats;
@@ -78,6 +106,7 @@ pub mod structure;
 mod table;
 mod tournament;
 mod tournament_host;
+pub mod tourney_runner;
 pub mod traits;
 mod variants;
 

@@ -6,8 +6,14 @@
 //! `--preflop N` (0 for one bucket per class, four cards only), `--flop N`,
 //! `--turn N`, `--river N`, `--fit N` (sampled hands per street), `--check
 //! N` (hands per street for the quality check), `--plain` (not nut-aware,
-//! as before #204), `--compare FILE` (measure a saved abstraction, such as
-//! the published one, on the same hands).
+//! as before #204), `--nut-first` (cluster on the chances of the nuts, of
+//! second best and of redraws past the current nuts, #291), `--compare
+//! FILE` (measure a saved abstraction, such as the published one, on the
+//! same hands).
+//!
+//! Then the within-bucket spread of the nuts-first measures (exact nuts,
+//! second best, past the current nuts, over 200 runouts) for these buckets
+//! and the compared ones: the measures #291 says carry PLO5 and PLO6.
 //!
 //! For each street it reports the within-bucket spread of equity (measured
 //! with 2,000 samples per hand, ±1.1%) and of nut potential (how close to
@@ -34,7 +40,9 @@ use ducy_gto::{
         hunl::{Buckets, Hunl, HunlConfig},
     },
     omaha::{
-        abstraction::{PloAbstraction, PloAbstractionConfig, nut_potential, random_spot},
+        abstraction::{
+            PloAbstraction, PloAbstractionConfig, nut_outcomes, nut_potential, random_spot,
+        },
         showdown::{PairTable, equity_vs_random},
     },
 };
@@ -118,6 +126,7 @@ fn main() {
         river: num("--river", 200),
         fit_hands: num("--fit", 40_000),
         nut_aware: !std::env::args().any(|a| a == "--plain"),
+        nut_first: std::env::args().any(|a| a == "--nut-first"),
         ..PloAbstractionConfig::default()
     };
     let compare = arg("--compare").map(|f| {
@@ -235,6 +244,57 @@ fn main() {
             compared.unwrap_or_default(),
             both(&quantile_buckets(&sampled(k, 3), n), &truth, &nuts),
             both(&quantile_buckets(&sampled(2000, 4), n), &truth, &nuts),
+        );
+    }
+
+    // The nuts-first measures (#291): how far apart hands in one bucket are
+    // on the chance of exactly the nuts, of second best, and of ending past
+    // the current nuts.
+    println!(
+        "\nWithin-bucket spread of exact nuts / second best / past the current nuts, {check} hands \
+         per street (200 runouts):"
+    );
+    println!(
+        "| Street | These buckets |{}",
+        if compare.is_some() {
+            " Compared buckets |"
+        } else {
+            ""
+        }
+    );
+    println!("|---|---|{}", if compare.is_some() { "---|" } else { "" });
+    let three = |b: &[u16], o: &[[f64; 3]]| {
+        let col = |i: usize| -> Vec<f64> { o.iter().map(|x| x[i]).collect() };
+        format!(
+            "{:.3} / {:.3} / {:.3}",
+            spread(b, &col(0)),
+            spread(b, &col(1)),
+            spread(b, &col(2))
+        )
+    };
+    for (name, board_len) in [("Flop", 3), ("Turn", 4)] {
+        let spots: Vec<(Vec<Card>, Vec<Card>, [f64; 3])> = par_map((0..check).collect(), |i| {
+            let mut rng = Rng::new(17 + board_len as u64 * 7919 + i as u64 * 104_729);
+            let (hole, board) = random_spot(k, board_len, &mut rng);
+            let o = nut_outcomes(&hole, &board, 200, &mut rng);
+            (hole, board, o)
+        });
+        let outcomes: Vec<[f64; 3]> = spots.iter().map(|s| s.2).collect();
+        let ours: Vec<u16> = spots
+            .iter()
+            .map(|(h, b, _)| cards.bucket_on(h, &cards.view(b)))
+            .collect();
+        let compared = compare.as_ref().map(|old| {
+            let b: Vec<u16> = spots
+                .iter()
+                .map(|(h, b, _)| old.bucket_on(h, &old.view(b)))
+                .collect();
+            format!(" {} |", three(&b, &outcomes))
+        });
+        println!(
+            "| {name} | {} |{}",
+            three(&ours, &outcomes),
+            compared.unwrap_or_default()
         );
     }
 

@@ -14,6 +14,7 @@ use ducy_play::{
     Action, ChipRequest, Command, Departure, Outgoing, Personality, Refund, SeatedPlayer, Table,
     TableHost, TableRules, TableSeat, Variant,
     features::NUM_FEATURES,
+    generic,
     net::{Mlp, NUM_CLASSES, NetBot},
 };
 use std::{
@@ -41,7 +42,7 @@ use ducy_gto::{
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-fn err(e: impl std::fmt::Debug) -> JsError {
+pub(crate) fn err(e: impl std::fmt::Debug) -> JsError {
     JsError::new(&format!("{e:?}"))
 }
 
@@ -63,6 +64,25 @@ pub fn bot_personalities() -> Result<JsValue, JsError> {
             name: p.name(),
             description: p.description(),
             catchphrase: p.catchphrase(),
+        })
+        .collect();
+    serde_wasm_bindgen::to_value(&list).map_err(err)
+}
+
+/// The generic players' families (ducy_play::generic, #256), as [{id,
+/// name}]: a player of family `id` seats as `g-<id>-<seed>`.
+#[wasm_bindgen(js_name = genericFamilies)]
+pub fn generic_families() -> Result<JsValue, JsError> {
+    #[derive(Serialize)]
+    struct FamilyInfo {
+        id: &'static str,
+        name: &'static str,
+    }
+    let list: Vec<FamilyInfo> = generic::Family::ALL
+        .iter()
+        .map(|f| FamilyInfo {
+            id: f.id(),
+            name: f.name(),
         })
         .collect();
     serde_wasm_bindgen::to_value(&list).map_err(err)
@@ -680,6 +700,10 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
             seats.push(seat?);
             continue;
         }
+        if let Some(bot) = generic::bot_by_id(id, Some(seed.wrapping_add(i as u64 + 1))) {
+            seats.push(TableSeat::bot(id, bot));
+            continue;
+        }
         let p =
             Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
         seats.push(TableSeat::bot(
@@ -692,7 +716,7 @@ fn seats_for(bots: &[String], seed: u64) -> Result<Vec<TableSeat>, JsError> {
 
 /// The bot with id `id` (a personality, or "gto" once loaded), for a
 /// restored table.
-fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
+pub(crate) fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
     if id == GTO_ID {
         return gto_seat(seed)?.bot.ok_or_else(|| JsError::new("no bot"));
     }
@@ -706,6 +730,9 @@ fn bot_for(id: &str, seed: u64) -> Result<Box<dyn ducy_play::Bot>, JsError> {
     }
     if let Some(seat) = net_seat(id, seed) {
         return seat?.bot.ok_or_else(|| JsError::new("no bot"));
+    }
+    if let Some(bot) = generic::bot_by_id(id, Some(seed)) {
+        return Ok(Box::new(bot));
     }
     let p = Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
     Ok(Box::new(p.bot(Some(seed))))
@@ -913,7 +940,12 @@ impl BotTable {
         if self.table.hand().is_none() {
             return Err(JsError::new("no hand dealt"));
         }
-        to_js(&self.table.view(0))
+        let mut view = self.table.view(0);
+        // The bots settle it (Milk King runs it once): nothing to ask.
+        if self.bots_choose_runs() {
+            view.run_choice = false;
+        }
+        to_js(&view)
     }
 
     /// Puts every seat back to the buy-in for the next hand, so no chips
@@ -948,9 +980,14 @@ impl BotTable {
         if self.table.in_hand() {
             return Err(JsError::new("the current hand isn't over"));
         }
-        let p =
-            Personality::from_name(id).ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
-        *self.table.seat_mut(seat) = TableSeat::bot(p.id(), p.bot(Some(seed)));
+        *self.table.seat_mut(seat) = match generic::bot_by_id(id, Some(seed)) {
+            Some(bot) => TableSeat::bot(id, bot),
+            None => {
+                let p = Personality::from_name(id)
+                    .ok_or_else(|| JsError::new(&format!("unknown bot {id}")))?;
+                TableSeat::bot(p.id(), p.bot(Some(seed)))
+            }
+        };
         self.table.set_stack(seat, chips).map_err(err)
     }
 
@@ -1048,9 +1085,11 @@ impl BotTable {
 }
 
 impl BotTable {
-    /// The hand asks whether to run it twice and the person isn't in it.
+    /// The hand asks whether to run it twice and the bots answer: the person
+    /// isn't in it, or Milk King is, who only ever runs it once.
     fn bots_choose_runs(&self) -> bool {
-        matches!(self.table.awaiting(), Some(ducy_play::Awaiting::RunChoice(seats)) if !seats.contains(&0))
+        matches!(self.table.awaiting(), Some(ducy_play::Awaiting::RunChoice(seats))
+            if !seats.contains(&0) || seats.iter().any(|&s| self.table.seat(s).id == Personality::MilkKing.id()))
     }
 
     /// Whether the person plays the GTO bot heads-up, where review works.
@@ -1078,7 +1117,35 @@ impl BotTable {
     }
 }
 
-fn to_js(value: &impl Serialize) -> Result<JsValue, JsError> {
+/// A club table's host: `seats` empty seats and no seat for the host (see
+/// [`MultiTable::club`]).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn club_host(
+    seats: usize,
+    min_buy_in: u64,
+    max_buy_in: u64,
+    small_blind: u64,
+    big_blind: u64,
+    seed: u64,
+    game: Option<String>,
+    turn_ms: u64,
+) -> Result<TableHost, JsError> {
+    let rules = rules_for(game.as_deref(), small_blind, big_blind)?;
+    if small_blind == 0 || big_blind < small_blind || min_buy_in < big_blind {
+        return Err(JsError::new("invalid blinds or buy-in"));
+    }
+    if !(2..=ducy_play::MAX_PLAYERS).contains(&seats) {
+        return Err(JsError::new("a table seats 2 to 10"));
+    }
+    let all = (0..seats).map(|_| TableSeat::empty()).collect();
+    let mut table = Table::new(rules, all, min_buy_in, seed)
+        .map_err(err)?
+        .with_secure_deals();
+    table.set_run_it_twice(true);
+    TableHost::without_host(table, turn_ms, min_buy_in, max_buy_in).map_err(err)
+}
+
+pub(crate) fn to_js(value: &impl Serialize) -> Result<JsValue, JsError> {
     value
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(err)
@@ -1270,19 +1337,16 @@ impl MultiTable {
         game: Option<String>,
         turn_ms: u64,
     ) -> Result<MultiTable, JsError> {
-        let rules = rules_for(game.as_deref(), small_blind, big_blind)?;
-        if small_blind == 0 || big_blind < small_blind || min_buy_in < big_blind {
-            return Err(JsError::new("invalid blinds or buy-in"));
-        }
-        if !(2..=ducy_play::MAX_PLAYERS).contains(&seats) {
-            return Err(JsError::new("a table seats 2 to 10"));
-        }
-        let all = (0..seats).map(|_| TableSeat::empty()).collect();
-        let mut table = Table::new(rules, all, min_buy_in, seed)
-            .map_err(err)?
-            .with_secure_deals();
-        table.set_run_it_twice(true);
-        let host = TableHost::without_host(table, turn_ms, min_buy_in, max_buy_in).map_err(err)?;
+        let host = club_host(
+            seats,
+            min_buy_in,
+            max_buy_in,
+            small_blind,
+            big_blind,
+            seed,
+            game,
+            turn_ms,
+        )?;
         Ok(MultiTable { host })
     }
 
@@ -1460,6 +1524,15 @@ impl MultiTable {
     #[wasm_bindgen(js_name = setSitOutLimit)]
     pub fn set_sit_out_limit(&mut self, ms: f64) {
         self.host.set_sit_out_limit(ms as u64);
+    }
+
+    /// Whether player `client_id` owes the table hands (a club's call time):
+    /// while they do, sitting out or being away blinds them off (dealt in,
+    /// checking or folding) instead of taking them out, and they aren't
+    /// removed for it. Returns whether they're at the table.
+    #[wasm_bindgen(js_name = setMustPlay)]
+    pub fn set_must_play(&mut self, client_id: &str, on: bool, now: f64) -> bool {
+        self.host.set_must_play(client_id, on, now as u64)
     }
 
     /// Approves the chips the player in `seat` asked for.

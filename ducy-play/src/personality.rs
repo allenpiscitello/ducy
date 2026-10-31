@@ -1289,8 +1289,9 @@ impl PersonalityBot {
         let monster = edge >= style.value_margin + 0.2;
         let pot = obs.pot as f64;
         // Holding the ace of the flush on an unpaired Omaha board: nobody can
-        // have the nut flush, so it's the best spot there is to bluff.
-        let (bluff, bluff_raise) = if nut_flush_blocker(obs) {
+        // have the nut flush, so it's the best spot there is to bluff. With
+        // no flush possible either, two cards of the nut straight do the same.
+        let (bluff, bluff_raise) = if nut_flush_blocker(obs) || nut_straight_blocker(obs) {
             (
                 blocker_bluff(style.bluff).min(0.9),
                 blocker_bluff(style.bluff_raise).min(0.5),
@@ -1526,7 +1527,52 @@ fn nut_flush_blocker(obs: &Observation) -> bool {
     matches!(mine.as_slice(), [c] if c.rank() == Rank::Ace)
 }
 
-/// The chance to bluff with the nut-flush blocker: as if it had three
+/// Omaha, a board with no pair and no flush possible (no three of a suit),
+/// so the nuts is the best straight, and two of its hole cards are the cards
+/// that straight needs (two jacks on 9-8-2, which wants J-T) without making
+/// it: fewer nut straights out there, so a good spot to bluff.
+fn nut_straight_blocker(obs: &Observation) -> bool {
+    if !matches!(obs.rules.variant, Variant::Omaha { .. }) || obs.board.len() < 3 {
+        return false;
+    }
+    let mut suits = [0u8; 4];
+    let mut on_board = [false; 13];
+    for card in &obs.board {
+        suits[card.suit() as usize] += 1;
+        if std::mem::replace(&mut on_board[card.rank() as usize], true) {
+            return false;
+        }
+    }
+    if suits.iter().any(|&n| n >= 3) {
+        return false;
+    }
+    // The ranks of the straight with `top` as its high card (0 the deuce, 12
+    // the ace; the five-high straight's ace is 12).
+    let window = |top: usize| (0..5).map(move |k| (top + 13 - k) % 13);
+    // The nut straight: the highest that takes three board cards (Omaha
+    // plays exactly two from the hand). None on boards that can't make one.
+    let Some(top) = (3..13)
+        .rev()
+        .find(|&t| window(t).filter(|&r| on_board[r]).count() >= 3)
+    else {
+        return false;
+    };
+    let needed: Vec<usize> = window(top).filter(|&r| !on_board[r]).collect();
+    let hole: Vec<usize> = obs
+        .hole_cards
+        .iter(false)
+        .map(|c| c.rank() as usize)
+        .collect();
+    let has = |r: usize| hole.contains(&r);
+    // Holding it: both missing ranks, or (with four of it on the board) the
+    // missing rank and any other card of it.
+    let makes = needed.iter().all(|&r| has(r))
+        && (needed.len() >= 2 || window(top).filter(|r| !needed.contains(r)).any(has));
+    let blocks = hole.iter().filter(|r| needed.contains(r)).count();
+    !makes && blocks >= 2
+}
+
+/// The chance to bluff with a nut blocker: as if it had three
 /// tries, so a 25% bluffer goes to 58% and one who never bluffs still
 /// rarely does. Against calling stations an exploiting bot's bluffs are
 /// already zero, and stay that.

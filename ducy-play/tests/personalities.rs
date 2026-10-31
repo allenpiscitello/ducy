@@ -618,6 +618,41 @@ fn andrew_favorable_opens_up_in_omaha() {
 }
 
 #[test]
+fn omaha_bots_bluff_with_nut_straight_blockers() {
+    // On a rainbow, unpaired K-9-8-7 turn the nuts is J-T. Doug Poker in the
+    // big blind, checked to, bets more often holding two jacks (fewer nut
+    // straights out there) than two queens, which block nothing.
+    let plo = TableRules::pot_limit_omaha(1, 2);
+    let bets = |hole: &str, board: &str| {
+        let mut doug = quick(Personality::DougPoker, 5);
+        let mut hand = exact(plo.variant, plo, &["As Ad 5c 4h", hole], board);
+        to_flop(&mut hand);
+        hand.act(Action::Check).unwrap();
+        hand.act(Action::Check).unwrap();
+        assert_eq!(hand.street(), Street::Turn);
+        let obs = hand.observation(1).unwrap();
+        (0..400)
+            .filter(|_| matches!(doug.act(&obs), Some(Action::Bet(_))))
+            .count()
+    };
+    let rainbow = "Ks 9h 8d 7c 2s";
+    let blocker = bets("Jh Jc 3d 2h", rainbow);
+    let no_blocker = bets("Qh Qc 3d 2h", rainbow);
+    assert!(
+        blocker as f64 > 1.6 * no_blocker as f64,
+        "{blocker} with two jacks, {no_blocker} with two queens"
+    );
+    // A flush possible (three hearts) leaves flushes to fear: no extra bluffs.
+    let suited = "Kh 9h 8h 7c 2s";
+    let suited_blocker = bets("Js Jc 3d 2d", suited);
+    let suited_no_blocker = bets("Qs Qc 3d 2d", suited);
+    assert!(
+        (suited_blocker as f64) < 1.3 * suited_no_blocker as f64 + 10.0,
+        "flush board: {suited_blocker} with two jacks, {suited_no_blocker} with two queens"
+    );
+}
+
+#[test]
 fn omaha_bots_bluff_with_the_nut_flush_blocker() {
     // How often Doug Poker, in the big blind with ace high, bets the turn
     // when it's checked through.

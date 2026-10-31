@@ -352,6 +352,34 @@ fn re_entries_get_a_new_stack_at_a_table_and_keep_chips_balanced() {
 }
 
 #[test]
+fn a_late_entry_at_a_table_of_their_own_gets_players_from_the_others() {
+    // Two full tables of three, between hands.
+    let mut t = Tournament::new(config(3, 0, 7), random_field(6, 7)).unwrap();
+    assert_eq!(sizes(&t), [3, 3]);
+    let at = t
+        .add_entry(Entrant::bot(
+            "late",
+            "Late",
+            Box::new(RandomBot::new(Some(1))),
+        ))
+        .unwrap();
+    assert_eq!(
+        sizes(&t),
+        [3, 3, 1],
+        "every seat was taken: a table of their own"
+    );
+    let moves = t.balance().unwrap();
+    assert_eq!(moves.len(), 1);
+    assert_eq!(moves[0].to.table, at.table);
+    let mut s = sizes(&t);
+    s.sort();
+    assert_eq!(s, [2, 2, 3]);
+    assert_eq!(chips(&t), t.total_chips());
+    // Balanced already: nothing more moves.
+    assert!(t.balance().unwrap().is_empty());
+}
+
+#[test]
 fn hand_for_hand_on_the_bubble_keeps_tables_in_step() {
     // The bubble is skipped when two players bust in one hand, so look for it
     // over several seeds.

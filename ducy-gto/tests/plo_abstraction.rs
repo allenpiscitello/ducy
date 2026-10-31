@@ -5,8 +5,8 @@ use ducy_gto::{
         hunl::Buckets,
     },
     omaha::abstraction::{
-        BoardView, PloAbstraction, PloAbstractionConfig, PreflopClasses, beaten_share,
-        canonical_key, nutness, random_spot,
+        BoardView, NUM_NUT_FEATURES, PloAbstraction, PloAbstractionConfig, PreflopClasses,
+        beaten_share, canonical_key, nut_outcomes, nutness, random_spot,
     },
 };
 
@@ -353,4 +353,105 @@ fn nut_aware_flops_separate_nut_draws_of_similar_equity() {
         cards.predicted_nuts(&nut, &view),
         cards.predicted_nuts(&second, &view)
     );
+}
+
+#[test]
+fn nut_outcomes_split_the_nuts_from_second_best() {
+    let mut rng = Rng::new(21);
+    // On a full board: the nut flush is the nuts; the queen-high flush is
+    // beaten only by the ace-high ones (under 3% of holdings): second best.
+    let board = p("Kh 8h 3h Qc 2d");
+    assert_eq!(
+        nut_outcomes(&p("Ah 5h 4s 4c"), &board, 1, &mut rng),
+        [1.0, 0.0, 0.0]
+    );
+    assert_eq!(
+        nut_outcomes(&p("Qh 5h 4s 4c"), &board, 1, &mut rng),
+        [0.0, 1.0, 0.0]
+    );
+    assert_eq!(
+        nut_outcomes(&p("2s 7c 9d Td"), &board, 1, &mut rng),
+        [0.0; 3]
+    );
+    // On the flop, top set improves past the current nuts (a set) on any
+    // board pair, and a nut flush draw ends as the nuts more often than a
+    // king-high one.
+    let flop = p("Qh 7h 2c");
+    let set = nut_outcomes(&p("Qs Qd 5c 4c"), &flop, 400, &mut rng);
+    assert!(set[2] > 0.2, "{set:?}");
+    let nut = nut_outcomes(&p("Ah 5h 9s 8d"), &flop, 400, &mut rng);
+    let second = nut_outcomes(&p("Kh 5h 9s 8d"), &flop, 400, &mut rng);
+    assert!(nut[0] > second[0] + 0.1, "{nut:?} {second:?}");
+    assert!(second[1] > nut[1], "{nut:?} {second:?}");
+}
+
+#[test]
+fn nut_first_features_see_freerolls() {
+    let at = |board: &str, hole: &str| BoardView::exact(&p(board)).nut_first_features(&p(hole));
+    let n = NUM_NUT_FEATURES;
+    // Past the nut-aware ones: the nuts with the nut flush draw, redraws to a
+    // higher nut straight, a set with a draw, a set.
+    let set_fd = at("8h 7h 2c", "8s 8d Ah 5h");
+    assert_eq!(set_fd[n + 2], 1.0, "a set with the nut flush draw");
+    assert_eq!(set_fd[n + 3], 1.0);
+    assert_eq!(
+        set_fd[n], 1.0,
+        "top set is the nuts, with the nut flush draw"
+    );
+    // T-9 is the nut straight on 8-7-6; with J-Q as well, more turns keep
+    // it the nuts as the straight moves up.
+    let wrap = at("8c 7d 6h", "Ts 9s Jd Qc");
+    let bare = at("8c 7d 6h", "Ts 9s 3c 2d");
+    assert!(wrap[n + 1] > bare[n + 1], "{} {}", wrap[n + 1], bare[n + 1]);
+    assert_eq!(
+        at("8c 7d 6h", "Ks Qs 3c 2d")[n + 1],
+        0.0,
+        "no straight, no redraw"
+    );
+}
+
+#[test]
+fn nut_first_abstractions_save_as_version_4() {
+    let cards = PloAbstraction::build(
+        PloAbstractionConfig {
+            hole_cards: 6,
+            preflop: 20,
+            flop: 20,
+            turn: 20,
+            river: 20,
+            fit_hands: 1200,
+            equity_samples: 100,
+            nut_first: true,
+            ..PloAbstractionConfig::default()
+        },
+        |_| {},
+    );
+    assert!(cards.config.nut_aware && cards.config.nut_first);
+    let bytes = cards.save();
+    assert_eq!(&bytes[..9], b"DUCYPLOA\x04");
+    let loaded = PloAbstraction::load(&bytes).expect("loads");
+    assert!(loaded.config.nut_first);
+    assert_eq!(loaded.save(), bytes);
+    assert!(PloAbstraction::load(&bytes[..bytes.len() - 1]).is_none());
+    assert!(cards.settings().ends_with("|plo-features-v3"));
+    // Training's per-deal buckets equal play's per-hand ones.
+    let mut rng = Rng::new(13);
+    for _ in 0..20 {
+        let (h, b) = random_spot(12, 5, &mut rng);
+        let board = [b[0], b[1], b[2], b[3], b[4]];
+        let deal = cards.deal_buckets([&h[..6], &h[6..]], &board);
+        for (player, hole) in [&h[..6], &h[6..]].into_iter().enumerate() {
+            for (street, n) in [0usize, 3, 4, 5].into_iter().enumerate() {
+                let b = loaded.hand_bucket(hole, &board[..n]);
+                assert_eq!(deal[player][street], b);
+                assert!((b as usize) < cards.bucket_count(n));
+            }
+        }
+    }
+    // The nut flush draw predicts the nuts more often than the K-high one.
+    let flop = p("Qh 7h 2c");
+    let view = cards.view(&flop);
+    let nut = p("Ah 5h 9s 8d 4c 3c");
+    let second = p("Kh 5h 9s 8d 4c 3c");
+    assert!(cards.predicted_nuts(&nut, &view) > cards.predicted_nuts(&second, &view));
 }

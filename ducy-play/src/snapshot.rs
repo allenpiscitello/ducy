@@ -160,6 +160,9 @@ pub struct PlayerSnapshot {
     /// Time left in their time bank (full for a table saved before there was one).
     #[cfg_attr(feature = "serde", serde(default = "full_time_bank"))]
     pub(crate) time_bank_ms: u64,
+    /// Owes the table hands ([`crate::host::TableHost::set_must_play`]).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) must_play: bool,
 }
 
 #[cfg(feature = "serde")]

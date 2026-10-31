@@ -11,7 +11,8 @@ use ducy::deck::{Card, Deck};
 
 use crate::{
     Action, Awaiting, BettingStructure, Bot, Deal, Event, Hand, HiddenDeal, LegalActions,
-    PersonalityBot, PlayError, Post, Pot, Street, TableRules, fallback_action,
+    Observation, PersonalityBot, PlayError, Post, Pot, SeatView, Street, TableRules, Variant,
+    fallback_action,
     snapshot::{SeatSnapshot, TableSnapshot},
 };
 
@@ -381,24 +382,7 @@ impl Table {
     /// dealt now (with everyone who would play), or `None` if fewer than two
     /// seats would be dealt in.
     pub fn next_positions(&self) -> Option<(usize, usize, usize)> {
-        let n = self.seats.len();
-        let dealt: Vec<usize> = (0..n).filter(|&s| self.will_play(s)).collect();
-        if dealt.len() < 2 {
-            return None;
-        }
-        let next_after = |from: usize| {
-            (1..=n)
-                .map(|k| (from + k) % n)
-                .find(|s| dealt.contains(s))
-                .expect("two players are in")
-        };
-        let button = next_after(self.button);
-        let small_blind = if dealt.len() == 2 {
-            button
-        } else {
-            next_after(button)
-        };
-        Some((button, small_blind, next_after(small_blind)))
+        next_positions(self.seats.len(), self.button, |s| self.will_play(s))
     }
 
     /// Someone new has just sat in `seat` (e.g. moved from another table in
@@ -1024,6 +1008,117 @@ impl Table {
             won,
             net,
         }
+    }
+}
+
+/// The button, small blind and big blind seats of the next hand at a table
+/// of `n` seats whose button is on `button`, where `plays` says which seats
+/// would be dealt in; `None` if fewer than two would. The button moves to
+/// the next seat dealt in; heads-up it posts the small blind and the other
+/// player the big, otherwise the two seats after it do.
+pub(crate) fn next_positions(
+    n: usize,
+    button: usize,
+    plays: impl Fn(usize) -> bool,
+) -> Option<(usize, usize, usize)> {
+    let dealt: Vec<usize> = (0..n).filter(|&s| plays(s)).collect();
+    if dealt.len() < 2 {
+        return None;
+    }
+    let next_after = |from: usize| {
+        (1..=n)
+            .map(|k| (from + k) % n)
+            .find(|s| dealt.contains(s))
+            .expect("two players are in")
+    };
+    let button = next_after(button);
+    let small_blind = if dealt.len() == 2 {
+        button
+    } else {
+        next_after(button)
+    };
+    Some((button, small_blind, next_after(small_blind)))
+}
+
+impl TableView {
+    /// What a bot playing the viewer's seat decides from, built from this
+    /// view alone: for a bot that sits at a table the way a person does and
+    /// sees only what they see (e.g. a club's bot members, which send their
+    /// moves as any member does). `None` unless it's the viewer's turn.
+    ///
+    /// Its seats are the hand's players only, numbered round the table from
+    /// the viewer (0), as the hand numbers them but starting with the viewer.
+    /// Its rules are the view's with a chip of 1: set the table's chip if it
+    /// has one.
+    pub fn observation(&self) -> Option<Observation> {
+        let legal = self.legal?;
+        let street = self.street?;
+        let n = self.seats.len();
+        let (contributed, _) = crate::hands::contributions(&self.events, n);
+        // The hand's players: seats taken and in this hand (a seat out of it
+        // sits out, or has no chips in front of it and none in the pot).
+        let dealt: Vec<usize> = (0..n)
+            .filter(|&s| {
+                let x = &self.seats[s];
+                !x.empty
+                    && !x.sitting_out
+                    && (x.stack > 0 || x.all_in || x.folded || contributed[s] > 0)
+            })
+            .collect();
+        let index = |s: usize| dealt.iter().position(|&d| d == s).unwrap_or(s);
+        let hole_cards = Deck::parse(&self.seats[0].cards.as_ref()?.join(" ")).ok()?;
+        let structure = if self.pot_limit {
+            TableRules::pot_limit_omaha(self.small_blind, self.big_blind)
+        } else {
+            TableRules::no_limit_holdem(self.small_blind, self.big_blind)
+        };
+        let variant = match self.hole_cards {
+            2 => Variant::Holdem,
+            h => Variant::Omaha {
+                hole_cards: h as u32,
+            },
+        };
+        let mut rules = structure.with_variant(variant).with_ante(self.ante);
+        if self.bomb_pot {
+            let ante = self.events.iter().find_map(|e| match e {
+                Event::Ante { amount, .. } => Some(*amount),
+                _ => None,
+            });
+            // On two boards once a second one shows.
+            rules = rules.bomb_pot(
+                ante.unwrap_or(self.big_blind),
+                !self.second_board.is_empty(),
+            );
+        }
+        Some(Observation {
+            seat: 0,
+            hole_cards,
+            rules,
+            street,
+            board: self
+                .board
+                .iter()
+                .filter_map(|c| Card::parse(c).ok())
+                .collect(),
+            button: index(self.button),
+            pot: self.pot,
+            current_bet: self.current_bet,
+            seats: dealt
+                .iter()
+                .map(|&s| {
+                    let x = &self.seats[s];
+                    SeatView {
+                        stack: x.stack,
+                        street_bet: x.street_bet,
+                        contributed: contributed[s],
+                        folded: x.folded,
+                        all_in: x.all_in,
+                    }
+                })
+                .collect(),
+            legal: LegalActions { seat: 0, ..legal },
+            history: self.events.iter().map(|e| rotate_event(e, index)).collect(),
+        })
     }
 }
 

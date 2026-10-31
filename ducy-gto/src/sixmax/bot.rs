@@ -54,7 +54,7 @@ impl PreflopStrategy {
         for node in &game.nodes {
             if let Node::Decision { id, actions, .. } = node {
                 offsets[*id as usize] = (probs.len(), actions.len());
-                for class in 0..C {
+                for class in 0..game.classes {
                     let p = f(*id, class);
                     assert_eq!(p.len(), actions.len(), "one probability per action");
                     probs.extend(p);
@@ -124,7 +124,7 @@ impl PreflopStrategy {
         out.extend((ids.len() as u32).to_le_bytes());
         for id in ids {
             out.extend(id.to_le_bytes());
-            for class in 0..C {
+            for class in 0..self.game.classes {
                 out.extend(
                     self.probs(id, class)
                         .iter()

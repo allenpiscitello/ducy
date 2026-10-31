@@ -8,9 +8,11 @@
 //! `--blueprint` takes a blueprint, or a training checkpoint (it's turned
 //! into a blueprint on the fly, so a run in progress can be measured).
 //! `--seed N` must then match the checkpoint's training seed (default 1).
-//! `--only NAME` plays one opponent: `equity`, `calling`, `self` or a
-//! personality id. `--lbr N` also runs Local Best Response for N hands: a
-//! lower bound on how much the blueprint can be exploited.
+//! `--only NAME[,NAME…]` plays just those opponents: `equity`, `calling`,
+//! `self` or personality ids (a quick smoke test instead of every bot).
+//! `--lbr N` also runs Local Best Response for N hands: a lower bound on how
+//! much the blueprint can be exploited. With `--stack` and `--depth`, LBR
+//! plays at that stack against the `--depth` blueprint nearest it.
 //! `--stack N` starts both players N big blinds deep (default: the depth
 //! the blueprint was trained for, 100); GtoBot plays deeper stacks off its
 //! tree, as against Slumbot at 200.
@@ -67,6 +69,7 @@ use ducy_gto::{
 use ducy_play::{
     Bot, MatchConfig, TableRules, Variant,
     bots::{CallingStation, EquityBot},
+    generic::{Family, GenericPlayer},
     personality::Personality,
     run_match,
 };
@@ -79,7 +82,7 @@ fn main() {
     let mut blueprint_path = String::new();
     let mut deals = 20_000usize;
     let mut seed = 1u64;
-    let mut only: Option<String> = None;
+    let mut only: Option<Vec<String>> = None;
     let mut lbr = 0usize;
     let mut river = 0usize;
     let mut turn = 0usize;
@@ -97,7 +100,7 @@ fn main() {
             "--blueprint" => blueprint_path = v(),
             "--deals" => deals = v().replace('_', "").parse().expect("--deals"),
             "--seed" => seed = v().parse().expect("--seed"),
-            "--only" => only = Some(v()),
+            "--only" => only = Some(v().split(',').map(|s| s.trim().to_string()).collect()),
             "--lbr" => lbr = v().replace('_', "").parse().expect("--lbr"),
             "--river-solve" => river = v().parse().expect("--river-solve"),
             "--turn-solve" => turn = v().parse().expect("--turn-solve"),
@@ -155,10 +158,36 @@ fn main() {
         (0, r) => vec![(0, 0), (0, r)],
         (t, r) => vec![(0, r), (t, r)],
     };
+    // LBR at `--stack` plays the `--depth` blueprint nearest it (by ratio,
+    // as DepthGtoBot picks), on that depth's own game.
+    let lbr_depth = stack_bb.and_then(|s| {
+        depths
+            .iter()
+            .chain(std::iter::once(&(
+                config.stack / config.big_blind,
+                String::new(),
+            )))
+            .min_by(|a, b| {
+                let r = |d: u64| (d as f64 / s as f64).ln().abs();
+                r(a.0).total_cmp(&r(b.0))
+            })
+            .filter(|(_, f)| !f.is_empty())
+            .cloned()
+    });
+    let depth_lbr = lbr_depth.as_ref().filter(|_| lbr > 0).map(|(d, f)| {
+        let g = Hunl::new(depth_config(*d), Some(&cards));
+        let b = Blueprint::load(&std::fs::read(f).expect("read --depth FILE"), &g, &cards)
+            .expect("a blueprint trained at its --depth");
+        println!("LBR at {d} BB, against the {d} BB blueprint");
+        (g, b)
+    });
+    let (lbr_game, lbr_blueprint) = depth_lbr
+        .as_ref()
+        .map_or((&game, &blueprint), |(g, b)| (g, b));
     let mut per_hand = Vec::new();
     for &(t_iter, r_iter) in runs.iter().filter(|_| lbr > 0) {
         let t = Instant::now();
-        let hands = lbr_hands_solving(&game, &cards, &blueprint, lbr, 99, t_iter, r_iter);
+        let hands = lbr_hands_solving(lbr_game, &cards, lbr_blueprint, lbr, 99, t_iter, r_iter);
         let r = LbrResult::of(&hands);
         let what = match (t_iter, r_iter) {
             (0, 0) => "the blueprint".to_string(),
@@ -218,6 +247,17 @@ fn main() {
             Box::new(move |s| Box::new(p.bot(Some(s))) as Box<dyn Bot>),
         ));
     }
+    // The Bankroll Challenge's generic players (#256), a family each: a
+    // different player of the family for each seed, so the result is the
+    // family's average.
+    for f in Family::ALL {
+        opponents.push((
+            format!("g-{}", f.id()),
+            Box::new(move |s| {
+                Box::new(GenericPlayer::new(f, s % 1000).bot(Some(s))) as Box<dyn Bot>
+            }),
+        ));
+    }
     let rules = TableRules::no_limit_holdem(config.small_blind, config.big_blind);
     let stack = stack_bb.map_or(config.stack, |n| n * config.big_blind);
     let depth_bytes: Vec<(u64, Vec<u8>)> = depths
@@ -236,7 +276,7 @@ fn main() {
         "opponent", "hands", "bb/100", "± 95%"
     );
     for (name, make) in &opponents {
-        if only.as_ref().is_some_and(|o| o != name) {
+        if only.as_ref().is_some_and(|o| !o.contains(name)) {
             continue;
         }
         let t = Instant::now();
@@ -264,6 +304,10 @@ fn main() {
         };
         let mut bots: Vec<Box<dyn Bot>> = vec![me, make(2000)];
         for b in 0..BLOCKS {
+            // A generic family plays a different player each block.
+            if name.starts_with("g-") {
+                bots[1] = make(2000 + b as u64);
+            }
             let m = MatchConfig::new(rules, per_block, 7919 * b as u64 + 1)
                 .with_starting_stack(stack)
                 .duplicate();
@@ -292,7 +336,7 @@ fn plo_match(
     bb: u64,
     deals: usize,
     seed: u64,
-    only: Option<&str>,
+    only: Option<&[String]>,
     river: usize,
     rival: Option<(&str, &str)>,
 ) {
@@ -361,7 +405,7 @@ fn plo_match(
         "opponent", "hands", "bb/100", "± 95%", "off-tree"
     );
     for (name, make) in &opponents {
-        if only.is_some_and(|o| o != name) {
+        if only.is_some_and(|o| !o.contains(name)) {
             continue;
         }
         let t = Instant::now();
