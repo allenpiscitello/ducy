@@ -21,6 +21,7 @@ pub mod chart;
 pub mod equity;
 pub mod field;
 pub mod plo;
+pub mod plo_spot;
 pub mod preflop;
 pub mod realize;
 pub mod solver;
