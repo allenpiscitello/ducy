@@ -391,6 +391,47 @@ impl Table {
     pub fn game_key(&self) -> String {
         format!("{}:{}/{}:{}", self.game, self.sb, self.bb, self.seats)
     }
+
+    /// Its stakes, as tables are filtered by them.
+    pub fn stakes(&self) -> Stakes {
+        Stakes::of(self.bb)
+    }
+}
+
+/// How high a table's stakes are, by its big blind, for filtering tables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Stakes {
+    /// A big blind under 1.
+    Micro,
+    /// 1 to 3 (1/2, 1/3).
+    Low,
+    /// Over 3, up to 10 (2/5, 5/10).
+    Medium,
+    /// Over 10.
+    High,
+}
+
+impl Stakes {
+    /// The band of big blind `bb` (in hundredths).
+    pub fn of(bb: u64) -> Self {
+        match bb {
+            0..100 => Stakes::Micro,
+            100..=300 => Stakes::Low,
+            301..=1000 => Stakes::Medium,
+            _ => Stakes::High,
+        }
+    }
+
+    /// Its name, as filters show it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Stakes::Micro => "Micro",
+            Stakes::Low => "Low",
+            Stakes::Medium => "Medium",
+            Stakes::High => "High",
+        }
+    }
 }
 
 /// A seat held at a table for a member (ducy-web #425).
@@ -1432,6 +1473,8 @@ impl Club {
                     "taken": seated.get(&t.id).copied().unwrap_or(0),
                     // Its game, for the waitlists (#518).
                     "key": t.game_key(),
+                    // Its stakes band, for filtering.
+                    "stakes": t.stakes(),
                 });
                 // The hit-and-run rule, so members know before they sit.
                 if t.stay_hands > 0 {
@@ -2828,9 +2871,22 @@ mod tests {
         assert_eq!(
             body["tables"][0],
             json!({"id": t.id, "name": "PLO - 0.01/0.02", "game": "plo4", "sb": 1, "bb": 2, "min": 100, "max": 200, "seats": 6, "taken": 2,
-                   "key": "plo4:1/2:6"})
+                   "key": "plo4:1/2:6", "stakes": "micro"})
         );
         assert_eq!(body["lists"], json!({}));
+    }
+
+    #[test]
+    fn stakes_bands_by_the_big_blind() {
+        let band = |bb| Stakes::of(bb).name();
+        assert_eq!(
+            [band(50), band(99), band(100), band(200), band(300)],
+            ["Micro", "Micro", "Low", "Low", "Low"]
+        );
+        assert_eq!(
+            [band(500), band(1000), band(1001), band(2500)],
+            ["Medium", "Medium", "High", "High"]
+        );
     }
 
     #[test]

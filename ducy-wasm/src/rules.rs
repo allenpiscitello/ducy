@@ -466,6 +466,13 @@ pub fn club_rules(club: &str, op: JsValue, now: f64) -> Result<JsValue, JsError>
     })
 }
 
+/// The stakes band of big blind `bb` (hundredths), for filtering tables:
+/// "micro", "low", "medium" or "high".
+#[wasm_bindgen(js_name = stakesBand)]
+pub fn stakes_band(bb: f64) -> String {
+    format!("{:?}", club_rules::Stakes::of(bb.max(0.0) as u64)).to_lowercase()
+}
+
 /// What a name reads as (#450): names with the same key are the same name.
 #[wasm_bindgen(js_name = nameKey)]
 pub fn name_key(name: &str) -> String {
