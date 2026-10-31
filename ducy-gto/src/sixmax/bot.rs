@@ -68,6 +68,36 @@ impl PreflopStrategy {
         }
     }
 
+    /// A copy with every decision's probabilities changed by `f`, which gets
+    /// the node's actions and one class's probabilities to edit in place;
+    /// each class is renormalized after. Decisions a compact strategy left
+    /// out stay out. For deliberately skewed opponents (sixmax_match).
+    pub fn map(&self, mut f: impl FnMut(&[(super::preflop::Act, u32)], &mut [f32])) -> Self {
+        let mut probs = self.probs.clone();
+        for node in &self.game.nodes {
+            let Node::Decision { id, actions, .. } = node else {
+                continue;
+            };
+            let (start, n) = self.offsets[*id as usize];
+            if n == 0 {
+                continue;
+            }
+            for class in 0..C {
+                let p = &mut probs[start + class * n..start + (class + 1) * n];
+                f(actions, p);
+                let sum: f32 = p.iter().sum();
+                if sum > 0.0 {
+                    p.iter_mut().for_each(|x| *x /= sum);
+                }
+            }
+        }
+        Self {
+            game: self.game.clone(),
+            offsets: self.offsets.clone(),
+            probs,
+        }
+    }
+
     /// The tree the strategy is for.
     pub fn game(&self) -> &PreflopGame {
         &self.game

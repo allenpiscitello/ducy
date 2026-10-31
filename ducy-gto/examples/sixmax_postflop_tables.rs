@@ -6,7 +6,11 @@
 //!     cargo run --release -p ducy-gto --example sixmax_postflop_tables -- \
 //!         --strategy sixmax-100.bin --cards cards-full.bin \
 //!         --spots spot-100-BTN-BB.bin,spot-100-CO-BB.bin --out postflop-100.bin \
-//!         [--samples 24]
+//!         [--samples 24] [--seed 21]
+//!
+//! Each spot's deals come from its own seed (`--seed` plus its place in the
+//! list), so the sampling noise of one pair of classes differs from table
+//! to table and averages out when tables are pooled.
 //!
 //! Spot files are named spot-<bb>-<name>.bin (sixmax_spot_train,
 //! `SpotGame::from_name`): single-raised, limped or 3-bet pots alike.
@@ -25,6 +29,7 @@ fn main() {
     let mut spots: Vec<String> = Vec::new();
     let mut out = String::from("postflop.bin");
     let mut samples = 24usize;
+    let mut seed = 21u64;
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -35,6 +40,7 @@ fn main() {
             "--spots" => spots = v().split(',').map(str::to_string).collect(),
             "--out" => out = v(),
             "--samples" => samples = v().parse().expect("--samples"),
+            "--seed" => seed = v().parse().expect("--seed"),
             _ => panic!("unknown argument {a}"),
         }
     }
@@ -49,7 +55,7 @@ fn main() {
             .expect("class")
     };
     let mut tables = Vec::new();
-    for file in &spots {
+    for (index, file) in spots.iter().enumerate() {
         let t = Instant::now();
         let name = SpotGame::name_of_file(file)
             .unwrap_or_else(|| panic!("{file}: not spot-<bb>-<name>.bin"));
@@ -66,7 +72,7 @@ fn main() {
         )
         .expect("a checkpoint for this spot")
         .average();
-        let share = game.share_table(&profile, samples, 21, threads);
+        let share = game.share_table(&profile, samples, seed + index as u64, threads);
         let at = |ip: &str, oop: &str| share[class(ip) * NUM_PREFLOP_CLASSES + class(oop)];
         println!(
             "{}: AA v 72o {:.2}, 72o v AA {:.2}, KQs v 99 {:.2}, 76s v AJo {:.2} ({:.0}s)",

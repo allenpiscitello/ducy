@@ -46,6 +46,8 @@ fn main() {
     let mut prior_weight = 20f32;
     let mut progress: Option<String> = None;
     let mut postflop_path: Option<String> = None;
+    // Realization adds rather than scales, so shares can pass the pot (#278).
+    let mut additive = false;
     let mut threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -65,6 +67,7 @@ fn main() {
             "--prior-weight" => prior_weight = v().parse().expect("--prior-weight"),
             "--progress" => progress = Some(v()),
             "--postflop" => postflop_path = Some(v()),
+            "--additive" => additive = true,
             f => panic!("unknown option {f}"),
         }
     }
@@ -78,6 +81,7 @@ fn main() {
         ),
         None => PreflopGame::new(bb),
     };
+    game.additive = additive;
     // Measured postflop values for single-raised pots (sixmax_postflop_tables).
     if let Some(path) = &postflop_path {
         game.postflop = PostflopTable::from_bytes(&std::fs::read(path).expect("read --postflop"))

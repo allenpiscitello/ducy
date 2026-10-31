@@ -419,18 +419,16 @@ impl<'a> SpotGame<'a> {
                         let (ci, cj) = (k / NUM_PREFLOP_CLASSES, k % NUM_PREFLOP_CLASSES);
                         let mut rng =
                             Rng::new(seed ^ (k as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
-                        let mut total = 0.0;
-                        let mut n = 0usize;
-                        let mut tries = 0;
-                        while n < samples && tries < samples * 20 {
-                            tries += 1;
+                        // A deal of these two classes: the combos, the board and
+                        // who wins a showdown (None when the combos collide).
+                        let deal = |rng: &mut Rng| {
                             let h0 =
                                 combos[ci][(rng.next_u64() % combos[ci].len() as u64) as usize];
                             let h1 =
                                 combos[cj][(rng.next_u64() % combos[cj].len() as u64) as usize];
                             let mut used = bit(h0[0]) | bit(h0[1]);
                             if used & (bit(h1[0]) | bit(h1[1])) != 0 {
-                                continue;
+                                return None;
                             }
                             used |= bit(h1[0]) | bit(h1[1]);
                             let mut board = [0; 5];
@@ -443,9 +441,20 @@ impl<'a> SpotGame<'a> {
                                     }
                                 };
                             }
-                            let buckets = self.cards.deal_buckets([&h0, &h1], &board);
                             let showdown =
                                 showdown_score(&h0, &board).cmp(&showdown_score(&h1, &board)) as i8;
+                            Some((h0, h1, board, showdown))
+                        };
+                        // Each played deal's share, beside its showdown result
+                        // (1 a win, 0.5 a tie, 0 a loss).
+                        let mut played: Vec<(f64, f64)> = Vec::with_capacity(samples);
+                        let mut tries = 0;
+                        while played.len() < samples && tries < samples * 20 {
+                            tries += 1;
+                            let Some((h0, h1, board, showdown)) = deal(&mut rng) else {
+                                continue;
+                            };
+                            let buckets = self.cards.deal_buckets([&h0, &h1], &board);
                             let s = SpotState {
                                 hole: [h0, h1],
                                 board,
@@ -457,10 +466,37 @@ impl<'a> SpotGame<'a> {
                             // Player 0's real result: the zero-sum payoff plus
                             // their half of the dead money.
                             let net = self.value(&s, profile) + half_dead;
-                            total += (net + to) / pot;
-                            n += 1;
+                            played.push(((net + to) / pot, (showdown as f64 + 1.0) / 2.0));
                         }
-                        let share = if n > 0 { total / n as f64 } else { 0.5 };
+                        let n = played.len() as f64;
+                        let share = if played.is_empty() {
+                            0.5
+                        } else {
+                            // The showdown result as a control variate: how lucky
+                            // the sampled boards ran is known from many cheap
+                            // deals (no betting walked), and a deal's share
+                            // follows its luck closely, so the share is corrected
+                            // by that luck. Unbiased; far less noise per pair.
+                            let mx = played.iter().map(|p| p.0).sum::<f64>() / n;
+                            let my = played.iter().map(|p| p.1).sum::<f64>() / n;
+                            let cov = played.iter().map(|p| (p.0 - mx) * (p.1 - my)).sum::<f64>();
+                            let var = played.iter().map(|p| (p.1 - my).powi(2)).sum::<f64>();
+                            let beta = if var > 0.0 { cov / var } else { 0.0 };
+                            let (mut luck, mut m) = (0.0, 0usize);
+                            let mut cheap_tries = 0;
+                            while m < 64 * samples && cheap_tries < 64 * samples * 20 {
+                                cheap_tries += 1;
+                                if let Some((_, _, _, showdown)) = deal(&mut rng) {
+                                    luck += (showdown as f64 + 1.0) / 2.0;
+                                    m += 1;
+                                }
+                            }
+                            if m > 0 {
+                                mx - beta * (my - luck / m as f64)
+                            } else {
+                                mx
+                            }
+                        };
                         out[k].store((share as f32).to_bits(), Relaxed);
                     }
                 });

@@ -22,6 +22,14 @@
 //! can be compared on the same deals. `--progress FILE` writes a small JSON
 //! status file every half minute.
 //!
+//! `--field LIST` draws the five opponents from LIST instead of every
+//! Regular: personality ids and any of the `--bots` kinds, e.g. only the
+//! hardest Regulars, or `gto6@live.bin` for a table of the live bot. With
+//! fewer than five in the list, opponents repeat. `gto6loose@FILE`,
+//! `gto6tight@`, `gto6aggro@` and `gto6passive@` play FILE's strategy
+//! skewed that way (SKEW of the probability moved at every decision), so a
+//! field of the live bot can include opponents with flaws to exploit.
+//!
 //! `--flops` instead plays tables of six random Regulars and reports how
 //! many players see the flop, by how the preflop went.
 
@@ -48,7 +56,7 @@ use ducy_gto::{
     sixmax::{
         bot::{PreflopStrategy, SixMaxBot},
         equity::PreflopEquity,
-        preflop::PreflopGame,
+        preflop::{Act, PreflopGame},
         realize::Realization,
         solver::PreflopSolver,
         spot::{SpotBot, SpotGame},
@@ -73,14 +81,16 @@ fn mix(mut x: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-/// `k` different Regulars for deal `d`.
-fn lineup(d: u64, k: usize) -> Vec<Personality> {
-    let mut pool: Vec<Personality> = Personality::ALL.to_vec();
+/// `k` of the `n` opponents in the field for deal `d`, as indices: all
+/// different when the field has `k` or more, else drawn with repeats.
+fn lineup(d: u64, k: usize, n: usize) -> Vec<usize> {
+    let mut pool: Vec<usize> = (0..n).collect();
     let mut out = Vec::with_capacity(k);
     let mut x = d.wrapping_mul(0x2545_f491_4f6c_dd1d) ^ 0x5eed;
     for _ in 0..k {
         x = mix(x);
-        out.push(pool.swap_remove((x % pool.len() as u64) as usize));
+        let i = (x % pool.len() as u64) as usize;
+        out.push(if n >= k { pool.swap_remove(i) } else { pool[i] });
     }
     out
 }
@@ -89,11 +99,65 @@ fn regular(p: Personality) -> Make {
     Arc::new(move |s| Box::new(p.bot(Some(s))) as Box<dyn Bot>)
 }
 
+/// How far the skewed opponents lean: this share of the probability moves.
+const SKEW: f32 = 0.15;
+
+/// Leans one class's action probabilities at one decision, for the skewed
+/// opponents: `loose` folds less (calls instead, or makes the smallest
+/// raise), `tight` folds more, `aggro` raises instead of calling, `passive`
+/// calls instead of raising. Renormalized by the caller.
+fn skew(style: &str, actions: &[(Act, u32)], p: &mut [f32]) {
+    let find = |want: fn(&Act) -> bool| actions.iter().position(|(a, _)| want(a));
+    let fold = find(|a| *a == Act::Fold);
+    let call = find(|a| *a == Act::Call);
+    let raise = find(|a| matches!(a, Act::Raise(_) | Act::AllIn));
+    let is_raise = |i: usize| matches!(actions[i].0, Act::Raise(_) | Act::AllIn);
+    let shift = |from: &[usize], to: usize, p: &mut [f32]| {
+        for &i in from {
+            let m = p[i] * SKEW;
+            p[i] -= m;
+            p[to] += m;
+        }
+    };
+    match style {
+        "loose" => {
+            if let (Some(f), Some(t)) = (fold, call.or(raise)) {
+                shift(&[f], t, p);
+            }
+        }
+        "tight" => {
+            if let Some(f) = fold {
+                let from: Vec<usize> = (0..p.len()).filter(|&i| i != f).collect();
+                shift(&from, f, p);
+            }
+        }
+        "aggro" => {
+            if let (Some(c), Some(r)) = (call, raise) {
+                shift(&[c], r, p);
+            }
+        }
+        "passive" => {
+            if let Some(c) = call {
+                let from: Vec<usize> = (0..p.len()).filter(|&i| is_raise(i)).collect();
+                shift(&from, c, p);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// The measured bot's chips over one deal from each seat, by position.
-fn play_deal(make: &Make, rules: TableRules, stack: u64, d: u64, seed: u64) -> [i64; SEATS] {
+fn play_deal(
+    make: &Make,
+    field: &[Make],
+    rules: TableRules,
+    stack: u64,
+    d: u64,
+    seed: u64,
+) -> [i64; SEATS] {
     let deal = Deal::random(rules.variant, SEATS, Some(seed.wrapping_add(d))).expect("deal");
     let button = (d as usize) % SEATS;
-    let opponents = lineup(d ^ seed, SEATS - 1);
+    let opponents = lineup(d ^ seed, SEATS - 1, field.len());
     let mut by_position = [0i64; SEATS];
     for hero in 0..SEATS {
         let mut bots: Vec<Box<dyn Bot>> = Vec::with_capacity(SEATS);
@@ -103,7 +167,7 @@ fn play_deal(make: &Make, rules: TableRules, stack: u64, d: u64, seed: u64) -> [
             if seat == hero {
                 bots.push(make(s));
             } else {
-                bots.push(regular(opponents[o])(s));
+                bots.push(field[opponents[o]](s));
                 o += 1;
             }
         }
@@ -125,7 +189,15 @@ struct Stats {
     by_position: [i64; SEATS],
 }
 
-fn run(make: &Make, rules: TableRules, stack: u64, deals: u64, seed: u64, threads: u64) -> Stats {
+fn run(
+    make: &Make,
+    field: &[Make],
+    rules: TableRules,
+    stack: u64,
+    deals: u64,
+    seed: u64,
+    threads: u64,
+) -> Stats {
     let chunks: Vec<Vec<(i64, [i64; SEATS])>> = thread::scope(|scope| {
         let handles: Vec<_> = (0..threads)
             .map(|t| {
@@ -134,7 +206,7 @@ fn run(make: &Make, rules: TableRules, stack: u64, deals: u64, seed: u64, thread
                     (t..deals)
                         .step_by(threads as usize)
                         .map(|d| {
-                            let p = play_deal(&make, rules, stack, d, seed);
+                            let p = play_deal(&make, field, rules, stack, d, seed);
                             PLAYED.fetch_add(1, Relaxed);
                             (p.iter().sum(), p)
                         })
@@ -183,10 +255,10 @@ fn flops(rules: TableRules, stack: u64, deals: u64, seed: u64) {
     let mut no_flop = 0u64;
     for d in 0..deals {
         let deal = Deal::random(rules.variant, SEATS, Some(seed.wrapping_add(d))).expect("deal");
-        let mut bots: Vec<Box<dyn Bot>> = lineup(d ^ seed, SEATS)
+        let mut bots: Vec<Box<dyn Bot>> = lineup(d ^ seed, SEATS, Personality::ALL.len())
             .into_iter()
             .enumerate()
-            .map(|(seat, p)| regular(p)(mix(seed ^ (d << 8) ^ seat as u64)))
+            .map(|(seat, p)| regular(Personality::ALL[p])(mix(seed ^ (d << 8) ^ seat as u64)))
             .collect();
         let mut hand = Hand::new(rules, &[stack; SEATS], d as usize % SEATS, deal).expect("hand");
         let mut seated: Vec<&mut dyn Bot> = Vec::with_capacity(SEATS);
@@ -259,6 +331,7 @@ fn main() {
     let mut equity_path: Option<String> = None;
     let mut realize_path: Option<String> = None;
     let mut progress: Option<String> = None;
+    let mut field_names: Option<String> = None;
     // Trained postflop spots for gto6s: checkpoints named spot-<bb>-<name>.bin
     // (sixmax_spot_train, SpotGame::from_name).
     let mut spot_files: Vec<String> = Vec::new();
@@ -281,6 +354,7 @@ fn main() {
             "--realize" => realize_path = Some(v()),
             "--progress" => progress = Some(v()),
             "--spots" => spot_files = v().split(',').map(str::to_string).collect(),
+            "--field" => field_names = Some(v()),
             f => panic!("unknown option {f}"),
         }
     }
@@ -292,15 +366,15 @@ fn main() {
         return;
     }
 
-    let mut bots: Vec<(String, Make)> = Vec::new();
-    for name in names.split(',') {
+    let build = |name: &str| -> (String, Make) {
         let (kind, solve_file) = match name.split_once('@') {
             Some((k, f)) => (k, Some(f.to_string())),
             None => (name, solve_path.clone()),
         };
         let make: Make = match kind {
             "equity" => Arc::new(|s| Box::new(EquityBot::new(200, Some(s))) as Box<dyn Bot>),
-            "gto6" | "gto6hu" | "gto6s" => {
+            "gto6" | "gto6hu" | "gto6s" | "gto6loose" | "gto6tight" | "gto6aggro"
+            | "gto6passive" => {
                 // gto6hu also plays heads-up pots after the flop with the
                 // heads-up blueprint (--cards, --blueprint).
                 let heads_up = (kind == "gto6hu").then(|| {
@@ -345,6 +419,14 @@ fn main() {
                         PreflopStrategy::from_solver(&game, &solver)
                     }
                 });
+                // The skewed variants: the same strategy with SKEW of the
+                // probability moved one way at every decision.
+                let strategy = match kind.strip_prefix("gto6") {
+                    Some(style @ ("loose" | "tight" | "aggro" | "passive")) => {
+                        Arc::new(strategy.map(|actions, p| skew(style, actions, p)))
+                    }
+                    _ => strategy,
+                };
                 // gto6s plays the trained postflop spots (--spots, --cards).
                 let spots: Vec<(Arc<SpotGame<'static>>, Arc<Profile<u64>>)> = if kind == "gto6s" {
                     let cards: &'static CardAbstraction = Box::leak(Box::new(
@@ -427,8 +509,18 @@ fn main() {
             Some((k, f)) => format!("{k}@{}", f.rsplit('/').next().unwrap_or(f)),
             None => name.to_string(),
         };
-        bots.push((shown, make));
-    }
+        (shown, make)
+    };
+    let bots: Vec<(String, Make)> = names.split(',').map(build).collect();
+    // The opponents: every Regular, or the bots named in --field.
+    let field: Vec<Make> = match &field_names {
+        Some(f) => f.split(',').map(|n| build(n).1).collect(),
+        None => Personality::ALL.into_iter().map(regular).collect(),
+    };
+    let against = match &field_names {
+        Some(f) => format!("five from the field ({f})"),
+        None => "five random Regulars".to_string(),
+    };
 
     let finished = Arc::new(AtomicBool::new(false));
     let reporter = progress.map(|path| {
@@ -455,9 +547,7 @@ fn main() {
     });
 
     let bb = config.big_blind as f64;
-    println!(
-        "{deals} deals × 6 seats against five random Regulars, {stack_bb} BB deep (bb/100 won, ± 95%)\n"
-    );
+    println!("{deals} deals × 6 seats against {against}, {stack_bb} BB deep (bb/100 won, ± 95%)\n");
     print!("{:>18} {:>14}", "bot", "bb/100");
     for p in POSITIONS {
         print!(" {p:>7}");
@@ -469,7 +559,7 @@ fn main() {
     };
     let mut results: Vec<Vec<i64>> = Vec::new();
     for (name, make) in &bots {
-        let s = run(make, rules, stack, deals, seed, threads);
+        let s = run(make, &field, rules, stack, deals, seed, threads);
         let per_deal: Vec<f64> = s.per_deal.iter().map(|&x| x as f64).collect();
         let (r, ci) = rate(&per_deal, bb);
         print!("{name:>18} {:>7.1} ± {:<4.1}", r, ci);

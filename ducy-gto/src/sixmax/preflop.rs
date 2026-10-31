@@ -91,6 +91,13 @@ pub struct PreflopGame {
     /// where the preflop betting ends in one of these, its pot shares come
     /// from the table instead of equity times realization.
     pub postflop: Vec<PostflopTable>,
+    /// Realization adds instead of scaling (#278): each player's share of
+    /// the pot is its equity times its realization, and what that leaves
+    /// over (or takes beyond) the pot is split evenly, so a share can pass
+    /// 1 (winning more than the pot after the flop, as deep stacks do) or
+    /// drop below 0. Off: the products are rescaled to sum to 1, which caps
+    /// every share at the pot.
+    pub additive: bool,
 }
 
 /// What a two-player pot (limped, single-raised, 3-bet …) is worth after the
@@ -170,6 +177,7 @@ impl PreflopGame {
             decisions: 0,
             realize,
             postflop: Vec::new(),
+            additive: false,
         };
         let mut put_in = [0; SEATS];
         put_in[SB] = 1;
@@ -343,6 +351,41 @@ impl PreflopGame {
                 .max_by_key(|&&s| postflop_order(s))
                 .expect("players");
             let mut total = 0.0;
+            if self.additive && !all_in {
+                // Equity first (the products normalized), then realization
+                // added: the shares still sum to 1, but aren't capped.
+                let mut e = [0f64; SEATS];
+                let mut sum = 0.0;
+                for &i in &players {
+                    let mut p = 1.0;
+                    for &j in &players {
+                        if j != i {
+                            p *= eq.heads_up(classes[i], classes[j]);
+                        }
+                    }
+                    e[i] = p;
+                    sum += p;
+                }
+                let mut realized = 0.0;
+                for &i in &players {
+                    let r = if i == last {
+                        &self.realize.ip
+                    } else {
+                        &self.realize.oop
+                    };
+                    share[i] = e[i] / sum * r[classes[i]] as f64;
+                    realized += share[i];
+                }
+                let even = (1.0 - realized) / players.len() as f64;
+                for &i in &players {
+                    share[i] += even;
+                }
+                let mut out = [0f64; SEATS];
+                for s in 0..SEATS {
+                    out[s] = (share[s] * pot as f64 - put_in[s] as f64) / 2.0;
+                }
+                return out;
+            }
             for &i in &players {
                 let mut p = 1.0;
                 for &j in &players {
