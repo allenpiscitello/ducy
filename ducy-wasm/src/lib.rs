@@ -5,6 +5,7 @@ mod club;
 mod fair;
 mod hands;
 mod host;
+mod identity;
 mod member;
 mod money;
 mod oneoff;
