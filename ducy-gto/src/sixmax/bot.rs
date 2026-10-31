@@ -325,6 +325,11 @@ impl<B: Bot> SixMaxBot<B> {
         self
     }
 
+    /// How the PLO spots' postflop decisions went, if it has them.
+    pub fn plo_spot_stats(&self) -> Option<super::plo_spot::SpotStats> {
+        self.plo_spots.as_ref().map(|s| s.stats)
+    }
+
     /// Plays the first strategy only in hands from `lo` to `hi` big blinds
     /// deep (the effective stack, `hand_depth_bb`).
     pub fn with_depths(mut self, lo: f64, hi: f64) -> Self {

@@ -11,7 +11,7 @@
 //! (with its `--equity`; realization doesn't change how it loads). `--line`
 //! is the preflop line, one letter per decision from UTG (`f` fold, `c`
 //! call or check, `r` raise); `--lines all` trains each of
-//! `plo_spot::LINES` in turn, `--total` iterations each, to
+//! `plo_spot::lines()` (17) in turn, `--total` iterations each, to
 //! `<checkpoint dir>/plo-spot-<bb>-<line>.bin`. `--total` trains up to that
 //! many iterations in all (a stopped run resumes); a checkpoint is saved at
 //! every report.
@@ -25,7 +25,7 @@ use ducy_gto::{
     sixmax::{
         bot::PreflopStrategy,
         equity::PreflopEquity,
-        plo_spot::{LINES, PloSpotGame},
+        plo_spot::{PloSpotGame, lines},
         preflop::PreflopGame,
         realize::Realization,
         solver::PreflopSolver,
@@ -144,8 +144,11 @@ fn main() {
         let dir = std::path::Path::new(&checkpoint)
             .parent()
             .map_or(".".to_string(), |d| d.display().to_string());
-        for l in LINES {
-            let spot = PloSpotGame::from_line(&strategy, l, &cards).expect("a line of this solve");
+        for l in lines() {
+            let Some(spot) = PloSpotGame::from_line(&strategy, &l, &cards) else {
+                println!("{l}: not a two-player line of this solve; skipped");
+                continue;
+            };
             train(
                 &spot,
                 total,
