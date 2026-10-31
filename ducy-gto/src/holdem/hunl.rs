@@ -428,6 +428,12 @@ pub struct BettingTree {
 
 impl BettingTree {
     pub fn build(c: &HunlConfig) -> Self {
+        Self::build_from(c, Betting::start(c))
+    }
+
+    /// The tree from `start` on, e.g. a six-handed pot's flop
+    /// ([`Betting::street_start`]); node 0 is `start`.
+    pub fn build_from(c: &HunlConfig, start: Betting) -> Self {
         fn add(c: &HunlConfig, b: Betting, nodes: &mut Vec<Node>) -> u32 {
             let id = nodes.len() as u32;
             let actions = if b.is_over() {
@@ -445,7 +451,7 @@ impl BettingTree {
             id
         }
         let mut nodes = Vec::new();
-        add(c, Betting::start(c), &mut nodes);
+        add(c, start, &mut nodes);
         Self { nodes }
     }
 

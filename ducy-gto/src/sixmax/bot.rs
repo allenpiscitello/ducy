@@ -74,6 +74,36 @@ impl PreflopStrategy {
         }
     }
 
+    /// A copy with every decision's probabilities changed by `f`, which gets
+    /// the node's actions and one class's probabilities to edit in place;
+    /// each class is renormalized after. Decisions a compact strategy left
+    /// out stay out. For deliberately skewed opponents (sixmax_match).
+    pub fn map(&self, mut f: impl FnMut(&[(super::preflop::Act, u32)], &mut [f32])) -> Self {
+        let mut probs = self.probs.clone();
+        for node in &self.game.nodes {
+            let Node::Decision { id, actions, .. } = node else {
+                continue;
+            };
+            let (start, n) = self.offsets[*id as usize];
+            if n == 0 {
+                continue;
+            }
+            for class in 0..C {
+                let p = &mut probs[start + class * n..start + (class + 1) * n];
+                f(actions, p);
+                let sum: f32 = p.iter().sum();
+                if sum > 0.0 {
+                    p.iter_mut().for_each(|x| *x /= sum);
+                }
+            }
+        }
+        Self {
+            game: self.game.clone(),
+            offsets: self.offsets.clone(),
+            probs,
+        }
+    }
+
     /// The tree the strategy is for.
     pub fn game(&self) -> &PreflopGame {
         &self.game
@@ -247,6 +277,11 @@ pub struct SixMaxBot<B: Bot> {
     /// Plays heads-up pots after the flop, seeing them as a heads-up hand
     /// (`heads_up_view`): a heads-up GTO bot. Without one, `post` does.
     heads_up: Option<Box<dyn Bot>>,
+    /// Plays the trained six-handed postflop spots (#267), tried before
+    /// `heads_up` and `post`.
+    spots: Option<super::spot::SpotBot>,
+    /// The PLO postflop spots (#290), tried the same way.
+    plo_spots: Option<super::plo_spot::PloSpotBot>,
     /// PLO: hands are looked up by this abstraction's preflop buckets
     /// rather than hold'em's 169 classes.
     plo: Option<Arc<PloAbstraction>>,
@@ -256,6 +291,8 @@ pub struct SixMaxBot<B: Bot> {
     pub off_tree: u64,
     /// Decisions after the flop the heads-up bot made.
     pub heads_up_decisions: u64,
+    /// Decisions after the flop the spot blueprints made.
+    pub spot_decisions: u64,
 }
 
 impl<B: Bot> SixMaxBot<B> {
@@ -265,12 +302,27 @@ impl<B: Bot> SixMaxBot<B> {
             strategies: vec![(strategy, 0.0, f64::INFINITY)],
             post,
             heads_up: None,
+            spots: None,
+            plo_spots: None,
             plo: None,
             rng: Rng::new(seed),
             solved: 0,
             off_tree: 0,
             heads_up_decisions: 0,
+            spot_decisions: 0,
         }
+    }
+
+    /// Plays the trained postflop spots with `spots` (#267).
+    pub fn with_spots(mut self, spots: super::spot::SpotBot) -> Self {
+        self.spots = Some(spots);
+        self
+    }
+
+    /// Plays trained six-handed PLO postflop spots (#290).
+    pub fn with_plo_spots(mut self, spots: super::plo_spot::PloSpotBot) -> Self {
+        self.plo_spots = Some(spots);
+        self
     }
 
     /// Plays the first strategy only in hands from `lo` to `hi` big blinds
@@ -381,6 +433,12 @@ impl<B: Bot> Bot for SixMaxBot<B> {
                 return Some(action);
             }
             self.off_tree += 1;
+        } else if let Some(action) = self.spots.as_mut().and_then(|s| s.act(obs)) {
+            self.spot_decisions += 1;
+            return Some(action);
+        } else if let Some(action) = self.plo_spots.as_mut().and_then(|s| s.act(obs)) {
+            self.spot_decisions += 1;
+            return Some(action);
         } else if let Some(bot) = self.heads_up.as_mut() {
             if let Some(view) = heads_up_view(obs) {
                 if let Some(action) = bot.act(&view) {
