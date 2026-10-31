@@ -7,6 +7,11 @@
 //! The table's real actions are mapped onto the tree by kind, not size:
 //! every raise is the tree's raise at that level, every all-in its all-in.
 //! Its own raises are the tree's sizes in the table's chips.
+//!
+//! For pot-limit Omaha (#290) the strategy is a `PreflopGame::pot_limit`
+//! solve over a PLO abstraction's preflop buckets, and the bot looks hands up
+//! by bucket (`with_plo_buckets`); after the flop, heads-up pots go to a
+//! heads-up PLO bot (`with_heads_up`), as they go to GtoBot in hold'em.
 
 use std::sync::Arc;
 
@@ -21,6 +26,7 @@ use crate::{
     holdem::{
         cards::from_ducy, depths::hand_depth_bb, iso::NUM_PREFLOP_CLASSES, iso::preflop_class,
     },
+    omaha::abstraction::PloAbstraction,
 };
 
 const C: usize = NUM_PREFLOP_CLASSES;
@@ -274,6 +280,9 @@ pub struct SixMaxBot<B: Bot> {
     /// Plays the trained six-handed postflop spots (#267), tried before
     /// `heads_up` and `post`.
     spots: Option<super::spot::SpotBot>,
+    /// PLO: hands are looked up by this abstraction's preflop buckets
+    /// rather than hold'em's 169 classes.
+    plo: Option<Arc<PloAbstraction>>,
     rng: Rng,
     /// Preflop decisions taken from the solve, and those left to `post`.
     pub solved: u64,
@@ -292,6 +301,7 @@ impl<B: Bot> SixMaxBot<B> {
             post,
             heads_up: None,
             spots: None,
+            plo: None,
             rng: Rng::new(seed),
             solved: 0,
             off_tree: 0,
@@ -327,6 +337,13 @@ impl<B: Bot> SixMaxBot<B> {
         self
     }
 
+    /// Pot-limit Omaha: the strategies are `PreflopGame::pot_limit` solves
+    /// over `cards`' preflop buckets, and hands are looked up by bucket.
+    pub fn with_plo_buckets(mut self, cards: Arc<PloAbstraction>) -> Self {
+        self.plo = Some(cards);
+        self
+    }
+
     fn preflop(&mut self, obs: &Observation) -> Option<Action> {
         if obs.seats.len() != SEATS || obs.seats.iter().any(|s| s.stack + s.contributed == 0) {
             return None;
@@ -350,7 +367,16 @@ impl<B: Bot> SixMaxBot<B> {
             return None;
         }
         let cards: Vec<_> = obs.hole_cards.iter(false).map(from_ducy).collect();
-        let class = preflop_class(cards[0], cards[1]);
+        let class = match &self.plo {
+            Some(plo) if cards.len() == plo.config.hole_cards => {
+                plo.preflop_bucket(&cards) as usize
+            }
+            Some(_) => return None,
+            None => preflop_class(cards[0], cards[1]),
+        };
+        if class >= strategy.game.classes {
+            return None;
+        }
         let probs = strategy.probs(*id, class);
         // A decision a compact strategy left out.
         if probs.is_empty() {

@@ -80,6 +80,8 @@ pub mod club_service;
 pub mod club_tourney_host;
 #[cfg(feature = "club")]
 pub mod club_tourneys;
+#[cfg(feature = "club")]
+pub mod club_views;
 mod deal;
 mod error;
 pub mod fair_deal;

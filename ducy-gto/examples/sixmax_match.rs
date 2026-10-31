@@ -32,6 +32,13 @@
 //!
 //! `--flops` instead plays tables of six random Regulars and reports how
 //! many players see the flop, by how the preflop went.
+//!
+//! `--game plo` plays pot-limit Omaha (#290), with as many hole cards as
+//! `--cards` (a PLO abstraction). `plo6` is the six-handed PLO bot: the
+//! `sixmax_plo` solve in `--solve` (with its `--equity`) before the flop,
+//! Doug Poker after it; `plo6hu` also plays heads-up pots after the flop with
+//! the heads-up PLO blueprint in `--blueprint`. Regulars play PLO as they
+//! play hold'em.
 
 use std::{
     sync::{
@@ -51,7 +58,11 @@ use ducy_gto::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
         bot::GtoBot,
-        hunl::{BettingTree, Hunl, HunlConfig},
+        hunl::{BettingTree, Buckets, Hunl, HunlConfig},
+    },
+    omaha::{
+        abstraction::PloAbstraction,
+        bot::{PloGtoBot, load_blueprint},
     },
     sixmax::{
         bot::{PreflopStrategy, SixMaxBot},
@@ -63,7 +74,7 @@ use ducy_gto::{
     },
 };
 use ducy_play::{
-    Bot, Deal, Event, Hand, Street, TableRules, bots::EquityBot, personality::Personality,
+    Bot, Deal, Event, Hand, Street, TableRules, Variant, bots::EquityBot, personality::Personality,
     play_hand,
 };
 
@@ -335,6 +346,7 @@ fn main() {
     // Trained postflop spots for gto6s: checkpoints named spot-<bb>-<name>.bin
     // (sixmax_spot_train, SpotGame::from_name).
     let mut spot_files: Vec<String> = Vec::new();
+    let mut plo = false;
     let mut threads = thread::available_parallelism().map_or(4, |n| n.get()) as u64;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -355,11 +367,29 @@ fn main() {
             "--progress" => progress = Some(v()),
             "--spots" => spot_files = v().split(',').map(str::to_string).collect(),
             "--field" => field_names = Some(v()),
+            "--game" => plo = v().starts_with("plo"),
             f => panic!("unknown option {f}"),
         }
     }
     let config = HunlConfig::default();
-    let rules = TableRules::no_limit_holdem(config.small_blind, config.big_blind);
+    // PLO: the abstraction (its hole cards set the game), loaded once.
+    let plo_cards = plo.then(|| {
+        Arc::new(
+            PloAbstraction::load(
+                &std::fs::read(cards_path.as_ref().expect("--game plo needs --cards"))
+                    .expect("read --cards"),
+            )
+            .expect("a PLO abstraction"),
+        )
+    });
+    let rules = match &plo_cards {
+        Some(c) => TableRules::pot_limit_omaha(config.small_blind, config.big_blind).with_variant(
+            Variant::Omaha {
+                hole_cards: c.config.hole_cards as u32,
+            },
+        ),
+        None => TableRules::no_limit_holdem(config.small_blind, config.big_blind),
+    };
     let stack = stack_bb * config.big_blind;
     if flop_mode {
         flops(rules, stack, deals, seed);
@@ -373,6 +403,57 @@ fn main() {
         };
         let make: Make = match kind {
             "equity" => Arc::new(|s| Box::new(EquityBot::new(200, Some(s))) as Box<dyn Bot>),
+            "plo6" | "plo6hu" => {
+                let cards = plo_cards.clone().expect("plo6 needs --game plo");
+                let n = cards.bucket_count(0);
+                let eq = PreflopEquity::from_bytes(
+                    &std::fs::read(equity_path.as_ref().expect("plo6 needs --equity"))
+                        .expect("read --equity"),
+                )
+                .expect("equity table");
+                let realize = realize_path.as_ref().map_or_else(
+                    || Realization::uniform(n),
+                    |p| {
+                        Realization::from_bytes(&std::fs::read(p).expect("read --realize"))
+                            .expect("realization table")
+                    },
+                );
+                let game = PreflopGame::pot_limit(solve_bb, realize);
+                let solver = PreflopSolver::new(&game, &eq, 1);
+                solver
+                    .load(
+                        &std::fs::read(solve_file.as_ref().expect("plo6 needs --solve"))
+                            .expect("read --solve"),
+                    )
+                    .expect("a sixmax_plo solve for these buckets");
+                let strategy = Arc::new(PreflopStrategy::from_solver(&game, &solver));
+                // plo6hu: the heads-up PLO blueprint plays heads-up pots
+                // after the flop.
+                let heads_up = (kind == "plo6hu").then(|| {
+                    let hu = HunlConfig::pot_limit_omaha_lean(stack_bb);
+                    let bytes =
+                        std::fs::read(blueprint_path.as_ref().expect("plo6hu needs --blueprint"))
+                            .expect("read --blueprint");
+                    let (blueprint, tree) =
+                        load_blueprint(&hu, &cards, &bytes).expect("a PLO blueprint");
+                    (hu, Arc::new(blueprint), Arc::new(tree))
+                });
+                Arc::new(move |s| {
+                    let mut bot =
+                        SixMaxBot::new(strategy.clone(), Personality::DougPoker.bot(Some(s)), s)
+                            .with_plo_buckets(cards.clone());
+                    if let Some((hu, blueprint, tree)) = &heads_up {
+                        bot = bot.with_heads_up(Box::new(PloGtoBot::from_parts(
+                            hu.clone(),
+                            cards.clone(),
+                            blueprint.clone(),
+                            tree.clone(),
+                            s ^ 0x6,
+                        )));
+                    }
+                    Box::new(bot) as Box<dyn Bot>
+                })
+            }
             "gto6" | "gto6hu" | "gto6s" | "gto6loose" | "gto6tight" | "gto6aggro"
             | "gto6passive" => {
                 // gto6hu also plays heads-up pots after the flop with the

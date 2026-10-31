@@ -287,5 +287,36 @@ mod tests {
         let junk = solver.strategy(*id, trash);
         assert!(aa[fold] < 0.1, "aces fold {aa:?}");
         assert!(junk[fold] > aa[fold] + 0.3, "trash {junk:?}, aces {aa:?}");
+
+        // Six of the bot play whole PLO hands: legal, preflop from the solve.
+        use crate::sixmax::bot::{PreflopStrategy, SixMaxBot};
+        use ducy_play::{Deal, Hand, TableRules, Variant, personality::Personality, play_hand};
+        use std::sync::Arc;
+        let strategy = Arc::new(PreflopStrategy::from_solver(&game, &solver));
+        let cards = Arc::new(cards);
+        let rules =
+            TableRules::pot_limit_omaha(1, 2).with_variant(Variant::Omaha { hole_cards: 4 });
+        let mut bots: Vec<SixMaxBot<_>> = (0..SEATS as u64)
+            .map(|s| {
+                SixMaxBot::new(strategy.clone(), Personality::DougPoker.bot(Some(s)), s)
+                    .with_plo_buckets(cards.clone())
+            })
+            .collect();
+        for d in 0..60u64 {
+            let deal = Deal::random(rules.variant, SEATS, Some(d)).expect("deal");
+            let mut hand = Hand::new(rules, &[200; SEATS], d as usize % SEATS, deal).expect("hand");
+            let mut seated: Vec<&mut dyn ducy_play::Bot> = bots
+                .iter_mut()
+                .map(|b| b as &mut dyn ducy_play::Bot)
+                .collect();
+            let out = play_hand(&mut hand, &mut seated).expect("a legal hand");
+            assert_eq!(out.result.net.iter().sum::<i64>(), 0);
+        }
+        let solved: u64 = bots.iter().map(|b| b.solved).sum();
+        let off: u64 = bots.iter().map(|b| b.off_tree).sum();
+        assert!(
+            solved > 10 * off.max(1),
+            "{solved} from the solve, {off} off the tree"
+        );
     }
 }

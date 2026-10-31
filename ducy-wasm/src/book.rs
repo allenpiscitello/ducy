@@ -113,6 +113,7 @@ enum Op {
         text: String,
         amount: Option<f64>,
     },
+    StartMoney,
     BuyIn {
         id: String,
         table: String,
@@ -305,6 +306,7 @@ fn rule_op(b: &mut Book, op: Op, now: u64, changes: &mut bool) -> Result<Value, 
             .assign_to_agent(&id, agent.as_deref(), now)
             .map(|()| Value::Null),
         Op::RunAgent { by, cmd } => b.run_agent(&by, &cmd, now).and_then(value),
+        Op::StartMoney => b.start_money(now).map(|()| Value::Null),
         Op::LogAction { by, text, amount } => {
             b.log_action(&by, &text, now, whole(amount));
             Ok(Value::Null)
