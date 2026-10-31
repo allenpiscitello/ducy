@@ -14,6 +14,7 @@ ducy = { version = "0.3.0", path = "..", default-features = false }
 ducy-play = { version = "0.2.0", path = "../ducy-play", default-features = false, features = ["serde", "club"] }
 ducy-gto = { path = "../ducy-gto", default-features = false, features = ["serde"] }
 ducy-shuffle = { path = "../ducy-shuffle" }
+ducy-identity = { path = "../ducy-identity" }
 rand = "0.10.2"
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
