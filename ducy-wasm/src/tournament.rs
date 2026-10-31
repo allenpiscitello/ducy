@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
-use crate::play::rules_for;
+use crate::util::rules_for;
 
 fn err(e: impl std::fmt::Debug) -> JsError {
     JsError::new(&format!("{e:?}"))

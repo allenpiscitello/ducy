@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
 use crate::fair::{bytes32, hex};
-use crate::play::{club_host, err, to_js};
+use crate::util::{club_host, err, to_js};
 
 /// The table and runner options from club-host.js.
 #[derive(Deserialize)]

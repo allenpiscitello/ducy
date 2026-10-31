@@ -18,7 +18,7 @@ use ducy_identity::{
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
-use crate::play::{err, to_js};
+use crate::util::{err, to_js};
 
 /// "" when envelope `env` (JSON) checks out, else why not.
 #[wasm_bindgen(js_name = checkSignature)]

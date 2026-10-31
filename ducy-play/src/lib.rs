@@ -73,6 +73,10 @@ pub mod club_overview;
 #[cfg(feature = "club")]
 pub mod club_promos;
 #[cfg(feature = "club")]
+pub mod club_registry;
+#[cfg(feature = "club")]
+pub mod club_room;
+#[cfg(feature = "club")]
 pub mod club_rules;
 #[cfg(feature = "club")]
 pub mod club_seats;

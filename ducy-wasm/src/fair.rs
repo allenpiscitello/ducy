@@ -8,7 +8,7 @@ use ducy_play::fair_deal::{Bytes32, Reveal, hand_seed};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-use crate::play::rules_for;
+use crate::util::rules_for;
 
 pub(crate) fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()

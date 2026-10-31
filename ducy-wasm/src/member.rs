@@ -11,7 +11,7 @@ use ducy_play::club_member::{check_own_ledger, from_host, take_host_message};
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
 
-use crate::play::{err, to_js};
+use crate::util::{err, to_js};
 
 /// Whether envelope `env` is worth checking for membership `mem`.
 #[wasm_bindgen(js_name = memberFromHost)]
