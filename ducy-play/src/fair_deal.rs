@@ -161,6 +161,102 @@ pub fn check_deal(variant: Variant, players: usize, reveals: &[Reveal], deal: &D
     Deal::from_seed(variant, players, &hand_seed(&values)).is_ok_and(|d| &d == deal)
 }
 
+/// A finished hand's deal as the host publishes it, for a player to check
+/// (ducy-web #460): the commitments in the order the seed used them, the
+/// reveals, the seed, and where the player sat.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Published {
+    /// The game dealt.
+    pub variant: Variant,
+    /// How many were dealt in.
+    pub dealt: usize,
+    /// The player's place in dealing order.
+    pub index: usize,
+    /// The hand's seed.
+    pub seed: Bytes32,
+    /// Everyone's commitment, by id ("host" for the host's), in seed order.
+    pub list: Vec<(String, Bytes32)>,
+    /// The values used, each with whose it is.
+    pub reveals: Vec<(String, Reveal)>,
+}
+
+/// Whether a player should reveal to commitment list `list` (ids and
+/// commitments): it has their own commitment and the host's, and no id twice.
+pub fn may_reveal(list: &[(String, Bytes32)], mine: &Bytes32) -> bool {
+    let mut ids: Vec<&str> = list.iter().map(|(id, _)| id.as_str()).collect();
+    let n = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    list.iter().any(|(_, c)| c == mine) && ids.contains(&"host") && ids.len() == n
+}
+
+/// A player's check of a published deal: each value opens its commitment,
+/// their own value (`mine`, if they took part) was used, the seed is made
+/// from the values in list order, and their hole `cards` and the `board`
+/// they saw are what the seed deals. Ok(whether their value was in it), or
+/// what didn't check out, in words.
+pub fn check_published(
+    p: &Published,
+    cards: &[String],
+    board: &[String],
+    mine: Option<&Reveal>,
+) -> Result<bool, String> {
+    let commitment = |id: &str| p.list.iter().find(|(x, _)| x == id).map(|(_, c)| c);
+    if commitment("host").is_none() {
+        return Err("the host’s commitment is missing".into());
+    }
+    for (id, r) in &p.reveals {
+        if commitment(id) != Some(&r.commitment()) {
+            return Err(format!(
+                "{} value doesn’t match its commitment",
+                if id == "host" {
+                    "the host’s"
+                } else {
+                    "a player’s"
+                }
+            ));
+        }
+    }
+    if let Some(m) = mine
+        && !p.reveals.iter().any(|(_, r)| r.value == m.value)
+    {
+        return Err("your value wasn’t used".into());
+    }
+    let place = |id: &str| {
+        p.list
+            .iter()
+            .position(|(x, _)| x == id)
+            .unwrap_or(usize::MAX)
+    };
+    let mut used: Vec<&(String, Reveal)> = p.reveals.iter().collect();
+    used.sort_by_key(|(id, _)| place(id));
+    let values: Vec<Bytes32> = used.iter().map(|(_, r)| r.value).collect();
+    if hand_seed(&values) != p.seed {
+        return Err("the seed isn’t made from the values".into());
+    }
+    let deal = Deal::from_seed(p.variant, p.dealt, &p.seed).map_err(|e| e.to_string())?;
+    let sorted = |v: Vec<String>| {
+        let mut v = v;
+        v.sort();
+        v
+    };
+    if !cards.is_empty() {
+        let dealt = deal
+            .hole_cards()
+            .get(p.index)
+            .map(|h| h.iter(false).map(|c| c.to_string()).collect())
+            .unwrap_or_default();
+        if sorted(dealt) != sorted(cards.to_vec()) {
+            return Err("your cards aren’t the ones the seed deals".into());
+        }
+    }
+    let shown: Vec<String> = deal.board().iter().map(|c| c.to_string()).collect();
+    if !board.is_empty() && shown.get(..board.len()) != Some(board) {
+        return Err("the board isn’t the one the seed deals".into());
+    }
+    Ok(mine.is_some())
+}
+
 /// Why a commitment or reveal was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FairError {
@@ -289,5 +385,81 @@ impl FairRound {
             used,
             reveals,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A two-player Hold'em hand from the host's and Ann's reveals, published.
+    fn published() -> (Published, Reveal, Vec<String>, Vec<String>) {
+        let (host, ann) = (Reveal::random(), Reveal::random());
+        let list = vec![
+            ("ann".to_string(), ann.commitment()),
+            ("host".to_string(), host.commitment()),
+        ];
+        let seed = hand_seed(&[ann.value, host.value]);
+        let deal = Deal::from_seed(Variant::Holdem, 2, &seed).unwrap();
+        let cards = deal.hole_cards()[0]
+            .iter(false)
+            .map(|c| c.to_string())
+            .collect();
+        let board = deal.board()[..3].iter().map(|c| c.to_string()).collect();
+        let p = Published {
+            variant: Variant::Holdem,
+            dealt: 2,
+            index: 0,
+            seed,
+            list,
+            // In any order: the seed takes them in list order.
+            reveals: vec![("host".into(), host), ("ann".into(), ann)],
+        };
+        (p, ann, cards, board)
+    }
+
+    #[test]
+    fn a_player_checks_the_published_deal() {
+        let (p, ann, cards, board) = published();
+        assert_eq!(check_published(&p, &cards, &board, Some(&ann)), Ok(true));
+        assert_eq!(check_published(&p, &[], &[], None), Ok(false));
+        let why = |p: &Published, cards: &[String], board: &[String]| {
+            check_published(p, cards, board, Some(&ann)).unwrap_err()
+        };
+        let mut q = p.clone();
+        q.seed = [7; 32];
+        assert!(why(&q, &cards, &board).contains("seed"));
+        let mut q = p.clone();
+        q.reveals[0].1 = Reveal::random();
+        assert_eq!(
+            why(&q, &cards, &board),
+            "the host’s value doesn’t match its commitment"
+        );
+        let mut q = p.clone();
+        q.list.retain(|(id, _)| id != "host");
+        assert!(why(&q, &cards, &board).contains("host’s commitment is missing"));
+        let mut q = p.clone();
+        q.reveals.retain(|(id, _)| id == "host");
+        assert_eq!(why(&q, &cards, &board), "your value wasn’t used");
+        let other: Vec<String> = Deal::from_seed(Variant::Holdem, 2, &p.seed)
+            .unwrap()
+            .hole_cards()[1]
+            .iter(false)
+            .map(|c| c.to_string())
+            .collect();
+        assert!(why(&p, &other, &board).contains("your cards"));
+        assert!(why(&p, &cards, &["2c".into(), "3d".into(), "4h".into()]).contains("board"));
+    }
+
+    #[test]
+    fn reveal_only_to_a_list_with_yours_and_the_hosts_each_once() {
+        let (p, ann, ..) = published();
+        let mine = ann.commitment();
+        assert!(may_reveal(&p.list, &mine));
+        assert!(!may_reveal(&p.list, &[1; 32]));
+        assert!(!may_reveal(&p.list[..1], &mine));
+        let mut twice = p.list.clone();
+        twice.push(twice[0].clone());
+        assert!(!may_reveal(&twice, &mine));
     }
 }

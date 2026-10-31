@@ -8,9 +8,12 @@
 //!   `sender` the record to keep when it's taken.
 //! - `canonicalJson(json)`: the bytes a message is signed over.
 //! - `playerIdFor(raw)`, `showId(id)`, `parseShownId(text)`.
+//! - Backups: `passwordProblem`, `readBackup`, `backupWithClub`,
+//!   `proveClubBackup` (the file around the key; WebCrypto locks and
+//!   unlocks the key itself).
 
 use ducy_identity::{
-    Sender, Verifier, canonical, check_signature, parse_shown_id, player_id, show_id,
+    Sender, Verifier, backup, canonical, check_signature, parse_shown_id, player_id, show_id,
 };
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
@@ -67,4 +70,43 @@ pub fn show_id_js(id: &str) -> String {
 #[wasm_bindgen(js_name = parseShownId)]
 pub fn parse_shown_id_js(text: &str) -> Option<String> {
     parse_shown_id(text)
+}
+
+/// Why `password` won't do for a new backup (with the club's `name`, if
+/// any), or "".
+#[wasm_bindgen(js_name = passwordProblem)]
+pub fn password_problem_js(password: &str, name: &str) -> String {
+    backup::password_problem(password, name)
+}
+
+/// A backup file read (ducy-identity's backup): `{ok: true, value: {v, id,
+/// alg, seq, key?, lock?, club, head}}` (`head`, canonical JSON, what a
+/// version 2 file binds as associated data), or `{ok: false, message}`.
+#[wasm_bindgen(js_name = readBackup)]
+pub fn read_backup_js(text: &str) -> Result<JsValue, JsError> {
+    to_js(&match backup::read_backup(text) {
+        Ok(b) => {
+            let mut v = serde_json::to_value(&b).map_err(err)?;
+            v["head"] = canonical(&b.head()).into();
+            json!({"ok": true, "value": v})
+        }
+        Err(message) => json!({"ok": false, "message": message}),
+    })
+}
+
+/// A club's backup: player ID backup `locked` (JSON) with the club added.
+#[wasm_bindgen(js_name = backupWithClub)]
+pub fn backup_with_club(locked: &str, code: &str, name: &str) -> Result<String, JsError> {
+    backup::with_club(locked, code, name).map_err(|e| JsError::new(&e))
+}
+
+/// Whether an opened backup (its `club`, JSON or "null", and the player ID
+/// `id` its key holds) brings back club `code` for owner `owner`: "" if so,
+/// else why not.
+#[wasm_bindgen(js_name = proveClubBackup)]
+pub fn prove_club_backup(club: &str, id: &str, code: &str, owner: &str) -> String {
+    let club: Option<backup::Club> = serde_json::from_str(club).unwrap_or(None);
+    backup::prove_club(club.as_ref(), id, code, owner)
+        .err()
+        .unwrap_or_default()
 }
