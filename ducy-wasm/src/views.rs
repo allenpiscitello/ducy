@@ -11,7 +11,7 @@ use ducy_play::club_views::{chip_lines, left_summary, table_sessions};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
-use crate::play::{err, to_js};
+use crate::util::{err, to_js};
 
 /// Runs view op `op` with `args` (JSON) on the club.
 #[wasm_bindgen(js_name = clubView)]

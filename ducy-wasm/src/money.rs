@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 
-use crate::play::{err, to_js};
+use crate::util::{err, to_js};
 
 /// A move, as ducy-web sends it.
 #[derive(Deserialize)]

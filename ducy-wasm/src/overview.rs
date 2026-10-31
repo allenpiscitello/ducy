@@ -12,7 +12,7 @@ use ducy_play::club_overview::deal_clock;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
-use crate::play::{err, to_js};
+use crate::util::{err, to_js};
 
 /// Runs Overview op `op` with `args` (JSON) on the club.
 #[wasm_bindgen(js_name = clubOverview)]

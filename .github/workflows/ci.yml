@@ -35,6 +35,8 @@ jobs:
         with:
           tool: wasm-pack
       - run: cd ducy-wasm && wasm-pack build --target web
+      # The relay's build: clubs only, no bot tables or GTO (ducy-web #463).
+      - run: cd ducy-wasm && wasm-pack build --target web --out-dir pkg-clubs --no-default-features
       - run: cd ducy-play-wasm && wasm-pack build --target web
       - uses: actions/setup-node@v7
         with:

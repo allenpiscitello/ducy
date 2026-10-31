@@ -13,7 +13,7 @@ use ducy_play::club_seats::Seating;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
-use crate::play::{err, to_js};
+use crate::util::{err, to_js};
 
 /// Runs `op` with `args` (JSON) for table `table` on the club and its seating.
 #[wasm_bindgen(js_name = clubSeats)]

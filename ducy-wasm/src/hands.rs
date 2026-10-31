@@ -8,7 +8,7 @@ use ducy_play::{
 };
 use wasm_bindgen::prelude::*;
 
-use crate::play::{err, to_js};
+use crate::util::{err, to_js};
 
 /// The pots to show now, from the seats ({stack, street_bet, folded, all_in,
 /// empty, sitting_out}) and the hand's events: {pots: [{amount, eligible}],
