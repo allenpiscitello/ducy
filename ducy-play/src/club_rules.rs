@@ -385,6 +385,12 @@ impl Table {
     pub fn limits(&self) -> (u64, u64) {
         (self.min_bb * self.bb, self.max_bb * self.bb)
     }
+
+    /// The game it deals, as players pick one: its type, stakes and seats.
+    /// Tables with the same key share a waitlist (ducy-web #518).
+    pub fn game_key(&self) -> String {
+        format!("{}:{}/{}:{}", self.game, self.sb, self.bb, self.seats)
+    }
 }
 
 /// A seat held at a table for a member (ducy-web #425).
@@ -462,6 +468,9 @@ pub struct Club {
     /// Grouped tables with must-move (ducy-web #501).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<crate::club_groups::Group>,
+    /// Each game's waitlist, by [`Table::game_key`] (ducy-web #518).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lists: BTreeMap<String, Vec<crate::club_lists::OnList>>,
     /// Outside servers that may give members chips, by their key's id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub services: BTreeMap<String, Service>,
@@ -799,6 +808,7 @@ impl Club {
             rathole_hours: None,
             waitlist: BTreeMap::new(),
             groups: vec![],
+            lists: BTreeMap::new(),
             services: BTreeMap::new(),
             service_refused: None,
         })
@@ -1077,6 +1087,11 @@ impl Club {
     pub fn remove(&mut self, id: &str, now: u64) -> Option<Value> {
         if !self.removable(id) {
             return None;
+        }
+        // Off every waitlist (#518).
+        let keys: Vec<String> = self.lists.keys().cloned().collect();
+        for k in keys {
+            self.leave_list(id, &k);
         }
         self.set_status(id, Status::Removed, &[Status::Member, Status::Pending], now)
     }
@@ -1380,8 +1395,9 @@ impl Club {
         } else {
             given
         };
+        let id = random36(rng, 6);
         self.tables.push(Table {
-            id: random36(rng, 6),
+            id: id.clone(),
             name,
             game: g.id.into(),
             sb,
@@ -1396,7 +1412,9 @@ impl Club {
             created_at: now,
             other: Map::new(),
         });
-        Ok(self.tables.last().expect("just added"))
+        // A new table of a must-move game goes at the end of its chain (#518).
+        self.join_group(&id);
+        Ok(self.table(&id).expect("just added"))
     }
 
     /// What members are told about the tables (no one's chips), with how
@@ -1412,12 +1430,15 @@ impl Club {
                     "id": t.id, "name": t.name, "game": t.game, "sb": t.sb, "bb": t.bb,
                     "min": min, "max": max, "seats": t.seats,
                     "taken": seated.get(&t.id).copied().unwrap_or(0),
+                    // Its game, for the waitlists (#518).
+                    "key": t.game_key(),
                 });
                 // The hit-and-run rule, so members know before they sit.
                 if t.stay_hands > 0 {
                     v["stayHands"] = t.stay_hands.into();
                 }
-                // Its place in a group: the main table, or must-move 1, 2, 3 (#501).
+                // Must move (#501, #518): a main table, or the tables a
+                // must-move one feeds and its move order.
                 let g = self.group_label(&t.id);
                 if !g.is_null() {
                     v["group"] = g;
@@ -1426,7 +1447,9 @@ impl Club {
             })
             .collect();
         // The rathole rule's window, so members see it before they sit (#187).
-        json!({"type": "tables", "club": self.code, "tables": tables, "rathole": self.rathole_hours.clone().unwrap_or(0.into())})
+        // How many are on each game's list (#518).
+        json!({"type": "tables", "club": self.code, "tables": tables, "rathole": self.rathole_hours.clone().unwrap_or(0.into()),
+               "lists": self.list_counts()})
     }
 
     /// May member `id` join table `table`? "" if so, else why not. `at` is
@@ -2804,8 +2827,10 @@ mod tests {
         assert_eq!(body["tables"].as_array().unwrap().len(), 2);
         assert_eq!(
             body["tables"][0],
-            json!({"id": t.id, "name": "PLO - 0.01/0.02", "game": "plo4", "sb": 1, "bb": 2, "min": 100, "max": 200, "seats": 6, "taken": 2})
+            json!({"id": t.id, "name": "PLO - 0.01/0.02", "game": "plo4", "sb": 1, "bb": 2, "min": 100, "max": 200, "seats": 6, "taken": 2,
+                   "key": "plo4:1/2:6"})
         );
+        assert_eq!(body["lists"], json!({}));
     }
 
     #[test]

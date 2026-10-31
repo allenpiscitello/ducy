@@ -62,6 +62,8 @@ pub mod club_groups;
 #[cfg(feature = "club")]
 pub mod club_host;
 #[cfg(feature = "club")]
+pub mod club_lists;
+#[cfg(feature = "club")]
 pub mod club_member;
 pub mod club_money;
 #[cfg(feature = "club")]
