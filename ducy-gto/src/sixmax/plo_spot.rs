@@ -35,13 +35,29 @@ fn postflop_order(position: usize) -> usize {
     (position + 2) % SEATS
 }
 
-/// The common heads-up lines of six-handed PLO, for training: single-raised
-/// pots by the opener's position against the callers that come up most,
-/// the small blind's open and limp against the big blind, and the big blind
-/// 3-betting the button.
-pub const LINES: [&str; 9] = [
-    "fffrfc", "ffrffc", "ffrcff", "fffrcf", "frfffc", "rffffc", "ffffrc", "ffffcc", "fffrfrc",
-];
+/// The heads-up lines of six-handed PLO trained by default: a single-raised
+/// pot for every opener and caller (15; at tables of Regulars the caller is
+/// often in position, not the big blind), the small blind's limp checked by
+/// the big blind, and the big blind 3-betting the button.
+pub fn lines() -> Vec<String> {
+    let mut out = Vec::new();
+    for opener in 0..SEATS - 1 {
+        for caller in opener + 1..SEATS {
+            out.push(
+                (0..SEATS)
+                    .map(|s| match s {
+                        s if s == opener => 'r',
+                        s if s == caller => 'c',
+                        _ => 'f',
+                    })
+                    .collect(),
+            );
+        }
+    }
+    out.push("ffffcc".to_string());
+    out.push("fffrfrc".to_string());
+    out
+}
 
 /// A heads-up postflop spot of six-handed PLO.
 pub struct PloSpotGame<'a> {
@@ -309,6 +325,19 @@ pub struct PloSpotBot {
         std::sync::Arc<crate::Profile<u64>>,
     )>,
     rng: Rng,
+    /// Postflop decisions seen, and why those not played were left: not a
+    /// heads-up line, no spot for it, off the spot's tree, played.
+    pub stats: SpotStats,
+}
+
+/// How a [`PloSpotBot`]'s postflop decisions went.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SpotStats {
+    pub seen: u64,
+    pub not_heads_up: u64,
+    pub no_spot: u64,
+    pub off_tree: u64,
+    pub played: u64,
 }
 
 impl PloSpotBot {
@@ -322,6 +351,7 @@ impl PloSpotBot {
         Self {
             spots,
             rng: Rng::new(seed),
+            stats: SpotStats::default(),
         }
     }
 
@@ -335,9 +365,15 @@ impl PloSpotBot {
         if obs.street == ducy_play::Street::Preflop || obs.seats.len() != SEATS {
             return None;
         }
-        let ([a, b], raises, aggressor) = super::spot::heads_up_line(&obs.history, obs.button)?;
+        self.stats.seen += 1;
+        let Some(([a, b], raises, aggressor)) =
+            super::spot::heads_up_line(&obs.history, obs.button)
+        else {
+            self.stats.not_heads_up += 1;
+            return None;
+        };
         let depth = crate::holdem::depths::hand_depth_bb(obs);
-        let (game, profile) = self.spots.iter().find(|(g, _)| {
+        let Some((game, profile)) = self.spots.iter().find(|(g, _)| {
             let bb = g.config.stack as f64 / g.config.big_blind as f64;
             g.raises == raises
                 && g.aggressor == aggressor
@@ -345,7 +381,10 @@ impl PloSpotBot {
                 && g.positions.contains(&b)
                 && depth >= bb * 0.7
                 && depth <= bb * 1.4
-        })?;
+        }) else {
+            self.stats.no_spot += 1;
+            return None;
+        };
         let side_of = |seat: usize| -> usize {
             if super::bot::position(seat, obs.button) == game.positions[0] {
                 0
@@ -384,15 +423,20 @@ impl PloSpotBot {
         for e in &obs.history[flop_at + 1..] {
             follow.apply(&game.tree, e, side_of, &mut map_rng);
         }
-        let node = follow.node?;
+        let Some(node) = follow.node else {
+            self.stats.off_tree += 1;
+            return None;
+        };
         let n = &game.tree.nodes[node as usize];
         let me = side_of(obs.seat);
         if n.actions.is_empty()
             || n.betting.to_act != me
             || n.betting.street != street_index(obs.street)
         {
+            self.stats.off_tree += 1;
             return None;
         }
+        self.stats.played += 1;
         let hole: Vec<Card> = obs.hole_cards.iter(false).map(from_ducy).collect();
         let board: Vec<Card> = obs.board.iter().copied().map(from_ducy).collect();
         if hole.len() != game.cards.config.hole_cards {
