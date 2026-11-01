@@ -409,6 +409,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ducy-training"
+version = "0.1.0"
+dependencies = [
+ "ryu-js",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ducy-wasm"
 version = "0.1.0"
 dependencies = [
@@ -417,6 +426,7 @@ dependencies = [
  "ducy-identity",
  "ducy-play",
  "ducy-shuffle",
+ "ducy-training",
  "getrandom 0.4.3",
  "rand 0.10.3",
  "rust_decimal",

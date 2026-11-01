@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "ducy-wasm", "ducy-play", "ducy-play-wasm", "ducy-gto", "ducy-shuffle", "ducy-identity"]
+members = [".", "ducy-wasm", "ducy-play", "ducy-play-wasm", "ducy-gto", "ducy-shuffle", "ducy-identity", "ducy-training"]
 
 [package]
 name = "ducy"
