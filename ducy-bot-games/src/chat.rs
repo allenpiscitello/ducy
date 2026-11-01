@@ -458,6 +458,7 @@ mod tests {
         assert_eq!(persona_of("jen_silly").tone, "friendly");
         assert_eq!(persona_of("bungleman").tone, "needle");
         assert_eq!(persona_of("milk_king").tone, "friendly");
+        assert_eq!(persona_of("gto-plo5").tone, "robot");
         assert_eq!(persona_of("gto-plo6").tone, "robot");
         assert_eq!(persona_of("someone_new").tone, "friendly");
         assert_eq!(persona_of("g-maniac-12").tone, "needle");
