@@ -125,6 +125,7 @@ impl Club {
         let before = self.menu.len();
         self.menu.retain(|g| g.key != key);
         self.interest.remove(key);
+        self.interest_tried.remove(key);
         self.menu.len() < before
     }
 
@@ -158,9 +159,24 @@ impl Club {
     }
 
     /// Whether offered game `key` should ask about a table now: it isn't
-    /// running, no question is open, and enough are interested.
+    /// running, no question is open, enough are interested, and they aren't
+    /// the same people a question just closed on without a table.
     pub fn wants_interest(&self, key: &str) -> bool {
-        !self.interest.contains_key(key) && self.interest_need(key).is_some()
+        !self.interest.contains_key(key)
+            && self.interest_need(key).is_some()
+            && self.interest_tried.get(key) != Some(&self.interest_who(key))
+    }
+
+    /// Who's interested in game `key` now and the fewest each would start
+    /// with, in order: what a question that closed without a table is
+    /// remembered by.
+    fn interest_who(&self, key: &str) -> String {
+        let seats = self.offered(key).map_or(0, |g| g.seats);
+        self.interested(key, seats)
+            .iter()
+            .map(|(id, m)| format!("{id}:{m}"))
+            .collect::<Vec<_>>()
+            .join(",")
     }
 
     /// Asks the first of those interested in game `key` (as many as it takes,
@@ -332,8 +348,13 @@ impl Club {
             }
         }
         let Some((tid, name)) = opened else {
+            // Not asked again until someone joins or leaves the list, or
+            // changes how few they'd start with.
+            let who = self.interest_who(key);
+            self.interest_tried.insert(key.into(), who);
             return out;
         };
+        self.interest_tried.remove(key);
         for m in &yes {
             if self.leave_list(m, key) {
                 out.lists_to.push(m.clone());
@@ -511,7 +532,7 @@ mod tests {
 
     #[test]
     fn no_one_left_and_too_few_said_yes() {
-        let mut c = club(&["a", "b"]);
+        let mut c = club(&["a", "b", "c"]);
         for m in ["a", "b"] {
             c.join_list_with(m, K, Some(2), 0).unwrap();
         }
@@ -525,5 +546,11 @@ mod tests {
         // b didn't answer: still on the list, and a too.
         assert_eq!(c.list(K).len(), 2);
         assert!(c.tables.is_empty());
+        // The same two aren't asked again until the list changes.
+        assert!(!c.wants_interest(K));
+        c.join_list_with("c", K, Some(2), 1).unwrap();
+        assert!(c.wants_interest(K));
+        c.leave_list("c", K);
+        assert!(!c.wants_interest(K));
     }
 }

@@ -520,6 +520,10 @@ pub struct Club {
     /// that isn't running, by its key, while it's open.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub interest: BTreeMap<String, crate::club_interest::InterestAsk>,
+    /// Who was interested in an offered game when its question last closed
+    /// without a table, by its key: it isn't asked again until that changes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub interest_tried: BTreeMap<String, String>,
     /// Outside servers that may give members chips, by their key's id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub services: BTreeMap<String, Service>,
@@ -860,6 +864,7 @@ impl Club {
             lists: BTreeMap::new(),
             menu: Vec::new(),
             interest: BTreeMap::new(),
+            interest_tried: BTreeMap::new(),
             services: BTreeMap::new(),
             service_refused: None,
         })
