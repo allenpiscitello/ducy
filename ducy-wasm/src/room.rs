@@ -6,8 +6,8 @@
 //! value}` (and `clock`, for the play clock's ops) or `{ok: false,
 //! message}`.
 
-use ducy_play::club_registry::Record;
-use ducy_play::club_room::{
+use ducy_club::registry::Record;
+use ducy_club::room::{
     PlayClock, admin_full, admin_people, admin_person, check_create, check_import, code_info,
     hand_no_cards, plan_of,
 };
@@ -78,11 +78,11 @@ enum Op {
 pub fn club_room(op: JsValue, now: f64) -> Result<JsValue, JsError> {
     let op: Op = serde_wasm_bindgen::from_value(op).map_err(err)?;
     let now = now as u64;
-    let clocked =
-        |mut c: PlayClock, f: fn(&mut PlayClock, u64) -> Option<ducy_play::club_room::Usage>| {
-            let u = f(&mut c, now);
-            json!({"ok": true, "value": u, "clock": c})
-        };
+    let clocked = |mut c: PlayClock,
+                   f: fn(&mut PlayClock, u64) -> Option<ducy_club::room::Usage>| {
+        let u = f(&mut c, now);
+        json!({"ok": true, "value": u, "clock": c})
+    };
     let out = match op {
         Op::CheckCreate { env, code } => match check_create(&env, &code, now) {
             Ok(name) => json!({"ok": true, "value": name}),

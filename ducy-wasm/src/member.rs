@@ -7,7 +7,7 @@
 //! - `checkOwnLedger(entriesJson, balance)`: whether a member's own entries
 //!   add up to their balance.
 
-use ducy_play::club_member::{check_own_ledger, from_host, take_host_message};
+use ducy_club::member::{check_own_ledger, from_host, take_host_message};
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
 

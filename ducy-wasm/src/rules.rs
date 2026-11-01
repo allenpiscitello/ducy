@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use ducy_play::club_rules::{self, Club, HOLD_MS, Refused, RuleError};
+use ducy_club::rules::{self as club_rules, Club, HOLD_MS, Refused, RuleError};
 use rand::rngs::StdRng;
 use serde::Deserialize;
 use serde_json::{Value, json};

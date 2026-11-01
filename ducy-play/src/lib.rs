@@ -55,41 +55,6 @@ pub struct ReadmeDoctests;
 
 mod bot;
 pub mod bots;
-#[cfg(feature = "club")]
-pub mod club_book;
-#[cfg(feature = "club")]
-pub mod club_groups;
-#[cfg(feature = "club")]
-pub mod club_host;
-#[cfg(feature = "club")]
-pub mod club_interest;
-#[cfg(feature = "club")]
-pub mod club_lists;
-#[cfg(feature = "club")]
-pub mod club_member;
-pub mod club_money;
-#[cfg(feature = "club")]
-pub mod club_oneoff;
-#[cfg(feature = "club")]
-pub mod club_overview;
-#[cfg(feature = "club")]
-pub mod club_promos;
-#[cfg(feature = "club")]
-pub mod club_registry;
-#[cfg(feature = "club")]
-pub mod club_room;
-#[cfg(feature = "club")]
-pub mod club_rules;
-#[cfg(feature = "club")]
-pub mod club_seats;
-#[cfg(feature = "club")]
-pub mod club_service;
-#[cfg(feature = "club")]
-pub mod club_tourney_host;
-#[cfg(feature = "club")]
-pub mod club_tourneys;
-#[cfg(feature = "club")]
-pub mod club_views;
 mod deal;
 mod error;
 pub mod fair_deal;

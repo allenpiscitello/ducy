@@ -7,8 +7,8 @@
 //! `dealClock(clockJson, on, now)` is a table's dealing clock after it is
 //! (or isn't) dealing at `now`.
 
-use ducy_play::club_host::ClubState;
-use ducy_play::club_overview::deal_clock;
+use ducy_club::host::ClubState;
+use ducy_club::overview::deal_clock;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
@@ -36,7 +36,7 @@ pub fn buy_in_range_js(
 ) -> Result<JsValue, JsError> {
     let t: Value = serde_json::from_str(t).map_err(err)?;
     let entries: Vec<Value> = serde_json::from_str(entries).map_err(err)?;
-    to_js(&ducy_play::club_book::buy_in_range(
+    to_js(&ducy_club::book::buy_in_range(
         &t,
         &entries,
         rathole_hours,

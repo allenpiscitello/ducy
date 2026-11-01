@@ -13,6 +13,23 @@ A performant analysis library for poker, supporting Texas Hold'em and Omaha.
 - **Board analysis** — flush texture analysis for Omaha boards
 - **Playing hands** — the [`ducy-play`](https://crates.io/crates/ducy-play) crate plays out Hold'em and Omaha hands: blinds, no-limit and pot-limit betting, side pots and showdown ([`ducy-play-wasm`](https://github.com/allenpiscitello/ducy/blob/master/ducy-play-wasm/README.md) for JavaScript)
 
+## Crates
+
+Generic poker, for anyone:
+
+- `ducy` (this crate): cards, hand ranking, equity and ranges.
+- `ducy-play`: hands, tables, table hosts and runners, tournaments, fair deals, and bots.
+- `ducy-shuffle`: a shuffle no one party controls.
+- `ducy-gto`: solving and GTO bots.
+- `ducy-play-wasm`: `ducy-play` for JavaScript.
+
+ducy.cards' own, built on those:
+
+- `ducy-club`: poker clubs: rules, money, tables, waitlists, tournaments and promotions, the manager's views, and the relay's registry and rooms.
+- `ducy-training`: the study tools: practising charts and ranges.
+- `ducy-identity`: player IDs and signed messages.
+- `ducy-wasm`: the site's bindings (its default `site` feature; the relay builds without it, clubs only).
+
 ## Quick start
 
 Add ducy to your `Cargo.toml`:

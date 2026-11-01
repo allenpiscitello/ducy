@@ -8,7 +8,7 @@
 //! chipsChanged, changed, liveChanged, live, onPlay, over, counts, value}).
 //! Or `{ok: false, message}`, with nothing changed.
 
-use ducy_play::club_host::ClubState;
+use ducy_club::host::ClubState;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 

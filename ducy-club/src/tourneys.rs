@@ -4,7 +4,7 @@
 //!
 //! Kept as ducy-web's JSON (`club.tourneys`, `club.payoutTables`), so a club
 //! saved before these rules loads as it is. The tables themselves run on
-//! [`crate::tourney_runner`].
+//! [`ducy_play::tourney_runner`].
 //!
 //! A tournament's club chips move through the money model, which the caller
 //! runs (`club_money`): these rules say what to move. A buy-in is taken
@@ -23,8 +23,8 @@ use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::club_rules::{Member, RuleError, Status, a_game, game, random36, refuse};
-use crate::structure::Step;
+use crate::rules::{Member, RuleError, Status, a_game, game, random36, refuse};
+use ducy_play::structure::Step;
 
 /// The longest tournament name.
 pub const MAX_TOURNEY_NAME: usize = 40;

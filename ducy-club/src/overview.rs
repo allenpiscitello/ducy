@@ -15,9 +15,9 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::club_host::ClubState;
-use crate::club_money::{CLUB, Entry, EntryKind};
-use crate::club_rules::{RuleError, Status, TableStatus, refuse};
+use crate::host::ClubState;
+use crate::money::{CLUB, Entry, EntryKind};
+use crate::rules::{RuleError, Status, TableStatus, refuse};
 
 /// A day, in milliseconds.
 pub const DAY: u64 = 86_400_000;
@@ -453,7 +453,7 @@ impl ClubState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::club_book::Limits;
+    use crate::book::Limits;
 
     const NOW: u64 = 1_800_000_000_000;
     const MIN: u64 = 60_000;
@@ -478,7 +478,7 @@ mod tests {
     }
 
     fn table(c: &mut ClubState, id: &str, dealing: Value) {
-        let mut t: crate::club_rules::Table = serde_json::from_value(json!({
+        let mut t: crate::rules::Table = serde_json::from_value(json!({
             "id": id, "name": id.to_uppercase(), "game": "nlhe", "sb": 100, "bb": 200, "minBB": 40, "maxBB": 100,
             "seats": 9, "status": "open",
         }))

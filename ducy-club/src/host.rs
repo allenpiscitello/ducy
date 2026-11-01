@@ -12,12 +12,12 @@ use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value, json};
 
-use crate::club_book::{AccountTo, Book};
-use crate::club_groups::MustMove;
-use crate::club_money::{CLUB, EntryKind};
-use crate::club_promos::{PromoState, Promos};
-use crate::club_rules::{RuleError, refuse};
-use crate::club_tourneys::{PayoutTable, Tourney, Tourneys};
+use crate::book::{AccountTo, Book};
+use crate::groups::MustMove;
+use crate::money::{CLUB, EntryKind};
+use crate::promos::{PromoState, Promos};
+use crate::rules::{RuleError, refuse};
+use crate::tourneys::{PayoutTable, Tourney, Tourneys};
 
 /// The whole club the host keeps, as ducy-web's JSON.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -499,7 +499,7 @@ impl ClubState {
                 if !self.tourneys.iter().any(|t| t.id == id) {
                     return refuse("No such tournament.");
                 }
-                let mut step = crate::club_tourney_host::TourneyStep::default();
+                let mut step = crate::tourney_host::TourneyStep::default();
                 self.tourney_abandon(&id, "the manager cancelled it", true, now, &mut step)?;
                 for m in &step.chips_changed {
                     self.account_latest(m, &mut out);
@@ -727,7 +727,7 @@ mod tests {
         })
         .unwrap();
         // Over the budget, a bonus isn't held: it's not paid. Hold one by hand.
-        let held = crate::club_promos::Award {
+        let held = crate::promos::Award {
             id: "a1".into(),
             promo: c.promos.list[0].id.clone(),
             member: "ann".into(),

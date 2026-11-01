@@ -22,8 +22,8 @@ use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::club_groups::{ASK_MS, Ask, GROUP_BY, GroupNews, MoveUp};
-use crate::club_rules::{Club, HOLD_MS, RuleError, Status, Table, refuse};
+use crate::groups::{ASK_MS, Ask, GROUP_BY, GroupNews, MoveUp};
+use crate::rules::{Club, HOLD_MS, RuleError, Status, Table, refuse};
 
 /// A game on the club's menu.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

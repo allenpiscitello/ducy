@@ -12,9 +12,9 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::club_host::ClubState;
-use crate::club_rules::{RuleError, refuse};
-use crate::club_tourneys::{Tourney, TourneyStatus};
+use crate::host::ClubState;
+use crate::rules::{RuleError, refuse};
+use crate::tourneys::{Tourney, TourneyStatus};
 
 /// How many players the live standings show.
 pub const LIVE_STANDINGS: usize = 20;

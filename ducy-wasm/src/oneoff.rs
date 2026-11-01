@@ -5,10 +5,10 @@
 
 use std::collections::BTreeMap;
 
-use ducy_play::club_host::ClubState;
-use ducy_play::club_oneoff::{self, Ledger, Seated};
-use ducy_play::club_rules::{Member, RuleError};
-use ducy_play::club_tourneys::Tourney;
+use ducy_club::host::ClubState;
+use ducy_club::oneoff::{self as club_oneoff, Ledger, Seated};
+use ducy_club::rules::{Member, RuleError};
+use ducy_club::tourneys::Tourney;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;

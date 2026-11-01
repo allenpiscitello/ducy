@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::club_registry::{FREE_LIMITS, Record};
+use crate::registry::{FREE_LIMITS, Record};
 
 /// How old a create or import request may be (its seq is at least the time
 /// it was signed).

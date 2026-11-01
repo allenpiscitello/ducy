@@ -11,9 +11,9 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::club_host::ClubState;
-use crate::club_money::{CLUB, EntryKind};
-use crate::club_rules::{RuleError, Status, refuse};
+use crate::host::ClubState;
+use crate::money::{CLUB, EntryKind};
+use crate::rules::{RuleError, Status, refuse};
 
 fn int(v: Option<&Value>) -> i64 {
     v.and_then(|x| x.as_i64().or_else(|| x.as_f64().map(|f| f as i64)))
@@ -195,7 +195,7 @@ impl ClubState {
     /// about; `player` when it's on someone else's link for a player's move
     /// along their path; for a promotion prize or its void, the award's
     /// `hand` and a note naming it.
-    pub fn entry_view(&self, e: &crate::club_money::Entry) -> Value {
+    pub fn entry_view(&self, e: &crate::money::Entry) -> Value {
         let mut out = serde_json::to_value(e).unwrap_or(Value::Null);
         let Some(o) = out.as_object_mut() else {
             return out;
@@ -291,7 +291,7 @@ impl ClubState {
             .unwrap_or(0)
     }
 
-    fn players_of(&self, id: &str, status: Status) -> Vec<&crate::club_rules::Member> {
+    fn players_of(&self, id: &str, status: Status) -> Vec<&crate::rules::Member> {
         self.book
             .club
             .members
@@ -492,7 +492,7 @@ mod tests {
                 "bo",
                 "t1",
                 Some(200),
-                crate::club_book::Limits { min: 40, max: 200 },
+                crate::book::Limits { min: 40, max: 200 },
                 3,
             )
             .unwrap();

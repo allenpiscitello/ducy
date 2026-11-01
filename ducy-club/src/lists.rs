@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::club_rules::{Club, Reservation, RuleError, Status, Table, TableStatus, refuse};
+use crate::rules::{Club, Reservation, RuleError, Status, Table, TableStatus, refuse};
 
 /// How long an offered seat is held.
 pub const OFFER_MS: u64 = 60_000;
