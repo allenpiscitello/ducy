@@ -28,6 +28,7 @@ ducy.cards' own, built on those:
 - `ducy-club`: poker clubs: rules, money, tables, waitlists, tournaments and promotions, the manager's views, and the relay's registry and rooms.
 - `ducy-training`: the study tools: practising charts and ranges.
 - `ducy-bot-games`: the games against the bots: the heads-up ladder, the Regulars' table, hand reviews and the bots' table talk.
+- `ducy-quest`: Bankroll Quest: a seeded world of card rooms, their games, players and waitlists.
 - `ducy-identity`: player IDs and signed messages.
 - `ducy-wasm`: the site's bindings (its default `site` feature; the relay builds without it, clubs only).
 

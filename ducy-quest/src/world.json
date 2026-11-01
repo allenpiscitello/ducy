@@ -1,0 +1,1993 @@
+{
+ "stakes": [
+  [
+   "1/2",
+   [
+    100,
+    200
+   ]
+  ],
+  [
+   "2/5",
+   [
+    200,
+    500
+   ]
+  ],
+  [
+   "5/10",
+   [
+    500,
+    1000
+   ]
+  ],
+  [
+   "10/20",
+   [
+    1000,
+    2000
+   ]
+  ],
+  [
+   "25/50",
+   [
+    2500,
+    5000
+   ]
+  ],
+  [
+   "50/100",
+   [
+    5000,
+    10000
+   ]
+  ]
+ ],
+ "regions": [
+  {
+   "id": "tx",
+   "name": "Texas",
+   "cities": [
+    {
+     "id": "mesquite",
+     "name": "Mesquite Flats",
+     "small": true
+    },
+    {
+     "id": "austin",
+     "name": "Austin",
+     "small": false
+    },
+    {
+     "id": "houston",
+     "name": "Houston",
+     "small": false
+    }
+   ]
+  },
+  {
+   "id": "la",
+   "name": "Los Angeles",
+   "cities": [
+    {
+     "id": "cactus",
+     "name": "Cactus Wells",
+     "small": true
+    },
+    {
+     "id": "losangeles",
+     "name": "Los Angeles",
+     "small": false
+    }
+   ]
+  },
+  {
+   "id": "fl",
+   "name": "Florida",
+   "cities": [
+    {
+     "id": "palmetto",
+     "name": "Palmetto Key",
+     "small": true
+    },
+    {
+     "id": "miami",
+     "name": "Miami",
+     "small": false
+    }
+   ]
+  }
+ ],
+ "rooms": [
+  {
+   "id": "deuce",
+   "city": "austin",
+   "name": "Deuce Street Card Room",
+   "local": false,
+   "games": [
+    {
+     "stakes": "1/2",
+     "game": "nlhe",
+     "tables": 6
+    },
+    {
+     "stakes": "2/5",
+     "game": "nlhe",
+     "tables": 2
+    },
+    {
+     "stakes": "5/10",
+     "game": "nlhe",
+     "tables": 1,
+     "chance": 0.35
+    },
+    {
+     "stakes": "1/2",
+     "game": "plo4",
+     "tables": 1,
+     "chance": 0.6
+    }
+   ]
+  },
+  {
+   "id": "harbor",
+   "city": "miami",
+   "name": "Copper Harbor Casino",
+   "local": false,
+   "games": [
+    {
+     "stakes": "2/5",
+     "game": "nlhe",
+     "tables": 3
+    },
+    {
+     "stakes": "5/10",
+     "game": "nlhe",
+     "tables": 2
+    },
+    {
+     "stakes": "10/20",
+     "game": "nlhe",
+     "tables": 1,
+     "chance": 0.6
+    },
+    {
+     "stakes": "2/5",
+     "game": "plo4",
+     "tables": 2
+    },
+    {
+     "stakes": "5/10",
+     "game": "plo4",
+     "tables": 1,
+     "chance": 0.5
+    }
+   ]
+  },
+  {
+   "id": "ivory",
+   "city": "losangeles",
+   "name": "The Ivory Room",
+   "local": false,
+   "min_buy_in": 50,
+   "max_buy_in": 250,
+   "games": [
+    {
+     "stakes": "10/20",
+     "game": "nlhe",
+     "tables": 1
+    },
+    {
+     "stakes": "25/50",
+     "game": "nlhe",
+     "tables": 1,
+     "chance": 0.5,
+     "when": "evenings"
+    },
+    {
+     "stakes": "50/100",
+     "game": "nlhe",
+     "tables": 1,
+     "chance": 0.35,
+     "when": "weekend-nights"
+    },
+    {
+     "stakes": "25/50",
+     "game": "plo4",
+     "tables": 1,
+     "chance": 0.4,
+     "when": "evenings"
+    }
+   ]
+  },
+  {
+   "id": "mesquite",
+   "city": "mesquite",
+   "name": "Mesquite Flats Card Room",
+   "local": false,
+   "games": [
+    {
+     "stakes": "1/2",
+     "game": "nlhe",
+     "tables": 2
+    },
+    {
+     "stakes": "2/5",
+     "game": "nlhe",
+     "tables": 1,
+     "chance": 0.3
+    },
+    {
+     "stakes": "1/2",
+     "game": "plo4",
+     "tables": 1,
+     "chance": 0.25
+    }
+   ]
+  },
+  {
+   "id": "cactus",
+   "city": "cactus",
+   "name": "Cactus Wells Card Club",
+   "local": false,
+   "games": [
+    {
+     "stakes": "1/2",
+     "game": "nlhe",
+     "tables": 2
+    },
+    {
+     "stakes": "2/5",
+     "game": "nlhe",
+     "tables": 1,
+     "chance": 0.3
+    }
+   ]
+  },
+  {
+   "id": "palmetto",
+   "city": "palmetto",
+   "name": "Palmetto Key Poker Room",
+   "local": false,
+   "games": [
+    {
+     "stakes": "1/2",
+     "game": "nlhe",
+     "tables": 2
+    },
+    {
+     "stakes": "1/2",
+     "game": "plo4",
+     "tables": 1,
+     "chance": 0.4
+    }
+   ]
+  },
+  {
+   "id": "bayou",
+   "city": "houston",
+   "name": "Bayou City Poker Club",
+   "local": false,
+   "games": [
+    {
+     "stakes": "2/5",
+     "game": "nlhe",
+     "tables": 3
+    },
+    {
+     "stakes": "5/10",
+     "game": "nlhe",
+     "tables": 2
+    },
+    {
+     "stakes": "10/20",
+     "game": "nlhe",
+     "tables": 1,
+     "chance": 0.5
+    },
+    {
+     "stakes": "25/50",
+     "game": "nlhe",
+     "tables": 1,
+     "chance": 0.3,
+     "when": "evenings"
+    },
+    {
+     "stakes": "5/10",
+     "game": "plo4",
+     "tables": 1,
+     "chance": 0.4
+    }
+   ]
+  },
+  {
+   "id": "sunset",
+   "city": "losangeles",
+   "name": "Sunset Grove Card Club",
+   "local": false,
+   "games": [
+    {
+     "stakes": "1/2",
+     "game": "nlhe",
+     "tables": 5
+    },
+    {
+     "stakes": "2/5",
+     "game": "nlhe",
+     "tables": 3
+    },
+    {
+     "stakes": "5/10",
+     "game": "nlhe",
+     "tables": 2
+    },
+    {
+     "stakes": "2/5",
+     "game": "plo4",
+     "tables": 1
+    }
+   ]
+  },
+  {
+   "id": "clubmesquite",
+   "city": "mesquite",
+   "name": "Dot’s Back Room",
+   "local": true,
+   "games": [
+    {
+     "stakes": "1/2",
+     "game": "nlhe",
+     "tables": 1
+    },
+    {
+     "stakes": "1/2",
+     "game": "plo4",
+     "tables": 1,
+     "chance": 0.25
+    }
+   ]
+  },
+  {
+   "id": "clubcactus",
+   "city": "cactus",
+   "name": "The Yucca Lodge",
+   "local": true,
+   "games": [
+    {
+     "stakes": "1/2",
+     "game": "nlhe",
+     "tables": 1
+    },
+    {
+     "stakes": "1/2",
+     "game": "plo4",
+     "tables": 1,
+     "chance": 0.25
+    }
+   ]
+  },
+  {
+   "id": "clubpalmetto",
+   "city": "palmetto",
+   "name": "The Bait Shop Game",
+   "local": true,
+   "games": [
+    {
+     "stakes": "1/2",
+     "game": "nlhe",
+     "tables": 1
+    },
+    {
+     "stakes": "1/2",
+     "game": "plo4",
+     "tables": 1,
+     "chance": 0.25
+    }
+   ]
+  }
+ ],
+ "bases": [
+  {
+   "pool": "english",
+   "gender": "f",
+   "age": "young",
+   "skin": "s1",
+   "wear": ""
+  },
+  {
+   "pool": "english",
+   "gender": "m",
+   "age": "middle",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "english",
+   "gender": "f",
+   "age": "older",
+   "skin": "s1",
+   "wear": ""
+  },
+  {
+   "pool": "english",
+   "gender": "m",
+   "age": "young",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "english",
+   "gender": "m",
+   "age": "young",
+   "skin": "s5",
+   "wear": ""
+  },
+  {
+   "pool": "english",
+   "gender": "f",
+   "age": "middle",
+   "skin": "s6",
+   "wear": ""
+  },
+  {
+   "pool": "english",
+   "gender": "m",
+   "age": "older",
+   "skin": "s5",
+   "wear": ""
+  },
+  {
+   "pool": "english",
+   "gender": "f",
+   "age": "young",
+   "skin": "s4",
+   "wear": ""
+  },
+  {
+   "pool": "irish",
+   "gender": "f",
+   "age": "young",
+   "skin": "s1",
+   "wear": ""
+  },
+  {
+   "pool": "irish",
+   "gender": "m",
+   "age": "middle",
+   "skin": "s1",
+   "wear": ""
+  },
+  {
+   "pool": "irish",
+   "gender": "m",
+   "age": "older",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "irish",
+   "gender": "f",
+   "age": "middle",
+   "skin": "s1",
+   "wear": ""
+  },
+  {
+   "pool": "hispanic",
+   "gender": "f",
+   "age": "young",
+   "skin": "s3",
+   "wear": ""
+  },
+  {
+   "pool": "hispanic",
+   "gender": "m",
+   "age": "young",
+   "skin": "s3",
+   "wear": ""
+  },
+  {
+   "pool": "hispanic",
+   "gender": "m",
+   "age": "middle",
+   "skin": "s4",
+   "wear": ""
+  },
+  {
+   "pool": "hispanic",
+   "gender": "f",
+   "age": "older",
+   "skin": "s3",
+   "wear": ""
+  },
+  {
+   "pool": "hispanic",
+   "gender": "f",
+   "age": "middle",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "italian",
+   "gender": "m",
+   "age": "middle",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "italian",
+   "gender": "f",
+   "age": "middle",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "italian",
+   "gender": "m",
+   "age": "older",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "italian",
+   "gender": "f",
+   "age": "young",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "polish",
+   "gender": "f",
+   "age": "young",
+   "skin": "s1",
+   "wear": ""
+  },
+  {
+   "pool": "polish",
+   "gender": "m",
+   "age": "middle",
+   "skin": "s1",
+   "wear": ""
+  },
+  {
+   "pool": "polish",
+   "gender": "f",
+   "age": "older",
+   "skin": "s1",
+   "wear": ""
+  },
+  {
+   "pool": "polish",
+   "gender": "m",
+   "age": "young",
+   "skin": "s1",
+   "wear": ""
+  },
+  {
+   "pool": "greek",
+   "gender": "m",
+   "age": "young",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "greek",
+   "gender": "f",
+   "age": "middle",
+   "skin": "s3",
+   "wear": ""
+  },
+  {
+   "pool": "greek",
+   "gender": "m",
+   "age": "older",
+   "skin": "s3",
+   "wear": ""
+  },
+  {
+   "pool": "chinese",
+   "gender": "f",
+   "age": "young",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "chinese",
+   "gender": "m",
+   "age": "middle",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "chinese",
+   "gender": "f",
+   "age": "older",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "chinese",
+   "gender": "m",
+   "age": "young",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "vietnamese",
+   "gender": "f",
+   "age": "middle",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "vietnamese",
+   "gender": "m",
+   "age": "young",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "vietnamese",
+   "gender": "m",
+   "age": "older",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "korean",
+   "gender": "f",
+   "age": "young",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "korean",
+   "gender": "m",
+   "age": "young",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "korean",
+   "gender": "f",
+   "age": "middle",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "filipino",
+   "gender": "f",
+   "age": "young",
+   "skin": "s3",
+   "wear": ""
+  },
+  {
+   "pool": "filipino",
+   "gender": "m",
+   "age": "middle",
+   "skin": "s3",
+   "wear": ""
+  },
+  {
+   "pool": "filipino",
+   "gender": "f",
+   "age": "older",
+   "skin": "s3",
+   "wear": ""
+  },
+  {
+   "pool": "indian",
+   "gender": "f",
+   "age": "young",
+   "skin": "s4",
+   "wear": ""
+  },
+  {
+   "pool": "indian",
+   "gender": "m",
+   "age": "middle",
+   "skin": "s4",
+   "wear": ""
+  },
+  {
+   "pool": "indian",
+   "gender": "f",
+   "age": "middle",
+   "skin": "s4",
+   "wear": ""
+  },
+  {
+   "pool": "indian",
+   "gender": "m",
+   "age": "older",
+   "skin": "s4",
+   "wear": ""
+  },
+  {
+   "pool": "arabic",
+   "gender": "m",
+   "age": "young",
+   "skin": "s3",
+   "wear": ""
+  },
+  {
+   "pool": "arabic",
+   "gender": "f",
+   "age": "middle",
+   "skin": "s3",
+   "wear": "hijab"
+  },
+  {
+   "pool": "arabic",
+   "gender": "m",
+   "age": "older",
+   "skin": "s3",
+   "wear": ""
+  },
+  {
+   "pool": "arabic",
+   "gender": "f",
+   "age": "young",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "persian",
+   "gender": "f",
+   "age": "young",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "persian",
+   "gender": "m",
+   "age": "middle",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "persian",
+   "gender": "f",
+   "age": "older",
+   "skin": "s2",
+   "wear": ""
+  },
+  {
+   "pool": "nigerian",
+   "gender": "m",
+   "age": "young",
+   "skin": "s6",
+   "wear": ""
+  },
+  {
+   "pool": "nigerian",
+   "gender": "f",
+   "age": "young",
+   "skin": "s5",
+   "wear": ""
+  },
+  {
+   "pool": "nigerian",
+   "gender": "m",
+   "age": "middle",
+   "skin": "s5",
+   "wear": ""
+  },
+  {
+   "pool": "nigerian",
+   "gender": "f",
+   "age": "older",
+   "skin": "s6",
+   "wear": ""
+  },
+  {
+   "pool": "nigerian",
+   "gender": "f",
+   "age": "middle",
+   "skin": "s5",
+   "wear": ""
+  },
+  {
+   "pool": "japanese",
+   "gender": "f",
+   "age": "young",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "japanese",
+   "gender": "m",
+   "age": "middle",
+   "skin": "ea",
+   "wear": ""
+  },
+  {
+   "pool": "japanese",
+   "gender": "m",
+   "age": "older",
+   "skin": "ea",
+   "wear": ""
+  }
+ ],
+ "names": {
+  "english": {
+   "f": {
+    "young": [
+     "Emma",
+     "Olivia",
+     "Chloe",
+     "Lily",
+     "Grace",
+     "Hannah",
+     "Ava",
+     "Zoe",
+     "Maddie"
+    ],
+    "middle": [
+     "Lisa",
+     "Michelle",
+     "Karen",
+     "Amy",
+     "Heather",
+     "Julie",
+     "Wendy",
+     "Dana",
+     "Tanya"
+    ],
+    "older": [
+     "Dorothy",
+     "Barbara",
+     "Joan",
+     "Shirley",
+     "Betty",
+     "Carol",
+     "Judy",
+     "Peggy",
+     "Lois"
+    ]
+   },
+   "m": {
+    "young": [
+     "Tyler",
+     "Ethan",
+     "Jake",
+     "Ryan",
+     "Owen",
+     "Cody",
+     "Dylan",
+     "Noah",
+     "Marcus"
+    ],
+    "middle": [
+     "Dave",
+     "Mike",
+     "Steve",
+     "Rob",
+     "Brian",
+     "Greg",
+     "Paul",
+     "Jim",
+     "Darnell"
+    ],
+    "older": [
+     "Walt",
+     "Harold",
+     "Earl",
+     "Stan",
+     "Gene",
+     "Herb",
+     "Hank",
+     "Norm",
+     "Clyde"
+    ]
+   }
+  },
+  "irish": {
+   "f": {
+    "young": [
+     "Aoife",
+     "Ciara",
+     "Niamh",
+     "Erin",
+     "Saoirse",
+     "Orla",
+     "Caitlin",
+     "Molly"
+    ],
+    "middle": [
+     "Siobhan",
+     "Maeve",
+     "Sinead",
+     "Fiona",
+     "Colleen",
+     "Bridget",
+     "Nora",
+     "Deirdre"
+    ],
+    "older": [
+     "Maureen",
+     "Eileen",
+     "Kathleen",
+     "Margaret",
+     "Mary",
+     "Agnes",
+     "Bernadette",
+     "Rosaleen"
+    ]
+   },
+   "m": {
+    "young": [
+     "Liam",
+     "Conor",
+     "Sean",
+     "Declan",
+     "Cian",
+     "Ronan",
+     "Kieran",
+     "Finn"
+    ],
+    "middle": [
+     "Patrick",
+     "Brendan",
+     "Kevin",
+     "Dermot",
+     "Colm",
+     "Niall",
+     "Shane",
+     "Brian"
+    ],
+    "older": [
+     "Seamus",
+     "Michael",
+     "Thomas",
+     "Francis",
+     "Gerald",
+     "Cornelius",
+     "Desmond",
+     "Eamon"
+    ]
+   }
+  },
+  "hispanic": {
+   "f": {
+    "young": [
+     "Sofia",
+     "Valentina",
+     "Camila",
+     "Lucia",
+     "Isabella",
+     "Daniela",
+     "Ximena",
+     "Mariana"
+    ],
+    "middle": [
+     "Carmen",
+     "Gabriela",
+     "Veronica",
+     "Adriana",
+     "Patricia",
+     "Leticia",
+     "Claudia",
+     "Lorena"
+    ],
+    "older": [
+     "Rosa",
+     "Guadalupe",
+     "Dolores",
+     "Esperanza",
+     "Consuelo",
+     "Graciela",
+     "Socorro",
+     "Lourdes"
+    ]
+   },
+   "m": {
+    "young": [
+     "Mateo",
+     "Diego",
+     "Santiago",
+     "Luis",
+     "Andres",
+     "Javier",
+     "Adrian",
+     "Emilio"
+    ],
+    "middle": [
+     "Carlos",
+     "Hector",
+     "Jorge",
+     "Ricardo",
+     "Manny",
+     "Raul",
+     "Miguel",
+     "Roberto"
+    ],
+    "older": [
+     "Jose",
+     "Ramon",
+     "Ernesto",
+     "Arturo",
+     "Rafael",
+     "Alfonso",
+     "Domingo",
+     "Ignacio"
+    ]
+   }
+  },
+  "italian": {
+   "f": {
+    "young": [
+     "Giulia",
+     "Chiara",
+     "Alessia",
+     "Francesca",
+     "Sara",
+     "Martina",
+     "Giorgia",
+     "Elena"
+    ],
+    "middle": [
+     "Gina",
+     "Tina",
+     "Angela",
+     "Teresa",
+     "Daniela",
+     "Paola",
+     "Silvia",
+     "Monica"
+    ],
+    "older": [
+     "Rosa",
+     "Carmela",
+     "Concetta",
+     "Giuseppina",
+     "Antonietta",
+     "Lucia",
+     "Filomena",
+     "Maria"
+    ]
+   },
+   "m": {
+    "young": [
+     "Luca",
+     "Matteo",
+     "Marco",
+     "Nico",
+     "Alessandro",
+     "Lorenzo",
+     "Gianni",
+     "Dario"
+    ],
+    "middle": [
+     "Tony",
+     "Sal",
+     "Vinny",
+     "Frank",
+     "Paolo",
+     "Enzo",
+     "Joe",
+     "Carlo"
+    ],
+    "older": [
+     "Angelo",
+     "Carmine",
+     "Giuseppe",
+     "Domenic",
+     "Vito",
+     "Aldo",
+     "Rocco",
+     "Silvio"
+    ]
+   }
+  },
+  "polish": {
+   "f": {
+    "young": [
+     "Zofia",
+     "Natalia",
+     "Kasia",
+     "Ola",
+     "Julia",
+     "Wiktoria",
+     "Maja",
+     "Zuzanna"
+    ],
+    "middle": [
+     "Agnieszka",
+     "Magda",
+     "Joanna",
+     "Beata",
+     "Ewa",
+     "Dorota",
+     "Marta",
+     "Iwona"
+    ],
+    "older": [
+     "Halina",
+     "Krystyna",
+     "Danuta",
+     "Jadwiga",
+     "Teresa",
+     "Barbara",
+     "Wanda",
+     "Irena"
+    ]
+   },
+   "m": {
+    "young": [
+     "Kuba",
+     "Kacper",
+     "Mateusz",
+     "Szymon",
+     "Bartek",
+     "Filip",
+     "Michal",
+     "Wojtek"
+    ],
+    "middle": [
+     "Tomasz",
+     "Piotr",
+     "Marek",
+     "Pawel",
+     "Krzysztof",
+     "Darek",
+     "Andrzej",
+     "Grzegorz"
+    ],
+    "older": [
+     "Stanislaw",
+     "Zbigniew",
+     "Henryk",
+     "Tadeusz",
+     "Jerzy",
+     "Kazimierz",
+     "Wladek",
+     "Ryszard"
+    ]
+   }
+  },
+  "greek": {
+   "f": {
+    "young": [
+     "Eleni",
+     "Sophia",
+     "Katerina",
+     "Maria",
+     "Christina",
+     "Ioanna",
+     "Despina",
+     "Zoe"
+    ],
+    "middle": [
+     "Georgia",
+     "Vasiliki",
+     "Athena",
+     "Dimitra",
+     "Anna",
+     "Niki",
+     "Stella",
+     "Irene"
+    ],
+    "older": [
+     "Kalliope",
+     "Panagiota",
+     "Eftychia",
+     "Fotini",
+     "Antigone",
+     "Chrysoula",
+     "Evangelia",
+     "Despo"
+    ]
+   },
+   "m": {
+    "young": [
+     "Nikos",
+     "Giorgos",
+     "Dimitri",
+     "Kostas",
+     "Yannis",
+     "Alexis",
+     "Stavros",
+     "Theo"
+    ],
+    "middle": [
+     "Spiros",
+     "Christos",
+     "Vasilis",
+     "Takis",
+     "Petros",
+     "Manolis",
+     "Andreas",
+     "Nick"
+    ],
+    "older": [
+     "Konstantinos",
+     "Panagiotis",
+     "Evangelos",
+     "Stelios",
+     "Athanasios",
+     "Gus",
+     "Lefteris",
+     "Aristotle"
+    ]
+   }
+  },
+  "chinese": {
+   "f": {
+    "young": [
+     "Mei",
+     "Lin",
+     "Xiaoyu",
+     "Jing",
+     "Ying",
+     "Hui",
+     "Wen",
+     "Lan"
+    ],
+    "middle": [
+     "Hong",
+     "Fang",
+     "Xia",
+     "Yan",
+     "Ling",
+     "Juan",
+     "Ping",
+     "Qing"
+    ],
+    "older": [
+     "Guiying",
+     "Xiulan",
+     "Yuying",
+     "Fengying",
+     "Shufen",
+     "Lihua",
+     "Meihua",
+     "Cuifen"
+    ]
+   },
+   "m": {
+    "young": [
+     "Wei",
+     "Jun",
+     "Hao",
+     "Kai",
+     "Yifan",
+     "Zihan",
+     "Rui",
+     "Tao"
+    ],
+    "middle": [
+     "Jian",
+     "Bin",
+     "Gang",
+     "Ming",
+     "Lei",
+     "Qiang",
+     "Feng",
+     "Bo"
+    ],
+    "older": [
+     "Guoqiang",
+     "Jianguo",
+     "Zhiwei",
+     "Dewei",
+     "Yongming",
+     "Wenhua",
+     "Shuping",
+     "Baoshan"
+    ]
+   }
+  },
+  "vietnamese": {
+   "f": {
+    "young": [
+     "Linh",
+     "Trang",
+     "Anh",
+     "Ngoc",
+     "Thao",
+     "Vy",
+     "Mai",
+     "Huong"
+    ],
+    "middle": [
+     "Lan",
+     "Thuy",
+     "Hoa",
+     "Hanh",
+     "Hien",
+     "Nga",
+     "Phuong",
+     "Dung"
+    ],
+    "older": [
+     "Bich",
+     "Hong",
+     "Tuyet",
+     "Kim",
+     "Loan",
+     "Cuc",
+     "Sen",
+     "Yen"
+    ]
+   },
+   "m": {
+    "young": [
+     "Minh",
+     "Khoa",
+     "Huy",
+     "Tuan",
+     "Nam",
+     "Bao",
+     "Duc",
+     "Long"
+    ],
+    "middle": [
+     "Hung",
+     "Thanh",
+     "Dung",
+     "Quang",
+     "Son",
+     "Trung",
+     "Hai",
+     "Phong"
+    ],
+    "older": [
+     "Binh",
+     "Cuong",
+     "Hoang",
+     "Lam",
+     "Tam",
+     "Vinh",
+     "Phuc",
+     "Thien"
+    ]
+   }
+  },
+  "korean": {
+   "f": {
+    "young": [
+     "Jiwoo",
+     "Seoyeon",
+     "Minji",
+     "Yuna",
+     "Haeun",
+     "Soyeon",
+     "Jiyoung",
+     "Eunbi"
+    ],
+    "middle": [
+     "Mijin",
+     "Sunhee",
+     "Eunjung",
+     "Hyejin",
+     "Jiyeon",
+     "Yoonhee",
+     "Sooyoung",
+     "Kyungmi"
+    ],
+    "older": [
+     "Soonja",
+     "Youngja",
+     "Okja",
+     "Myungsook",
+     "Jungsook",
+     "Kyungsook",
+     "Sunja",
+     "Malsoon"
+    ]
+   },
+   "m": {
+    "young": [
+     "Minjun",
+     "Jihoon",
+     "Hyunwoo",
+     "Seojun",
+     "Junho",
+     "Dohyun",
+     "Jaewon",
+     "Taeyang"
+    ],
+    "middle": [
+     "Sungho",
+     "Youngsoo",
+     "Jinho",
+     "Dongwook",
+     "Kyungho",
+     "Sangwoo",
+     "Jaesung",
+     "Hyunsoo"
+    ],
+    "older": [
+     "Youngho",
+     "Byungchul",
+     "Chulsoo",
+     "Kwangsoo",
+     "Sangchul",
+     "Duhwan",
+     "Jongsu",
+     "Myungho"
+    ]
+   }
+  },
+  "filipino": {
+   "f": {
+    "young": [
+     "Angel",
+     "Princess",
+     "Bea",
+     "Kyla",
+     "Trisha",
+     "Nicole",
+     "Jasmine",
+     "Andrea"
+    ],
+    "middle": [
+     "Maricel",
+     "Rowena",
+     "Marites",
+     "Jocelyn",
+     "Liza",
+     "Grace",
+     "Cherry",
+     "Lorna"
+    ],
+    "older": [
+     "Remedios",
+     "Corazon",
+     "Erlinda",
+     "Purita",
+     "Lourdes",
+     "Milagros",
+     "Teresita",
+     "Rosario"
+    ]
+   },
+   "m": {
+    "young": [
+     "Paolo",
+     "Miguel",
+     "Carlo",
+     "Jericho",
+     "Kenneth",
+     "Joshua",
+     "Mark",
+     "Bryan"
+    ],
+    "middle": [
+     "Romeo",
+     "Arnel",
+     "Rodel",
+     "Jun",
+     "Noel",
+     "Rey",
+     "Ariel",
+     "Jomar"
+    ],
+    "older": [
+     "Eduardo",
+     "Ernesto",
+     "Teodoro",
+     "Danilo",
+     "Rolando",
+     "Florencio",
+     "Emilio",
+     "Cesar"
+    ]
+   }
+  },
+  "indian": {
+   "f": {
+    "young": [
+     "Priya",
+     "Ananya",
+     "Diya",
+     "Isha",
+     "Kavya",
+     "Riya",
+     "Neha",
+     "Pooja"
+    ],
+    "middle": [
+     "Sunita",
+     "Anjali",
+     "Rekha",
+     "Meena",
+     "Kavita",
+     "Deepa",
+     "Sangeeta",
+     "Lakshmi"
+    ],
+    "older": [
+     "Kamala",
+     "Savitri",
+     "Shanti",
+     "Usha",
+     "Lalita",
+     "Parvati",
+     "Sushila",
+     "Pushpa"
+    ]
+   },
+   "m": {
+    "young": [
+     "Arjun",
+     "Rohan",
+     "Aditya",
+     "Vikram",
+     "Kunal",
+     "Rahul",
+     "Dev",
+     "Nikhil"
+    ],
+    "middle": [
+     "Raj",
+     "Sanjay",
+     "Anil",
+     "Vijay",
+     "Suresh",
+     "Ramesh",
+     "Ajay",
+     "Manoj"
+    ],
+    "older": [
+     "Prakash",
+     "Mohan",
+     "Krishna",
+     "Gopal",
+     "Hari",
+     "Narayan",
+     "Shankar",
+     "Ravi"
+    ]
+   }
+  },
+  "arabic": {
+   "f": {
+    "young": [
+     "Layla",
+     "Noor",
+     "Yasmin",
+     "Mariam",
+     "Salma",
+     "Amira",
+     "Lina",
+     "Dana"
+    ],
+    "middle": [
+     "Rania",
+     "Huda",
+     "Samira",
+     "Nadia",
+     "Hanan",
+     "Mona",
+     "Leila",
+     "Reem"
+    ],
+    "older": [
+     "Fatima",
+     "Khadija",
+     "Aisha",
+     "Zainab",
+     "Amina",
+     "Naima",
+     "Samia",
+     "Souad"
+    ]
+   },
+   "m": {
+    "young": [
+     "Omar",
+     "Yusuf",
+     "Adam",
+     "Karim",
+     "Zaid",
+     "Rami",
+     "Hamza",
+     "Tariq"
+    ],
+    "middle": [
+     "Ahmed",
+     "Khalid",
+     "Samir",
+     "Walid",
+     "Nabil",
+     "Hassan",
+     "Majid",
+     "Fadi"
+    ],
+    "older": [
+     "Mahmoud",
+     "Ibrahim",
+     "Abdullah",
+     "Mustafa",
+     "Said",
+     "Jamal",
+     "Hussein",
+     "Farouk"
+    ]
+   }
+  },
+  "persian": {
+   "f": {
+    "young": [
+     "Shirin",
+     "Yasaman",
+     "Nazanin",
+     "Parisa",
+     "Ava",
+     "Sara",
+     "Niloufar",
+     "Tara"
+    ],
+    "middle": [
+     "Mina",
+     "Laleh",
+     "Azadeh",
+     "Shabnam",
+     "Mahnaz",
+     "Golnaz",
+     "Roya",
+     "Neda"
+    ],
+    "older": [
+     "Parvin",
+     "Mahin",
+     "Pouran",
+     "Simin",
+     "Fereshteh",
+     "Zahra",
+     "Shahla",
+     "Touran"
+    ]
+   },
+   "m": {
+    "young": [
+     "Arash",
+     "Kian",
+     "Dariush",
+     "Navid",
+     "Babak",
+     "Ramin",
+     "Kamran",
+     "Cyrus"
+    ],
+    "middle": [
+     "Reza",
+     "Behrouz",
+     "Farhad",
+     "Mehdi",
+     "Saeed",
+     "Amir",
+     "Hamid",
+     "Majid"
+    ],
+    "older": [
+     "Hossein",
+     "Bahram",
+     "Jamshid",
+     "Parviz",
+     "Manouchehr",
+     "Houshang",
+     "Gholam",
+     "Ali"
+    ]
+   }
+  },
+  "nigerian": {
+   "f": {
+    "young": [
+     "Chioma",
+     "Adaeze",
+     "Temi",
+     "Funmi",
+     "Amaka",
+     "Zainab",
+     "Ifeoma",
+     "Tolu"
+    ],
+    "middle": [
+     "Ngozi",
+     "Folake",
+     "Bisi",
+     "Nkechi",
+     "Yetunde",
+     "Abimbola",
+     "Uche",
+     "Halima"
+    ],
+    "older": [
+     "Comfort",
+     "Patience",
+     "Grace",
+     "Adunni",
+     "Ebele",
+     "Titilayo",
+     "Nneka",
+     "Mojisola"
+    ]
+   },
+   "m": {
+    "young": [
+     "Tunde",
+     "Emeka",
+     "Chidi",
+     "Femi",
+     "Seun",
+     "Obinna",
+     "Ayo",
+     "Kelechi"
+    ],
+    "middle": [
+     "Chinedu",
+     "Segun",
+     "Kunle",
+     "Ikenna",
+     "Babatunde",
+     "Olumide",
+     "Nnamdi",
+     "Gbenga"
+    ],
+    "older": [
+     "Adewale",
+     "Chukwuma",
+     "Ibrahim",
+     "Festus",
+     "Godwin",
+     "Sunday",
+     "Olu",
+     "Okon"
+    ]
+   }
+  },
+  "japanese": {
+   "f": {
+    "young": [
+     "Yui",
+     "Hina",
+     "Aoi",
+     "Sakura",
+     "Mio",
+     "Rin",
+     "Haruka",
+     "Saki"
+    ],
+    "middle": [
+     "Yuko",
+     "Naomi",
+     "Akiko",
+     "Megumi",
+     "Tomoko",
+     "Keiko",
+     "Mayumi",
+     "Kumiko"
+    ],
+    "older": [
+     "Fumiko",
+     "Michiko",
+     "Setsuko",
+     "Kazuko",
+     "Hiroko",
+     "Sachiko",
+     "Yoshiko",
+     "Chiyo"
+    ]
+   },
+   "m": {
+    "young": [
+     "Haruto",
+     "Ren",
+     "Sota",
+     "Yuto",
+     "Kaito",
+     "Riku",
+     "Daiki",
+     "Shota"
+    ],
+    "middle": [
+     "Takeshi",
+     "Hiroshi",
+     "Kenji",
+     "Satoshi",
+     "Makoto",
+     "Daisuke",
+     "Kazuya",
+     "Tetsuya"
+    ],
+    "older": [
+     "Masao",
+     "Shigeru",
+     "Isamu",
+     "Tadashi",
+     "Noboru",
+     "Yoshio",
+     "Akira",
+     "Minoru"
+    ]
+   }
+  }
+ },
+ "region_mix": {
+  "tx": [
+   [
+    "white",
+    0.47
+   ],
+   [
+    "hispanic",
+    0.31
+   ],
+   [
+    "black",
+    0.13
+   ],
+   [
+    "southasian",
+    0.04
+   ],
+   [
+    "eastasian",
+    0.04
+   ],
+   [
+    "mideast",
+    0.01
+   ]
+  ],
+  "la": [
+   [
+    "white",
+    0.27
+   ],
+   [
+    "hispanic",
+    0.3
+   ],
+   [
+    "eastasian",
+    0.22
+   ],
+   [
+    "black",
+    0.09
+   ],
+   [
+    "mideast",
+    0.07
+   ],
+   [
+    "southasian",
+    0.05
+   ]
+  ],
+  "fl": [
+   [
+    "hispanic",
+    0.42
+   ],
+   [
+    "white",
+    0.34
+   ],
+   [
+    "black",
+    0.17
+   ],
+   [
+    "southasian",
+    0.03
+   ],
+   [
+    "eastasian",
+    0.03
+   ],
+   [
+    "mideast",
+    0.01
+   ]
+  ]
+ },
+ "pool_mix": {
+  "tx": {
+   "white": [
+    [
+     "english",
+     0.72
+    ],
+    [
+     "irish",
+     0.12
+    ],
+    [
+     "italian",
+     0.07
+    ],
+    [
+     "polish",
+     0.05
+    ],
+    [
+     "greek",
+     0.04
+    ]
+   ],
+   "black": [
+    [
+     "english",
+     0.88
+    ],
+    [
+     "nigerian",
+     0.12
+    ]
+   ]
+  },
+  "la": {
+   "white": [
+    [
+     "english",
+     0.52
+    ],
+    [
+     "irish",
+     0.1
+    ],
+    [
+     "italian",
+     0.16
+    ],
+    [
+     "polish",
+     0.08
+    ],
+    [
+     "greek",
+     0.14
+    ]
+   ],
+   "black": [
+    [
+     "english",
+     0.85
+    ],
+    [
+     "nigerian",
+     0.15
+    ]
+   ]
+  },
+  "fl": {
+   "white": [
+    [
+     "english",
+     0.56
+    ],
+    [
+     "irish",
+     0.1
+    ],
+    [
+     "italian",
+     0.2
+    ],
+    [
+     "polish",
+     0.08
+    ],
+    [
+     "greek",
+     0.06
+    ]
+   ],
+   "black": [
+    [
+     "english",
+     0.8
+    ],
+    [
+     "nigerian",
+     0.2
+    ]
+   ]
+  }
+ }
+}
