@@ -10,6 +10,13 @@
 //!   rosters and tourists.
 //! - [`waitlist`]: who's waiting for each game and how fast seats open.
 //! - [`lineup`]: who sits at each table, and their stacks.
+//! - [`quest`]: the quest itself: the bankroll, the clock, the seat, rest,
+//!   travel, your waitlists and runs.
+//! - [`reads`]: tagging players and how often your reads were right.
+//! - [`scenarios`]: the inbox, the ledger, and staking players.
+//! - [`backer`]: getting staked by a backer.
+//! - [`stats`]: the run's stats and the hall of records.
+//! - [`study`]: questions to study while you wait.
 //!
 //! Amounts are in hundredths (100 is $1); times are game minutes since the
 //! world began, a Monday at midnight.
@@ -18,8 +25,15 @@
 // Hours that wrap past midnight read better as `hour >= 22 || hour < 4`.
 #![allow(clippy::manual_range_contains)]
 
+pub mod backer;
 pub mod dice;
 pub mod lineup;
 pub mod people;
+pub mod quest;
+pub mod reads;
+pub mod scenarios;
+pub mod stats;
+pub mod study;
+pub mod text;
 pub mod waitlist;
 pub mod world;

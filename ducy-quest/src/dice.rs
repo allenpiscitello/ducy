@@ -33,6 +33,25 @@ macro_rules! int_key {
     )*};
 }
 int_key!(i32, i64, u32, u64, usize);
+impl Key for f64 {
+    fn put(&self, s: &mut String) {
+        s.push_str(&js_num(*self));
+    }
+}
+
+/// A number as JavaScript's `String(x)` writes it (for the sizes the quest
+/// uses: no exponents).
+pub fn js_num(x: f64) -> String {
+    if x == 0.0 {
+        "0".to_string()
+    } else if x.is_nan() {
+        "NaN".to_string()
+    } else if x.is_infinite() {
+        if x > 0.0 { "Infinity" } else { "-Infinity" }.to_string()
+    } else {
+        x.to_string()
+    }
+}
 
 /// The keys joined with `|`.
 pub fn join(keys: &[&dyn Key]) -> String {
@@ -82,5 +101,9 @@ mod tests {
         assert!((0.0..1.0).contains(&a));
         assert_eq!(a, roll!(42u32; "deuce", "1/2", "hour", 7i64));
         assert_ne!(a, roll!(43u32; "deuce", "1/2", "hour", 7i64));
+        // A whole float is written as JavaScript writes it.
+        assert_eq!(roll!(1; "x", 7.0), roll!(1; "x", 7i64));
+        assert_eq!(super::js_num(-0.0), "0");
+        assert_eq!(super::js_num(8470.5), "8470.5");
     }
 }

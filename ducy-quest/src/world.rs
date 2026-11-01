@@ -71,6 +71,34 @@ pub struct Room {
     pub games: Vec<RoomGame>,
 }
 
+/// A room's buy-in limits, in big blinds: none for the usual 40 to 200.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Limits {
+    /// The room's minimum.
+    #[serde(default)]
+    pub min_buy_in: Option<f64>,
+    /// The room's maximum.
+    #[serde(default)]
+    pub max_buy_in: Option<f64>,
+}
+
+impl Limits {
+    /// Room `id`'s limits (the usual for an unknown room).
+    pub fn of(id: &str) -> Self {
+        room_by_id(id).map(Self::from).unwrap_or_default()
+    }
+}
+
+impl From<&Room> for Limits {
+    fn from(r: &Room) -> Self {
+        Limits {
+            min_buy_in: r.min_buy_in,
+            max_buy_in: r.max_buy_in,
+        }
+    }
+}
+
 /// A face base's identity: what names and backgrounds come from.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Base {

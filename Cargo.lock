@@ -454,6 +454,7 @@ dependencies = [
  "ducy-gto",
  "ducy-identity",
  "ducy-play",
+ "ducy-quest",
  "ducy-shuffle",
  "ducy-training",
  "getrandom 0.4.3",
