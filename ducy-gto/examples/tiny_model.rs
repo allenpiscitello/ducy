@@ -7,8 +7,9 @@
 //!   (`loadGtoDepth`), as `blueprint-25.bin`.
 //! - PLO (`loadGtoPlo`): a small PLO abstraction and an untrained blueprint
 //!   for the lean 10 big blind game, as `plo-cards.bin` and
-//!   `plo-blueprint.bin`; the same for six hole cards as `plo6-cards.bin`
-//!   and `plo6-blueprint.bin`.
+//!   `plo-blueprint.bin`; the same for five hole cards as `plo5-cards.bin`
+//!   and `plo5-blueprint.bin`, and for six as `plo6-cards.bin` and
+//!   `plo6-blueprint.bin`.
 //! - Six-handed (`loadGto6`): compact preflop strategies for 100 and 200 BB
 //!   with every action equally likely, as `sixmax.bin` and `sixmax-200.bin`.
 //!
@@ -60,6 +61,25 @@ fn main() {
     std::fs::write(dir.join("plo-cards.bin"), cards.save()).expect("write plo-cards.bin");
     std::fs::write(dir.join("plo-blueprint.bin"), blueprint.save())
         .expect("write plo-blueprint.bin");
+
+    let cards = PloAbstraction::build(
+        PloAbstractionConfig {
+            hole_cards: 5,
+            preflop: 8,
+            flop: 8,
+            turn: 8,
+            river: 8,
+            fit_hands: 500,
+            equity_samples: 50,
+            ..PloAbstractionConfig::default()
+        },
+        |_| {},
+    );
+    let game = Hunl::<_, 5>::with_cards(HunlConfig::pot_limit_omaha_lean(10), Some(&cards));
+    let blueprint = Blueprint::from_profile(&game, &cards, &Profile::new());
+    std::fs::write(dir.join("plo5-cards.bin"), cards.save()).expect("write plo5-cards.bin");
+    std::fs::write(dir.join("plo5-blueprint.bin"), blueprint.save())
+        .expect("write plo5-blueprint.bin");
 
     let cards = PloAbstraction::build(
         PloAbstractionConfig {

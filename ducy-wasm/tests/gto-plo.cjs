@@ -1,6 +1,7 @@
 // The PLO GTO bots through the ducy-wasm JavaScript API (#131, #200): load a
-// model with loadGtoPlo, seat "gto-plo" at a plo4 table (and "gto-plo6" at
-// a plo6 table), and play hands against it, timing its decisions.
+// model with loadGtoPlo, seat "gto-plo" at a plo4 table (and "gto-plo5" at a
+// plo5 table, "gto-plo6" at a plo6 table), and play hands against it, timing
+// its decisions.
 //
 //   cd ducy-wasm && wasm-pack build --target nodejs --out-dir pkg-node && cd ..
 //   cargo run -p ducy-gto --example tiny_model -- target/tiny-model
@@ -8,7 +9,8 @@
 //
 // With a real model: DUCY_PLO_CARDS=plo-cards.bin DUCY_PLO_BLUEPRINT=plo-
 // blueprint.bin DUCY_PLO_BB=100 DUCY_PLO_HANDS=200 node ducy-wasm/tests/gto-plo.cjs
-// (DUCY_PLO6_CARDS, DUCY_PLO6_BLUEPRINT and DUCY_PLO6_BB for PLO6).
+// (DUCY_PLO5_CARDS, DUCY_PLO5_BLUEPRINT and DUCY_PLO5_BB for PLO5; the
+// same with PLO6 for PLO6).
 //
 // Uses only Node built-ins so it runs without `npm install`.
 
@@ -83,6 +85,23 @@ function play(id, game, bb, cards, blueprint, loadMs) {
 
 play("gto-plo", "plo4", bb, cards, blueprint, loadMs);
 
+// PLO5: a five-card model loads alongside the four-card one, as "gto-plo5".
+const cards5Path = process.env.DUCY_PLO5_CARDS || path.join(modelDir, "plo5-cards.bin");
+const blueprint5Path =
+  process.env.DUCY_PLO5_BLUEPRINT || path.join(modelDir, "plo5-blueprint.bin");
+const bb5 = BigInt(process.env.DUCY_PLO5_BB || 10);
+assert.ok(!ducy.gtoPlo5Loaded());
+assert.throws(() => new ducy.BotTable(["gto-plo5"], 200n, 1n, 2n, 1n, "plo5"), /gto-plo5/);
+const cards5 = fs.readFileSync(cards5Path);
+const blueprint5 = fs.readFileSync(blueprint5Path);
+// The four-card blueprint doesn't load with the five-card abstraction.
+assert.throws(() => ducy.loadGtoPlo(cards5, blueprint, bb), /doesn't match/);
+t = performance.now();
+ducy.loadGtoPlo(cards5, blueprint5, bb5);
+const load5Ms = performance.now() - t;
+assert.ok(ducy.gtoPlo5Loaded() && ducy.gtoPloLoaded() && !ducy.gtoPlo6Loaded());
+play("gto-plo5", "plo5", bb5, cards5, blueprint5, load5Ms);
+
 // PLO6: a six-card model loads alongside the four-card one, as "gto-plo6".
 const cards6Path = process.env.DUCY_PLO6_CARDS || path.join(modelDir, "plo6-cards.bin");
 const blueprint6Path =
@@ -97,5 +116,5 @@ assert.throws(() => ducy.loadGtoPlo(cards6, blueprint, bb), /doesn't match/);
 t = performance.now();
 ducy.loadGtoPlo(cards6, blueprint6, bb6);
 const load6Ms = performance.now() - t;
-assert.ok(ducy.gtoPlo6Loaded() && ducy.gtoPloLoaded());
+assert.ok(ducy.gtoPlo6Loaded() && ducy.gtoPlo5Loaded() && ducy.gtoPloLoaded());
 play("gto-plo6", "plo6", bb6, cards6, blueprint6, load6Ms);

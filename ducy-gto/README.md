@@ -963,6 +963,24 @@ retune):
 
 On average +72.7 against the 21 bots; it beats all of them.
 
+#### Heads-up PLO5 on nuts-first buckets (#291)
+
+Five hole cards on the nuts-first abstraction (`plo_abstraction
+--hole-cards 5 --nut-first --preflop 500 --flop 500 --turn 500 --river
+200`, version 4, 34.2 KB, built in 229 s) and the same lean 100 BB tree:
+about 959,000 information sets (2.4 MB), 200 million iterations at about
+6,000 a second on 12 cores. The button settled at fold / limp / raise 6 /
+34 / 60%; the big blind against an open at 38 / 44 / 18%. Published as
+`gto-plo5-nut-200m`. In the browser `loadGtoPlo` seats a five-card model
+as `gto-plo5` at a `plo5` table (`gtoPlo5Loaded()`), next to the four- and
+six-card ones.
+
+Against the bots, 40,000 hands each (bb/100 ± 95%): itself +2.8 ± 12.2,
+EquityBot +112.3 ± 16.1, calling station +176.5 ± 9.9, Doug Poker +21.6 ±
+11.9, Phil Bigmouth +11.3 ± 10.0, Danny Smallball +20.0 ± 8.5, The
+Mathematician +21.8 ± 12.9; it beats all 22 other bots, by +54.4 on
+average.
+
 ## Six-handed preflop against the field (#245)
 
 The six-handed preflop solve (`sixmax::solver`) looks for an equilibrium,
