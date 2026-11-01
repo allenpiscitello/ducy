@@ -318,8 +318,11 @@ pub struct Share {
 pub fn lessons_share(g: Option<&GameReview>) -> Share {
     Share {
         all: g.map_or(0.0, |g| g.totals.bb_lost),
+        // From 0, not an empty sum's -0.
         shown: g.map_or(0.0, |g| {
-            g.lessons.iter().map(|x| num(x.d.get("bb_lost"))).sum()
+            g.lessons
+                .iter()
+                .fold(0.0, |a, x| a + num(x.d.get("bb_lost")))
         }),
     }
 }
@@ -492,6 +495,10 @@ mod tests {
         );
         assert_eq!(g.totals.hands, 1);
         assert!(g.lessons.is_empty());
+        assert!(
+            lessons_share(Some(&g)).shown.is_sign_positive(),
+            "0, not -0"
+        );
         assert_eq!(
             lessons_share(Some(&g)),
             Share {
