@@ -1,7 +1,5 @@
-use ducy_play::{
-    Action, Command, Event, Outgoing, Personality, Refund, Table, TableHost, TableRules, TableSeat,
-    TableView, Update,
-};
+use ducy_host::{Command, Outgoing, Refund, TableHost, Update};
+use ducy_play::{Action, Event, Personality, Table, TableRules, TableSeat, TableView};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 fn bot_seat(p: Personality, seed: u64) -> TableSeat {
@@ -392,7 +390,7 @@ fn request(amount: u64) -> Command {
 }
 
 /// The chips view last sent to `client`.
-fn last_chips(out: &[Outgoing], client: &str) -> Option<ducy_play::ChipsView> {
+fn last_chips(out: &[Outgoing], client: &str) -> Option<ducy_host::ChipsView> {
     out.iter().rev().find_map(|o| match &o.update {
         Update::State { chips, .. } if o.to == client => chips.clone(),
         _ => None,
@@ -608,7 +606,7 @@ fn a_player_who_stays_away_sits_out_then_is_dropped() {
     h.approve_chips(2, 0);
     // Bo's connection drops: from the next hand Bo sits out.
     h.disconnected("b", 1);
-    for hand in 0..ducy_play::DROP_AFTER_HANDS {
+    for hand in 0..ducy_host::DROP_AFTER_HANDS {
         h.new_hand(2 + hand as u64).unwrap();
         assert_eq!(h.table().dealt(), &[0, 1], "hand {hand}");
         let v = h.host_view();
@@ -974,7 +972,7 @@ fn random_sitting_out_and_returning_conserves_chips() {
 }
 
 /// The `me` status last sent to `client`.
-fn last_me(out: &[Outgoing], client: &str) -> Option<ducy_play::SeatStatus> {
+fn last_me(out: &[Outgoing], client: &str) -> Option<ducy_host::SeatStatus> {
     out.iter().rev().find_map(|o| match &o.update {
         Update::State { me, .. } if o.to == client => me.clone(),
         _ => None,

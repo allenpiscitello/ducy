@@ -1,13 +1,14 @@
-//! A club table's runner (`ducy_play::runner`, ducy-web #452): events in
+//! A club table's runner (`ducy_host::runner`, ducy-web #452): events in
 //! with the time, steps out with the next time to wake it, against a real
 //! club table.
 
-use ducy_play::fair_deal::{Reveal, hand_seed};
-use ducy_play::runner::{
+use ducy_host::runner::{
     ASK_MS, Action, Event, FAIR_STEP_MS, IDLE_MS, PlayerCommand, RESUME_GRACE_MS, RunnerConfig,
     RunnerUpdate, Step, TableResult, TableRunner,
 };
-use ducy_play::{Command, Table, TableHost, TableRules, TableSeat};
+use ducy_host::{Command, TableHost};
+use ducy_play::fair_deal::{Reveal, hand_seed};
+use ducy_play::{Table, TableRules, TableSeat};
 
 /// A club table: four empty seats, blinds 1/2, buy-ins 40 to 200.
 fn runner(turn_ms: u64, config: RunnerConfig) -> TableRunner {

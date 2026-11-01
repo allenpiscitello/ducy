@@ -1,15 +1,14 @@
-//! A club tournament's runner (`ducy_play::tourney_runner`, ducy-web #458):
+//! A club tournament's runner (`ducy_host::tourney_runner`, ducy-web #458):
 //! events in with the time, steps out with the next time to wake it. The
 //! same cases as ducy-web's `test/tourney-runner.test.mjs`, against a real
 //! tournament.
 
-use ducy_play::tourney_runner::{
+use ducy_host::tourney_runner::{
     BOT_PACE_MS, StructureStep, TourneyAction, TourneyConfig, TourneyEvent, TourneyRunner,
     TourneyStep,
 };
-use ducy_play::{
-    BettingStructure, Command, Level, TournamentConfig, TournamentHost, Update, Variant,
-};
+use ducy_host::{Command, TournamentHost, Update};
+use ducy_play::{BettingStructure, Level, TournamentConfig, Variant};
 
 const MIN: u64 = 60_000;
 

@@ -2,12 +2,12 @@
 //! ducy-web's club-engine.js, with events and steps as plain JS objects.
 //! Bytes cross as lowercase hex.
 
-use ducy_play::fair_deal::{Bytes32, Reveal};
-use ducy_play::runner::{
+use ducy_host::runner::{
     ASK_MS, Action, Event, FairResult, IDLE_MS, NEXT_HAND_MS, PlayerCommand, RunnerConfig,
     RunnerUpdate, SeedPicker, Step, TableResult, TableRunner,
 };
-use ducy_play::{Command, HostSnapshot, TableHost};
+use ducy_host::{Command, HostSnapshot, TableHost};
+use ducy_play::fair_deal::{Bytes32, Reveal};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;

@@ -9,8 +9,9 @@ rounds, side pots and the showdown.
 - **History:** every post, action, board card and award is recorded as an `Event`
 - **Bots:** a `Bot` trait, simple built-in bots, 15 personality bots (Doug Poker, Phil Bigmouth, Rampart, Milk King, ...), a match runner with stack resets and duplicate deals, and `ProcessBot` for bots written in any language
 - **Tables:** `Table` keeps seats over many hands: the button moves, players sit out and come back posting missed blinds (or wait for the big blind), and bots play their seats
-- **Hosting:** `TableHost` runs a table for remote players, with commands in and per-player views out (no one sees another's cards before showdown), turn clocks, chip requests and sit-out limits, and snapshots to resume a hand after a restart
 - **Tournaments:** `Tournament` runs several tables with blind levels, eliminations, table balancing and hand-for-hand play
+- **Snapshots:** a table or tournament saved mid-hand and restored exactly
+- **Hosting** a table for remote players is [ducy-host](https://crates.io/crates/ducy-host)'s
 
 ## Install
 

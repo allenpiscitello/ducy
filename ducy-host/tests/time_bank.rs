@@ -3,9 +3,11 @@
 //! it to the clock; what's left when they act goes back in; each hand puts
 //! [`TIME_BANK_REFILL_MS`] back, up to full.
 
-use ducy_play::{
-    Command, HostSnapshot, Outgoing, SeatStatus, TIME_BANK_MS, TIME_BANK_REFILL_MS, Table,
-    TableHost, TableRules, TableSeat, Update,
+use ducy_play::{Table, TableRules, TableSeat};
+
+use ducy_host::{
+    Command, HostSnapshot, Outgoing, SeatStatus, TIME_BANK_MS, TIME_BANK_REFILL_MS, TableHost,
+    Update,
 };
 
 const TURN: u64 = 10_000;

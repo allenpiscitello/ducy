@@ -27,10 +27,9 @@
 //! - [`Table`]: seats over many hands: the button moves, people sit out and
 //!   come back (posting missed blinds or waiting for the big blind), and bots
 //!   play their seats ([`Table::advance`]).
-//! - [`TableHost`]: a table for remote players. It takes each player's
-//!   [`Command`]s and answers with [`Update`]s showing only what that player
-//!   may see. It also runs turn clocks, chip requests at a table with a bank,
-//!   and sit-out limits. It can be saved mid-hand and restored ([`snapshot`]).
+//! - Hosting a table for remote players (commands in, private views out,
+//!   turn clocks, chip requests) is the `ducy-host` crate's. A table or
+//!   tournament can be saved mid-hand and restored ([`snapshot`]).
 //! - [`Tournament`]: several tables with blind [`Level`]s, eliminations,
 //!   balancing and hand-for-hand play on the bubble.
 //! - Bots: the [`Bot`] trait, simple [`bots`], 15 [`Personality`] bots,
@@ -62,7 +61,6 @@ pub mod features;
 pub mod generic;
 mod hand;
 pub mod hands;
-mod host;
 mod matchup;
 pub mod net;
 pub mod net_data;
@@ -72,7 +70,6 @@ mod process;
 pub mod ranges;
 pub mod replay;
 mod rules;
-pub mod runner;
 mod showdown;
 pub mod snapshot;
 pub mod stats;
@@ -80,8 +77,6 @@ pub mod strength;
 pub mod structure;
 mod table;
 mod tournament;
-mod tournament_host;
-pub mod tourney_runner;
 pub mod traits;
 mod variants;
 
@@ -91,10 +86,6 @@ pub use error::PlayError;
 pub use hand::{
     Action, Awaiting, Event, Hand, HandResult, LegalActions, MAX_PLAYERS, Post, RaiseRange, Street,
 };
-pub use host::{
-    ChipRequest, ChipsView, Command, DROP_AFTER_HANDS, Departure, MAX_NAME, Outgoing, Refund,
-    SeatStatus, SeatedPlayer, TIME_BANK_MS, TIME_BANK_REFILL_MS, TableHost, Update,
-};
 pub use matchup::{MatchConfig, MatchResult, run_match};
 pub use personality::{Personality, PersonalityBot, Style, position_strength, scale_for_table};
 #[cfg(feature = "process")]
@@ -102,12 +93,11 @@ pub use process::ProcessBot;
 pub use rules::{BettingStructure, TableRules, Variant};
 pub use showdown::{Award, Pot};
 pub use snapshot::{
-    HandSnapshot, HostSnapshot, SNAPSHOT_VERSION, TOURNAMENT_SNAPSHOT_VERSION, TableSnapshot,
-    TournamentHostSnapshot, TournamentSnapshot,
+    HandSnapshot, SNAPSHOT_VERSION, SeatSnapshot, TOURNAMENT_SNAPSHOT_VERSION, TableSnapshot,
+    TournamentSnapshot,
 };
 pub use table::{BombPots, SeatState, Table, TableSeat, TableView};
 pub use tournament::{
     Entrant, Finish, HandReport, Level, Move, SeatRef, Standing, Tournament, TournamentConfig,
 };
-pub use tournament_host::{TournamentEvents, TournamentHost};
 pub use variants::{Comparison, VariantResult, run_variants};

@@ -6,11 +6,12 @@
 //! call says who was knocked out (with their places), who moved where, and
 //! when the level changed.
 
-use ducy_play::tourney_runner::{
+use ducy_host::tourney_runner::{
     BOT_PACE_MS, NEXT_HAND_MS, StructureStep, TableInfo, TourneyAction, TourneyConfig,
     TourneyEvent, TourneyResult, TourneyRunner,
 };
-use ducy_play::{Command, Level, Outgoing, TournamentConfig, TournamentHost, Update};
+use ducy_host::{Command, Outgoing, TournamentHost, Update};
+use ducy_play::{Level, TournamentConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
@@ -70,7 +71,7 @@ struct Message<'a> {
 struct Result_<'a> {
     seq: u64,
     out: Vec<Message<'a>>,
-    events: &'a ducy_play::TournamentEvents,
+    events: &'a ducy_host::TournamentEvents,
     standings: &'a [ducy_play::Standing],
     tables: &'a [TableInfo],
     level: usize,
@@ -169,7 +170,7 @@ impl ClubTournament {
     /// each turn with the time it had left. No one is connected; people are
     /// back when they join again. Fails for a snapshot of another version.
     pub fn restore(json: &str, now: f64) -> Result<ClubTournament, JsError> {
-        let s: ducy_play::TournamentHostSnapshot = serde_json::from_str(json).map_err(err)?;
+        let s: ducy_host::TournamentHostSnapshot = serde_json::from_str(json).map_err(err)?;
         let host = TournamentHost::restore(&s, now as u64, |_| None).map_err(err)?;
         Ok(ClubTournament { host })
     }
@@ -346,7 +347,7 @@ impl ClubTourney {
         now: f64,
     ) -> Result<ClubTourney, JsError> {
         let r: RunnerIn = serde_wasm_bindgen::from_value(runner).map_err(err)?;
-        let s: ducy_play::TournamentHostSnapshot = serde_json::from_str(json).map_err(err)?;
+        let s: ducy_host::TournamentHostSnapshot = serde_json::from_str(json).map_err(err)?;
         let host = TournamentHost::restore(&s, now as u64, |_| None).map_err(err)?;
         Ok(ClubTourney {
             runner: TourneyRunner::new(host, r.config(id)),

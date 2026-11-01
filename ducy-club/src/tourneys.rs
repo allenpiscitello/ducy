@@ -4,7 +4,7 @@
 //!
 //! Kept as ducy-web's JSON (`club.tourneys`, `club.payoutTables`), so a club
 //! saved before these rules loads as it is. The tables themselves run on
-//! [`ducy_play::tourney_runner`].
+//! ducy-host's `tourney_runner`.
 //!
 //! A tournament's club chips move through the money model, which the caller
 //! runs (`club_money`): these rules say what to move. A buy-in is taken

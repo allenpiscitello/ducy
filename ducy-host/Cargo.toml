@@ -1,0 +1,33 @@
+[package]
+name = "ducy-host"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+license = "MIT"
+description = "Host poker tables and tournaments for remote players: commands in, private views out, clocks, chip requests and snapshots, built on ducy-play."
+repository = "https://github.com/allenpiscitello/ducy"
+documentation = "https://docs.rs/ducy-host"
+readme = "README.md"
+categories = ["game-engines"]
+keywords = ["poker", "holdem", "omaha", "server"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+# Serialize commands, updates and snapshots.
+serde = ["dep:serde", "ducy-play/serde"]
+
+[dependencies]
+ducy = { version = "0.3.0", path = "..", default-features = false }
+ducy-play = { version = "0.2.0", path = "../ducy-play", default-features = false }
+serde = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+ducy-play = { version = "0.2.0", path = "../ducy-play" }
+rand = "0.10.2"
+serde_json = "1"
+
+[[test]]
+name = "snapshot"
+required-features = ["serde"]
