@@ -3,6 +3,9 @@
 //! has only what clubs need (ducy-web #463).
 
 mod book;
+// The ladder, the Regulars, reviews and bot chat (ducy-bot-games): the site's.
+#[cfg(feature = "site")]
+mod bot_games;
 mod club;
 mod fair;
 mod hands;

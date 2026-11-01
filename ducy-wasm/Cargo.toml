@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 # and ranges. The relay's build (ducy-web #463: clubs only) leaves them out:
 # --no-default-features.
 default = ["site"]
-site = ["dep:ducy-gto", "dep:ducy-training"]
+site = ["dep:ducy-gto", "dep:ducy-training", "dep:ducy-bot-games"]
 
 [dependencies]
 ducy = { version = "0.3.0", path = "..", default-features = false }
@@ -24,6 +24,7 @@ ducy-gto = { path = "../ducy-gto", default-features = false, features = ["serde"
 ducy-shuffle = { path = "../ducy-shuffle" }
 ducy-identity = { path = "../ducy-identity" }
 ducy-training = { path = "../ducy-training", optional = true }
+ducy-bot-games = { path = "../ducy-bot-games", optional = true }
 rand = "0.10.2"
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
