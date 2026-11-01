@@ -5,7 +5,7 @@
 use ducy_quest::lineup::{lineup_for, lineup_stacks, room_lineups, seated_hours};
 use ducy_quest::people::{person_of, roster, tourist};
 use ducy_quest::waitlist::{seat_gap, waiting_at};
-use ducy_quest::world::{cheapest_buy_in, lobby, room_by_id};
+use ducy_quest::world::{Limits, cheapest_buy_in, lobby};
 use serde_json::Value;
 
 fn fixture() -> Value {
@@ -159,7 +159,7 @@ fn the_lineups_and_stacks() {
             s(&st["table"]),
             &strings(&st["ids"]),
             blinds,
-            room_by_id(s(&st["room"])),
+            &Limits::of(s(&st["room"])),
             f(&st["minutes"]),
         );
         let want: Vec<(f64, f64)> = st["stacks"]

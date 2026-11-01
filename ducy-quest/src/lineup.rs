@@ -25,7 +25,7 @@ use crate::people::{
     Reg, name_of, parse_bot_id, person_of, roster, tourist, tourist_share, wildness,
 };
 use crate::roll;
-use crate::world::{Room, js_round, lobby, region_of, room_by_id, world};
+use crate::world::{Limits, js_round, lobby, region_of, room_by_id, world};
 
 /// Bot seats at a table: with you, 6-handed.
 pub const LINEUP_SEATS: usize = 5;
@@ -179,10 +179,10 @@ fn regulars_lineup(
 
 /// The buy-in range at `blinds` in a room, in chips: the room may set its
 /// own limits in big blinds.
-pub fn buy_in_range(blinds: [i64; 2], room: Option<&Room>) -> (f64, f64) {
+pub fn buy_in_range(blinds: [i64; 2], room: &Limits) -> (f64, f64) {
     let bb = blinds[1] as f64;
-    let min = room.and_then(|r| r.min_buy_in).unwrap_or(40.0);
-    let max = room.and_then(|r| r.max_buy_in).unwrap_or(200.0);
+    let min = room.min_buy_in.unwrap_or(40.0);
+    let max = room.max_buy_in.unwrap_or(200.0);
     (min * bb, max * bb)
 }
 
@@ -214,7 +214,7 @@ pub fn buy_in_for(
     table_id: &str,
     id: &str,
     blinds: [i64; 2],
-    room: Option<&Room>,
+    room: &Limits,
     minutes: f64,
 ) -> f64 {
     let (min, max) = buy_in_range(blinds, room);
@@ -285,7 +285,7 @@ pub fn lineup_stacks(
     table_id: &str,
     ids: &[String],
     blinds: [i64; 2],
-    room: Option<&Room>,
+    room: &Limits,
     minutes: f64,
 ) -> Vec<Stack> {
     let (_, max) = buy_in_range(blinds, room);

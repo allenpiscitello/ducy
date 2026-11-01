@@ -20,6 +20,9 @@ mod overview;
 #[cfg(feature = "site")]
 mod play;
 mod promos;
+// Bankroll Quest (ducy-quest): the site's.
+#[cfg(feature = "site")]
+mod quest;
 mod registry;
 mod room;
 mod rules;
