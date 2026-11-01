@@ -107,7 +107,7 @@ pub fn omaha_hand(cards: &str) -> Result<JsValue, JsError> {
 #[wasm_bindgen(js_name = omahaTagLabels)]
 pub fn omaha_tag_labels() -> Result<JsValue, JsError> {
     use serde::Serialize;
-    let labels: std::collections::BTreeMap<&str, &str> = ducy::games::omaha_analysis::TAG_LABELS
+    let labels: std::collections::BTreeMap<&str, &str> = ducy_training::omaha::OMAHA_TAG_LABELS
         .iter()
         .copied()
         .collect();

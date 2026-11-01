@@ -67,27 +67,6 @@ pub const FEATURE_NAMES: [&str; 43] = [
     "no_pair_no_suit",
 ];
 
-/// Each tag [`hand_tags`] can give, and a plural description that completes
-/// "you play too many ___".
-pub const TAG_LABELS: [(&str, &str); 13] = [
-    ("aa", "aces (AAxx)"),
-    ("big_pair", "kings or queens (KKxx, QQxx)"),
-    ("small_pair", "hands built around a small pair"),
-    ("double_paired", "double-paired hands"),
-    ("dead_cards", "hands with trips or quads (dead cards)"),
-    ("double_suited", "double-suited hands"),
-    ("rainbow", "rainbow hands with no flush draw"),
-    ("suited_ace", "hands with a suited ace"),
-    (
-        "weak_suited",
-        "weak suited hands (suited, but no ace or king in the suit)",
-    ),
-    ("rundown", "rundowns (four ranks in a row)"),
-    ("broadway", "broadway-heavy hands"),
-    ("low", "hands full of low cards"),
-    ("danglers", "hands with a dangling card"),
-];
-
 /// 2 to 14 (ace high).
 fn value(c: &Card) -> i32 {
     RankOrder::AceIsHigh.get_score(&c.rank()) as i32 + 2
@@ -351,8 +330,10 @@ pub fn hand_features(cards: &[Card]) -> Vec<f64> {
     ]
 }
 
-/// The recognisable kinds the hand is ([`TAG_LABELS`] ids), for spotting
-/// patterns in mistakes. A hand can have several.
+/// The recognisable kinds the hand is, for spotting patterns in mistakes:
+/// `aa`, `big_pair`, `small_pair`, `double_paired`, `dead_cards`,
+/// `double_suited`, `rainbow`, `suited_ace`, `weak_suited`, `rundown`,
+/// `broadway`, `low`, `danglers`. A hand can have several.
 pub fn hand_tags(cards: &[Card]) -> Vec<&'static str> {
     let k = Counts::of(cards);
     let rc = |r: usize| k.rank_count[r];
