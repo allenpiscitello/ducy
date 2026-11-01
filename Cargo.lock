@@ -348,6 +348,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ducy-club"
+version = "0.1.0"
+dependencies = [
+ "ducy-play",
+ "rand 0.10.3",
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "ducy-gto"
 version = "0.1.0"
 dependencies = [
@@ -382,7 +393,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "unicode-normalization",
 ]
 
 [[package]]
@@ -422,6 +432,7 @@ name = "ducy-wasm"
 version = "0.1.0"
 dependencies = [
  "ducy",
+ "ducy-club",
  "ducy-gto",
  "ducy-identity",
  "ducy-play",

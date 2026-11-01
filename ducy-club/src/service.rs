@@ -1,6 +1,6 @@
 //! A club's services (ducy-web #456): outside servers the owner of an
 //! always-on club lets give members chips, within limits. The rules
-//! ([`crate::club_rules`]) keep each service and check its requests; here a
+//! ([`crate::rules`]) keep each service and check its requests; here a
 //! checked request is carried out in one step (the chips moved through the
 //! book, the log, the budget and the once-only key), and the owner's
 //! changes are logged.
@@ -10,8 +10,8 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::club_host::ClubState;
-use crate::club_rules::{Prepared, Refused, RuleError, ServiceStatus, Status, chip_text};
+use crate::host::ClubState;
+use crate::rules::{Prepared, Refused, RuleError, ServiceStatus, Status, chip_text};
 
 /// What a service's request comes to.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -106,7 +106,7 @@ impl ClubState {
         now: u64,
     ) -> Result<ServiceAnswer, Refused> {
         // Checked already, but never carried out for a service revoked since.
-        let active = |s: &crate::club_rules::Service| s.status == ServiceStatus::Active;
+        let active = |s: &crate::rules::Service| s.status == ServiceStatus::Active;
         if !self.book.club.services.get(id).is_some_and(active) {
             return Err(Refused {
                 status: 401,

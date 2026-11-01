@@ -6,8 +6,8 @@
 //! returns `{ok: true, value, club}`, `club` being {tourneys, payoutTables}
 //! after an op that changes them, or `{ok: false, message}`.
 
-use ducy_play::club_rules::RuleError;
-use ducy_play::club_tourneys::{self, PayoutTable, Tourney, Tourneys};
+use ducy_club::rules::RuleError;
+use ducy_club::tourneys::{self as club_tourneys, PayoutTable, Tourney, Tourneys};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;

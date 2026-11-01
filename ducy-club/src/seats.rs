@@ -15,9 +15,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::club_book::Limits;
-use crate::club_host::ClubState;
-use crate::club_rules::{RuleError, Table, refuse};
+use crate::book::Limits;
+use crate::host::ClubState;
+use crate::rules::{RuleError, Table, refuse};
 
 /// What the club keeps on a running table between the runner's results.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -439,7 +439,7 @@ impl ClubState {
             .map_or(String::new(), |t| t.name.clone());
         if let Some(b) = by {
             // A group's move up is no one's to log.
-            if b != crate::club_groups::GROUP_BY {
+            if b != crate::groups::GROUP_BY {
                 let who = if self.manager(b) {
                     "The manager".to_string()
                 } else {

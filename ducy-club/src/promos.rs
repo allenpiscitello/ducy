@@ -29,7 +29,7 @@ use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::club_rules::{GAMES, Member, RuleError, chip_text, game, random36, refuse};
+use crate::rules::{GAMES, Member, RuleError, chip_text, game, random36, refuse};
 
 /// Hand categories, weakest first.
 pub const CATEGORIES: [&str; 10] = [
@@ -1512,7 +1512,7 @@ impl Promos {
         if !self
             .members
             .get(&a.member)
-            .is_some_and(|m| m.status == crate::club_rules::Status::Member)
+            .is_some_and(|m| m.status == crate::rules::Status::Member)
         {
             return refuse(format!("{} isn’t a member any more.", a.name));
         }

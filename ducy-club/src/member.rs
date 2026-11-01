@@ -12,7 +12,7 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::club_rules::{
+use crate::rules::{
     LOBBY_KEEP, MAX_EVENT_TEXT, MAX_EVENTS, MAX_INFO_TEXT, MAX_PLAYER_NAME, chat_name, clean_chat,
     cut, info_text,
 };

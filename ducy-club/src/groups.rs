@@ -28,7 +28,7 @@ use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::club_rules::{Club, HOLD_MS, RuleError, Status, Table, TableStatus, random36, refuse};
+use crate::rules::{Club, HOLD_MS, RuleError, Status, Table, TableStatus, random36, refuse};
 
 /// The most tables a game opens by itself.
 pub const MAX_GROUP_TABLES: usize = 4;

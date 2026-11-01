@@ -3,7 +3,7 @@
 //! Every move is one `run` call with an op ({op, …}); every call that can
 //! depend on the time takes it in milliseconds (e.g. `Date.now()`).
 
-use ducy_play::club_money::{Entry, EntryKind, Money, MoneyError, Terms};
+use ducy_club::money::{Entry, EntryKind, Money, MoneyError, Terms};
 use serde::Deserialize;
 use serde_json::json;
 use wasm_bindgen::prelude::*;

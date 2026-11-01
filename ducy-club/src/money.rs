@@ -43,9 +43,8 @@ const DAY_MS: i64 = 86_400_000;
 const MAX_DEPTH: usize = 64;
 
 /// When a backer expects a link below zero to be paid back.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "camelCase"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Terms {
     /// Within this long of going below zero.
     Within {
@@ -60,9 +59,8 @@ pub enum Terms {
 }
 
 /// A member and their backer.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Link {
     /// The member.
     pub member: String,
@@ -102,9 +100,8 @@ impl Link {
 }
 
 /// An agent run by several people.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Agency {
     /// The people who run it, each with their own link to it.
     pub people: Vec<String>,
@@ -113,9 +110,8 @@ pub struct Agency {
 }
 
 /// A member's or agent's settings.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Account {
     /// The backer they play through.
     pub through: Option<String>,
@@ -126,9 +122,8 @@ pub struct Account {
 }
 
 /// A seated player's chips at a table.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Session {
     /// The table.
     pub about: String,
@@ -141,9 +136,8 @@ pub struct Session {
 }
 
 /// What an entry was.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EntryKind {
     /// A backer gave chips.
     Give,
@@ -180,9 +174,8 @@ impl EntryKind {
 }
 
 /// One change to one link.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Entry {
     /// Its number, from 1.
     pub n: u64,
@@ -207,9 +200,8 @@ pub struct Entry {
 }
 
 /// Why a move was refused. As JSON, `{code, …}`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-#[cfg_attr(feature = "serde", serde(tag = "code", rename_all = "camelCase"))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "code", rename_all = "camelCase")]
 pub enum MoneyError {
     /// Not a whole number of chips from 1 to [`MAX_CHIPS`].
     Amount,
@@ -304,9 +296,8 @@ impl fmt::Display for MoneyError {
 impl std::error::Error for MoneyError {}
 
 /// A club's links, sessions and ledger.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Money {
     /// The club's offset from UTC, in minutes, for settle days.
     pub utc_offset_min: i32,

@@ -8,8 +8,8 @@
 //! tablesChanged, armHolds, value}). Or `{ok: false, message}`, with nothing
 //! changed.
 
-use ducy_play::club_host::ClubState;
-use ducy_play::club_seats::Seating;
+use ducy_club::host::ClubState;
+use ducy_club::seats::Seating;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 

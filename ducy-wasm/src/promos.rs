@@ -7,8 +7,8 @@
 //! `{ok: false, message}`. A few ops read only what they're given (`score5`,
 //! `bestWithTwo`, `handName`, `periodOf`, `shownHands`, `rules`); pass "{}".
 
-use ducy_play::club_promos::{self, Promo, Promos, Score};
-use ducy_play::club_rules::RuleError;
+use ducy_club::promos::{self as club_promos, Promo, Promos, Score};
+use ducy_club::rules::RuleError;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;

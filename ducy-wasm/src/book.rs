@@ -7,9 +7,9 @@
 //! true, value, club}`, `club` being {members, money, chips, requestLog,
 //! log} after the op, or `{ok: false, message}` with nothing changed.
 
-use ducy_play::club_book::{self, Book, Limits, TableRefusal};
-use ducy_play::club_money::Entry;
-use ducy_play::club_rules::RuleError;
+use ducy_club::book::{self as club_book, Book, Limits, TableRefusal};
+use ducy_club::money::Entry;
+use ducy_club::rules::RuleError;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;

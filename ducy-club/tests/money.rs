@@ -2,7 +2,7 @@
 //! under the club with 5,000 credit, Marco under Priya with 2,000, Ann under
 //! Marco with 500, and Ben the club's own with 1,000 chips and no credit.
 
-use ducy_play::club_money::{CLUB, EntryKind, FULL_SHARE, Money, MoneyError, Terms};
+use ducy_club::money::{CLUB, EntryKind, FULL_SHARE, Money, MoneyError, Terms};
 
 const DAY: u64 = 86_400_000;
 
@@ -477,7 +477,6 @@ fn a_club_moves_to_links_with_its_balances_and_seats() {
     assert!(m.audit().is_empty());
 }
 
-#[cfg(feature = "serde")]
 #[test]
 fn saves_and_restores() {
     let mut m = example();

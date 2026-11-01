@@ -13,8 +13,8 @@ use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value, json};
 
-use crate::club_money::{CLUB, Entry, EntryKind, Money, MoneyError};
-use crate::club_rules::{Club, RuleError, Status, chip_text, new_invite, refuse};
+use crate::money::{CLUB, Entry, EntryKind, Money, MoneyError};
+use crate::rules::{Club, RuleError, Status, chip_text, new_invite, refuse};
 
 /// The most chips in one move.
 pub const MAX_CHIPS: u64 = 1_000_000_000_000;
@@ -76,7 +76,7 @@ pub struct AgentDone {
     pub approved: Option<String>,
 }
 
-fn money_err(e: crate::club_money::MoneyError) -> RuleError {
+fn money_err(e: crate::money::MoneyError) -> RuleError {
     RuleError(e.to_string())
 }
 
@@ -1613,7 +1613,7 @@ mod tests {
         let mut b = book(&["al"]);
         b.offer_agent("al").unwrap();
         b.answer_agent("al", true, 1, &mut rng());
-        let p: crate::club_rules::Member = serde_json::from_value(
+        let p: crate::rules::Member = serde_json::from_value(
             json!({"id": "cy", "name": "Cy", "status": "pending", "agentOf": "al"}),
         )
         .unwrap();

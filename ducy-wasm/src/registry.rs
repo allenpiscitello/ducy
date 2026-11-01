@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use ducy_play::club_registry::{
+use ducy_club::registry::{
     FREE_LIMITS, PlanLimits, Registry, RelayLimits, admin_seen, clean_limits, day_of, usage_day,
 };
 use serde::Deserialize;

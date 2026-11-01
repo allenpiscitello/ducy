@@ -2,7 +2,7 @@
 //! tournament started from "Start a game" rather than a club's, played for
 //! points, and a cash game's ledger, with their standings and who owes whom.
 //!
-//! The tournament itself is a club tournament ([`crate::club_tourneys`]) in a
+//! The tournament itself is a club tournament ([`crate::tourneys`]) in a
 //! stand-in club that lives only in the host's tab. These are the parts of
 //! its own: names, the buy-in and prizes in points (`t.points = {buyIn,
 //! prizes}`), what players see, the results and standings. Points are only
@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::club_rules::{Member, RuleError, refuse};
-use crate::club_tourneys::{MAX_ENTRIES, Tourney, TourneyStatus};
+use crate::rules::{Member, RuleError, refuse};
+use crate::tourneys::{MAX_ENTRIES, Tourney, TourneyStatus};
 
 /// The most points in a buy-in or a prize.
 pub const MAX_POINTS: u64 = 1_000_000_000;
@@ -420,7 +420,7 @@ impl Ledger {
 
 /// The stand-in club's side of a one-off tournament (#456): making it,
 /// players registering and leaving before the start, and the host's prizes.
-impl crate::club_host::ClubState {
+impl crate::host::ClubState {
     fn the_tourney(&mut self) -> Result<&mut Tourney, RuleError> {
         match self.tourneys.first_mut() {
             Some(t) => Ok(t),
@@ -720,8 +720,8 @@ mod tests {
         }))
         .unwrap();
         if let Some(p) = places {
-            t.payout = Some(crate::club_tourneys::Payout {
-                rows: Some(vec![crate::club_tourneys::PayoutRow { from: 1, places: p }]),
+            t.payout = Some(crate::tourneys::Payout {
+                rows: Some(vec![crate::tourneys::PayoutRow { from: 1, places: p }]),
                 places: None,
             });
         }
@@ -787,7 +787,7 @@ mod tests {
         for (i, e) in t.entries.iter_mut().enumerate() {
             e.place = Some(i as u64 + 1);
         }
-        t.status = crate::club_tourneys::TourneyStatus::Finished;
+        t.status = crate::tourneys::TourneyStatus::Finished;
         let b = lobby_body("C", &members, &t, None);
         let r: Vec<(String, i64)> = results(&b)
             .iter()
@@ -836,7 +836,7 @@ mod tests {
     }
 
     // The stand-in club, with the host as its first member.
-    fn stand_in() -> crate::club_host::ClubState {
+    fn stand_in() -> crate::host::ClubState {
         serde_json::from_value(json!({
             "code": "ABCD-EFGH", "hostId": HOST_ID, "name": "Private game",
             "members": {HOST_ID: {"id": HOST_ID, "name": "Ann", "status": "member", "balance": 0}},

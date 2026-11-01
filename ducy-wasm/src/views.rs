@@ -6,8 +6,8 @@
 //!   `leftSummary(entriesJson, n)`: over entries as JSON, the club's ledger
 //!   or a member's own copy.
 
-use ducy_play::club_host::ClubState;
-use ducy_play::club_views::{chip_lines, left_summary, table_sessions};
+use ducy_club::host::ClubState;
+use ducy_club::views::{chip_lines, left_summary, table_sessions};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 

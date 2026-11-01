@@ -20,9 +20,6 @@ default = ["process"]
 serde = ["dep:serde", "ducy/serde"]
 # Run bots as separate programs that talk JSON over stdin/stdout.
 process = ["serde", "dep:serde_json"]
-# A club's own rules: members, names, help, the lobby, the info and tables
-# (club_rules, kept as ducy-web's JSON).
-club = ["serde", "dep:serde_json", "dep:unicode-normalization"]
 
 [dependencies]
 ducy = { version = "0.3.0", path = "..", default-features = false }
@@ -30,7 +27,6 @@ rand = "0.10.2"
 sha2 = "0.10"
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
-unicode-normalization = { version = "0.1", optional = true }
 
 [dev-dependencies]
 serde_json = "1"
