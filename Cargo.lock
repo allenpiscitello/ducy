@@ -416,6 +416,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ducy-quest"
+version = "0.1.0"
+dependencies = [
+ "ducy-bot-games",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ducy-shuffle"
 version = "0.1.0"
 dependencies = [
