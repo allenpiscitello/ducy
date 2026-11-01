@@ -34,35 +34,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack
-      - run: cd ducy-wasm && wasm-pack build --target web
-      # The relay's build: clubs only, no bot tables or GTO (ducy-web #463).
-      - run: cd ducy-wasm && wasm-pack build --target web --out-dir pkg-clubs --no-default-features
       - run: cd ducy-play-wasm && wasm-pack build --target web
       - uses: actions/setup-node@v7
         with:
           node-version: 20
       - run: cd ducy-play-wasm && wasm-pack build --target nodejs --out-dir pkg-node
       - run: node ducy-play-wasm/tests/smoke.cjs
-      - run: cd ducy-wasm && wasm-pack build --target nodejs --out-dir pkg-node
-      - run: node ducy-wasm/tests/friends.cjs
-      - run: node ducy-wasm/tests/stats.cjs
-      - run: node ducy-wasm/tests/structure.cjs
-      - run: node ducy-wasm/tests/ranges.cjs
-      - run: node ducy-wasm/tests/omaha-hand.cjs
-      - run: node ducy-wasm/tests/fair.cjs
-      - run: node ducy-wasm/tests/shuffle.cjs
-      - run: node ducy-wasm/tests/hidden.cjs
-      - run: node ducy-wasm/tests/tournament.cjs
-      - run: node ducy-wasm/tests/money.cjs
-      - run: node ducy-wasm/tests/run-twice.cjs
-      - run: node ducy-wasm/tests/bomb-pot.cjs
-      - run: node ducy-wasm/tests/replay.cjs
-      - run: node ducy-wasm/tests/partial-board.cjs
-      - run: node ducy-wasm/tests/seats.cjs
-      - run: node ducy-wasm/tests/seat-bot.cjs
-      - run: node ducy-wasm/tests/net.cjs
-      - run: cargo run -p ducy-gto --example tiny_model -- target/tiny-model
-      - run: node ducy-wasm/tests/review.cjs
-      - run: node ducy-wasm/tests/gto-plo.cjs
-      - run: node ducy-wasm/tests/gto-depths.cjs
-      - run: node ducy-wasm/tests/gto6.cjs
+      # ducy.cards' crates and their wasm tests live in DUCY-CARDS/ducy-web (rust/).
