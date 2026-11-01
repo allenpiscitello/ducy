@@ -9,6 +9,7 @@
 pub mod chart;
 pub mod holdem;
 pub mod holdem_rank;
+pub mod omaha;
 pub mod practice;
 pub mod skills;
 

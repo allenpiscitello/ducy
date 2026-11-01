@@ -165,7 +165,7 @@ pub fn tag_labels(n: usize) -> Vec<(&'static str, &'static str)> {
     if n == 2 {
         HOLDEM_TAG_LABELS.to_vec()
     } else {
-        let mut l = oa::TAG_LABELS.to_vec();
+        let mut l = crate::omaha::OMAHA_TAG_LABELS.to_vec();
         l.sort_by_key(|(t, _)| *t);
         l
     }
