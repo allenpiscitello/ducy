@@ -1,9 +1,8 @@
 //! Saving a table and loading it again: hands resume exactly where they were.
 
-use ducy_play::{
-    Action, Command, Deal, Hand, HostSnapshot, Outgoing, PlayError, Table, TableHost, TableRules,
-    TableSeat, Update,
-};
+use ducy_play::{Action, Deal, Hand, PlayError, Table, TableRules, TableSeat};
+
+use ducy_host::{Command, HostSnapshot, Outgoing, TableHost, Update};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 /// Through JSON and back, as the browser stores it.

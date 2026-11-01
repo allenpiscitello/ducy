@@ -8,7 +8,7 @@
 //!
 //! Seat 0 is the host's own seat. Seats marked *open* are for people: an
 //! open seat with a bot is played by the bot until someone joins, and an
-//! empty one ([`crate::TableSeat::empty`]) isn't dealt in. A person takes the
+//! empty one ([`ducy_play::TableSeat::empty`]) isn't dealt in. A person takes the
 //! seat at the start of the next hand, and gives it back (to its bot, or
 //! empty) when they leave or the host removes them. A person who's away or
 //! disconnected sits out, and one who stays disconnected for
@@ -23,10 +23,9 @@
 
 use ducy::deck::{Card, Deck};
 
-use crate::{
-    Action, Awaiting, Bot, PlayError, Table, TableRules, TableView,
-    snapshot::{HostSnapshot, PlayerSnapshot, SNAPSHOT_VERSION},
-};
+use ducy_play::{Action, Awaiting, Bot, PlayError, Table, TableRules, TableView};
+
+use crate::snapshot::{HostSnapshot, PlayerSnapshot, SNAPSHOT_VERSION};
 
 /// Where the next hand's cards come from.
 #[derive(Clone, Copy)]
@@ -518,7 +517,7 @@ impl TableHost {
     /// A bomb pot every few hands, or none (see [`Table::set_bomb_pots`]).
     pub fn set_bomb_pots(
         &mut self,
-        bomb_pots: Option<crate::BombPots>,
+        bomb_pots: Option<ducy_play::BombPots>,
         now: u64,
     ) -> Result<Vec<Outgoing>, PlayError> {
         self.table.set_bomb_pots(bomb_pots)?;
@@ -673,7 +672,7 @@ impl TableHost {
         if s.version != SNAPSHOT_VERSION {
             return Err(bad);
         }
-        let n = s.table.seats.len();
+        let n = s.table.seat_count();
         if s.open.len() != n || s.bot_ids.len() != n || s.players.iter().any(|p| p.seat >= n) {
             return Err(bad);
         }
@@ -1071,9 +1070,9 @@ impl TableHost {
     }
 
     /// Like [`TableHost::new_hand`], dealt from a provably fair seed the
-    /// players and the host agreed ([`crate::fair_deal`]): the hole cards go
+    /// players and the host agreed ([`ducy_play::fair_deal`]): the hole cards go
     /// to the dealt seats in seat order, so anyone with the seed can check
-    /// every card ([`crate::Deal::from_seed`]).
+    /// every card ([`ducy_play::Deal::from_seed`]).
     pub fn new_hand_from_seed(
         &mut self,
         now: u64,

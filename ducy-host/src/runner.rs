@@ -11,11 +11,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::fair_deal::{Bytes32, Reveal, hand_seed};
-use crate::{
-    ChipRequest, Command, Departure, Outgoing, PlayError, Refund, SeatedPlayer, TableHost,
-    TableView, Update,
-};
+use ducy_play::fair_deal::{Bytes32, Reveal, hand_seed};
+use ducy_play::{PlayError, TableView};
+
+use crate::{ChipRequest, Command, Departure, Outgoing, Refund, SeatedPlayer, TableHost, Update};
 
 /// The next hand is dealt this long after the last one ends.
 pub const NEXT_HAND_MS: u64 = 3000;

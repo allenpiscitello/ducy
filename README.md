@@ -18,7 +18,8 @@ A performant analysis library for poker, supporting Texas Hold'em and Omaha.
 Generic poker, for anyone:
 
 - `ducy` (this crate): cards, hand ranking, equity and ranges.
-- `ducy-play`: hands, tables, table hosts and runners, tournaments, fair deals, and bots.
+- `ducy-play`: hands, tables, tournaments, fair deals, and bots.
+- `ducy-host`: hosting tables and tournaments for remote players: commands in, private views out, clocks, chip requests, runners and snapshots.
 - `ducy-shuffle`: a shuffle no one party controls.
 - `ducy-gto`: solving and GTO bots.
 - `ducy-play-wasm`: `ducy-play` for JavaScript.

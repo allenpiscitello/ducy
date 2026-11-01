@@ -11,9 +11,9 @@
 
 use std::collections::HashMap;
 
-use crate::{
-    Command, Outgoing, PlayError, Standing, TableView, TournamentEvents, TournamentHost, Update,
-};
+use ducy_play::{PlayError, Standing, TableView};
+
+use crate::{Command, Outgoing, TournamentEvents, TournamentHost, Update};
 
 /// Absent players' moves come after this long.
 pub const BOT_PACE_MS: u64 = 700;

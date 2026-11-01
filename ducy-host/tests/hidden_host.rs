@@ -4,7 +4,8 @@
 //! restored mid-hand.
 
 use ducy::deck::{Card, Deck};
-use ducy_play::{Awaiting, Command, Event, HostSnapshot, Table, TableHost, TableRules, TableSeat};
+use ducy_host::{Command, HostSnapshot, TableHost};
+use ducy_play::{Awaiting, Event, Table, TableRules, TableSeat};
 
 fn card(s: &str) -> Card {
     Card::parse(s).unwrap()

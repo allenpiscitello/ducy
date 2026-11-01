@@ -2,7 +2,9 @@
 //! game's rules, and a club table's host. Kept apart from the bot tables
 //! (`play`), so the relay's build can leave those out (ducy-web #463).
 
-use ducy_play::{Table, TableHost, TableRules, TableSeat, Variant};
+use ducy_play::{Table, TableRules, TableSeat, Variant};
+
+use ducy_host::TableHost;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 

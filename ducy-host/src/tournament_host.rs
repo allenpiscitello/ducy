@@ -21,9 +21,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use ducy_play::{
+    Entrant, Finish, Move, PlayError, Standing, TableView, Tournament, TournamentConfig,
+};
+
 use crate::{
-    Command, Entrant, Finish, Move, Outgoing, PlayError, Standing, TableView, Tournament,
-    TournamentConfig, TournamentHostSnapshot, Update, host::parse_action,
+    Command, Outgoing, TournamentHostSnapshot, Update, host::parse_action,
     snapshot::TOURNAMENT_SNAPSHOT_VERSION,
 };
 
@@ -131,7 +134,7 @@ impl TournamentHost {
     pub fn restore(
         s: &TournamentHostSnapshot,
         now: u64,
-        bot: impl FnMut(&str) -> Option<Box<dyn crate::Bot>>,
+        bot: impl FnMut(&str) -> Option<Box<dyn ducy_play::Bot>>,
     ) -> Result<Self, PlayError> {
         if s.version != TOURNAMENT_SNAPSHOT_VERSION {
             return Err(PlayError::InvalidSnapshot);

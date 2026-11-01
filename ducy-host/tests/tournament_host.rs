@@ -3,9 +3,9 @@
 //! no view ever has another player's unshown cards, a moved player gets
 //! their new table at once, and a player who never shows up is blinded off.
 
-use ducy_play::{
-    BettingStructure, Command, Level, Outgoing, TournamentConfig, TournamentHost, Update, Variant,
-};
+use ducy_play::{BettingStructure, Level, TournamentConfig, Variant};
+
+use ducy_host::{Command, Outgoing, TournamentHost, Update};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 fn config(seed: u64) -> TournamentConfig {

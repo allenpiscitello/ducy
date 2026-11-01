@@ -11,12 +11,13 @@
 //! the page passes it each player's messages and sends back what it returns.
 
 use ducy_play::{
-    Action, ChipRequest, Command, Departure, Outgoing, Personality, Refund, SeatedPlayer, Table,
-    TableHost, TableRules, TableSeat,
+    Action, Personality, Table, TableRules, TableSeat,
     features::NUM_FEATURES,
     generic,
     net::{Mlp, NUM_CLASSES, NetBot},
 };
+
+use ducy_host::{ChipRequest, Command, Departure, Outgoing, Refund, SeatedPlayer, TableHost};
 use std::{
     cell::{Cell, RefCell},
     sync::Arc,
@@ -1087,7 +1088,7 @@ impl BotTable {
 #[derive(Serialize)]
 struct Message<'a> {
     to: &'a str,
-    data: &'a ducy_play::Update,
+    data: &'a ducy_host::Update,
 }
 
 /// What a host call returns: the host's own view, whether a bot or away
@@ -1190,7 +1191,7 @@ impl MultiTable {
             return Err(JsError::new("one open flag per bot"));
         }
         let mut seats = seats_for(&bots, seed)?;
-        let name: String = host_name.trim().chars().take(ducy_play::MAX_NAME).collect();
+        let name: String = host_name.trim().chars().take(ducy_host::MAX_NAME).collect();
         if !name.is_empty() {
             seats[0].name = name;
         }
@@ -1236,7 +1237,7 @@ impl MultiTable {
                 "the host's chips must be within the buy-in limits",
             ));
         }
-        let name: String = host_name.trim().chars().take(ducy_play::MAX_NAME).collect();
+        let name: String = host_name.trim().chars().take(ducy_host::MAX_NAME).collect();
         let mut all = vec![TableSeat::human(
             if name.is_empty() { "Host" } else { &name },
             "you",
@@ -1345,7 +1346,7 @@ impl MultiTable {
             Ok(c) => self.host.handle(client, c, now),
             Err(_) => vec![Outgoing {
                 to: client.to_string(),
-                update: ducy_play::Update::Rejected {
+                update: ducy_host::Update::Rejected {
                     reason: "bad message".to_string(),
                 },
             }],
@@ -1549,7 +1550,7 @@ impl MultiTable {
     /// joining again, and aren't folded for meanwhile. Fails for a snapshot
     /// from another version, or one that doesn't play out to what was saved.
     pub fn restore(json: &str, now: f64) -> Result<MultiTable, JsError> {
-        let s: ducy_play::HostSnapshot = serde_json::from_str(json).map_err(err)?;
+        let s: ducy_host::HostSnapshot = serde_json::from_str(json).map_err(err)?;
         let mut n = 0;
         let host = TableHost::restore(&s, now as u64, |id| {
             n += 1;

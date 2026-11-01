@@ -4,10 +4,9 @@
 //! timeouts and absences kept. 12 players play to a winner through restarts
 //! every few steps.
 
-use ducy_play::{
-    BettingStructure, Command, Level, Outgoing, TournamentConfig, TournamentHost,
-    TournamentHostSnapshot, Update, Variant,
-};
+use ducy_play::{BettingStructure, Level, TournamentConfig, Variant};
+
+use ducy_host::{Command, Outgoing, TournamentHost, TournamentHostSnapshot, Update};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 fn config(seed: u64) -> TournamentConfig {

@@ -4,9 +4,9 @@
 //! go along with them.
 
 use ducy::deck::{Card, Deck};
+use ducy_host::{Command, Outgoing, TableHost, Update};
 use ducy_play::{
-    Action, Awaiting, Command, Deal, Event, Hand, HandSnapshot, Outgoing, Table, TableHost,
-    TableRules, TableSeat, Update, Variant,
+    Action, Awaiting, Deal, Event, Hand, HandSnapshot, Table, TableRules, TableSeat, Variant,
 };
 
 fn card(s: &str) -> Card {
