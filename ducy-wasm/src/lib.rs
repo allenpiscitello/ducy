@@ -31,6 +31,9 @@ mod study;
 mod tournament;
 mod tourney_host;
 mod tourneys;
+// The study tools' rules (ducy-training): the site's.
+#[cfg(feature = "site")]
+mod training;
 mod util;
 mod views;
 #[cfg(feature = "site")]
