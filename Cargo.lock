@@ -348,6 +348,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ducy-bot-games"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ducy-club"
 version = "0.1.0"
 dependencies = [
@@ -432,6 +440,7 @@ name = "ducy-wasm"
 version = "0.1.0"
 dependencies = [
  "ducy",
+ "ducy-bot-games",
  "ducy-club",
  "ducy-gto",
  "ducy-identity",
