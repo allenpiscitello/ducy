@@ -1,13 +1,15 @@
 //! ducy.cards' study tools (ducy-web #464): practising Ducybot's pre-flop
-//! charts ([`chart`]) and top-% ranges ([`skills`]), with their scoring,
-//! mastery and pacing. The pages draw; this decides. Random draws come in
-//! from the caller (numbers in `0..1`), so the same draws give the same
-//! hands.
+//! charts ([`chart`]) and top-% ranges ([`skills`], [`practice`]), with
+//! their scoring, mastery and pacing. The pages draw; this decides. Random
+//! draws come in from the caller (numbers in `0..1`, or a seed for the
+//! practice's dice), so the same draws give the same hands.
 
 #![warn(missing_docs)]
 
 pub mod chart;
 pub mod holdem;
+pub mod holdem_rank;
+pub mod practice;
 pub mod skills;
 
 /// A number as JavaScript writes it (`String(x)`): "2.5", "3", "0.1".

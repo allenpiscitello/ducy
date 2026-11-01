@@ -2,11 +2,14 @@
 //! Ducybot's charts and the range trainer's skills.
 //!
 //! `training(op)` takes an op (`{op, …}`) and returns its value. Random
-//! draws come in from the page (`r`, numbers in `0..1`).
+//! draws come in from the page (`r`, numbers in `0..1`, or `seed` for the
+//! range trainer's dice).
 
 use std::collections::BTreeMap;
 
 use ducy_training::chart::{self, SceneSizes, Spot};
+use ducy_training::holdem_rank::HOLDEM_PERCENTILE;
+use ducy_training::practice::{self, Dice, Practice};
 use ducy_training::skills::{self, Record};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -133,6 +136,49 @@ enum Op {
         cards: u32,
         pct: u32,
     },
+    // ---- The range trainer's practice (`seed`: the dice for one deal) ----
+    PracticeRules,
+    HandKind {
+        cards: Vec<String>,
+    },
+    TopPercentile {
+        cards: Vec<String>,
+    },
+    TopTags {
+        cards: Vec<String>,
+    },
+    DealTop {
+        cards: usize,
+        seed: u64,
+        #[serde(default)]
+        prev: Option<Vec<String>>,
+    },
+    PracticeNext {
+        pr: Practice,
+        seed: u64,
+    },
+    PracticeAnswer {
+        pr: Practice,
+        yes: bool,
+    },
+    Diagnosis {
+        pr: Practice,
+    },
+    DrillTags {
+        cards: usize,
+        pct: f64,
+        seed: u64,
+    },
+    WeakestKinds {
+        #[serde(default)]
+        rec: Option<Value>,
+        tags: Vec<String>,
+    },
+    TopExamples {
+        cards: usize,
+        pct: f64,
+        seed: u64,
+    },
 }
 
 fn full_band() -> [f64; 2] {
@@ -220,6 +266,46 @@ pub fn training(op: JsValue) -> Result<JsValue, JsError> {
                 cards,
                 pct
             ))
+        }
+        Op::PracticeRules => {
+            let pairs = |l: &[(&str, &str)]| {
+                l.iter()
+                    .map(|(k, v)| (k.to_string(), json!(v)))
+                    .collect::<serde_json::Map<_, _>>()
+            };
+            json!({
+                "levels": practice::LEVELS, "closeCall": practice::CLOSE_CALL, "mastery": skills::MASTERY,
+                "holdemPercentile": HOLDEM_PERCENTILE.iter().map(|(c, p)| (c.to_string(), json!(p))).collect::<serde_json::Map<_, _>>(),
+                "holdemLabels": pairs(&ducy_training::holdem::HOLDEM_TAG_LABELS),
+            })
+        }
+        Op::HandKind { cards } => json!(practice::hand_kind(&cards)),
+        Op::TopPercentile { cards } => json!(practice::top_percentile(&cards)),
+        Op::TopTags { cards } => json!(practice::top_tags(&cards)),
+        Op::DealTop { cards, seed, prev } => {
+            let mut d = Dice::new(seed);
+            let h = practice::deal_not_again(
+                || practice::Dealt {
+                    cards: practice::deal_top(cards, &mut d),
+                    ..Default::default()
+                },
+                prev.as_deref(),
+            );
+            json!(h.cards)
+        }
+        Op::PracticeNext { pr, seed } => json!(practice::practice_next(&pr, &mut Dice::new(seed))),
+        Op::PracticeAnswer { pr, yes } => json!(practice::practice_answer(&pr, yes)),
+        Op::Diagnosis { pr } => json!(practice::diagnose(&pr).map(|d| {
+            let text = practice::diagnosis_text(&d, pr.cards, pr.pct);
+            json!({"kind": d.kind, "d": d, "text": text})
+        })),
+        Op::DrillTags { cards, pct, seed } => {
+            json!(practice::drill_tags(cards, pct, &mut Dice::new(seed)))
+        }
+        Op::WeakestKinds { rec, tags } => json!(practice::weakest_kinds(rec.as_ref(), &tags)),
+        Op::TopExamples { cards, pct, seed } => {
+            let (inside, outside) = practice::top_examples(cards, pct, &mut Dice::new(seed));
+            json!({"inside": inside, "outside": outside})
         }
     };
     to_js(&v)

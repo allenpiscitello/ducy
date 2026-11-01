@@ -439,6 +439,7 @@ dependencies = [
 name = "ducy-training"
 version = "0.1.0"
 dependencies = [
+ "ducy",
  "ryu-js",
  "serde",
  "serde_json",
