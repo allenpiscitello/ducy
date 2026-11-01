@@ -15,6 +15,7 @@ keywords = ["poker", "holdem", "omaha", "server"]
 all-features = true
 
 [features]
+default = ["serde"]
 # Serialize commands, updates and snapshots.
 serde = ["dep:serde", "ducy-play/serde"]
 
