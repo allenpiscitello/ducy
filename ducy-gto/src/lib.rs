@@ -11,11 +11,12 @@
 //! - [`Cfr`]: vanilla CFR and CFR+ over the full tree, for small games.
 //! - [`Mccfr`]: Monte Carlo CFR with external sampling, discounting (Linear
 //!   CFR, DCFR), regret-based pruning, parallel batches and checkpoints, for
-//!   games too big to walk in full.
+//!   games too big to walk in full, with two or more players.
 //! - [`exploitability`], [`best_response_value`], [`expected_value`]: exact
-//!   evaluation of a [`Profile`].
-//! - [`games`]: Kuhn poker and Leduc hold'em, small games with known
-//!   equilibrium values for checking the solver.
+//!   evaluation of a [`Profile`]; [`best_response_gains`] and
+//!   [`expected_values`] for any number of players.
+//! - [`games`]: Kuhn poker, three-player Kuhn poker and Leduc hold'em, small
+//!   games for checking the solver.
 //!
 //! ```
 //! use ducy_gto::{Cfr, Variant, exploitability, expected_value, games::kuhn::{Kuhn, GAME_VALUE}};
@@ -46,5 +47,8 @@ pub use cfr::{Cfr, Variant};
 pub use game::{Game, Turn};
 pub use key::Key;
 pub use mccfr::{Config, Discount, Mccfr, Prune};
-pub use profile::{Profile, best_response_value, expected_value, exploitability};
+pub use profile::{
+    Profile, best_response_gains, best_response_value, expected_value, expected_values,
+    exploitability,
+};
 pub use rng::Rng;
