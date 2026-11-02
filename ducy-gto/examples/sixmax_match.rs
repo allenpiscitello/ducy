@@ -38,7 +38,9 @@
 //! `sixmax_plo` solve in `--solve` (with its `--equity`) before the flop,
 //! Doug Poker after it; `plo6hu` also plays heads-up pots after the flop with
 //! the heads-up PLO blueprint in `--blueprint`. Regulars play PLO as they
-//! play hold'em.
+//! play hold'em. `plo6loose`, `plo6tight`, `plo6aggro` and `plo6passive`
+//! are `plo6` with its preflop skewed like the `gto6` ones, for a field of
+//! the PLO bot with flaws to exploit (`--field plo6,plo6loose,...`).
 
 use std::{
     sync::{
@@ -402,7 +404,8 @@ fn main() {
         };
         let make: Make = match kind {
             "equity" => Arc::new(|s| Box::new(EquityBot::new(200, Some(s))) as Box<dyn Bot>),
-            "plo6" | "plo6hu" | "plo6s" => {
+            "plo6" | "plo6hu" | "plo6s" | "plo6loose" | "plo6tight" | "plo6aggro"
+            | "plo6passive" => {
                 let cards = plo_cards.clone().expect("plo6 needs --game plo");
                 let n = cards.bucket_count(0);
                 let eq = PreflopEquity::from_bytes(
@@ -426,6 +429,13 @@ fn main() {
                     )
                     .expect("a sixmax_plo solve for these buckets");
                 let strategy = Arc::new(PreflopStrategy::from_solver(&game, &solver));
+                // The skewed variants, as for gto6.
+                let strategy = match kind.strip_prefix("plo6") {
+                    Some(style @ ("loose" | "tight" | "aggro" | "passive")) => {
+                        Arc::new(strategy.map(|actions, p| skew(style, actions, p)))
+                    }
+                    _ => strategy,
+                };
                 // plo6s: trained PLO postflop spots (--spots, files
                 // plo-spot-<bb>-<line>.bin from sixmax_plo_spot_train).
                 let plo_spots: Vec<(Arc<PloSpotGame<'static>>, Arc<Profile<u64>>)> = if kind
