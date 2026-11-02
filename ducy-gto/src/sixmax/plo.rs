@@ -290,7 +290,8 @@ mod tests {
 
         // Six of the bot play whole PLO hands: legal, preflop from the solve.
         use crate::sixmax::bot::{PreflopStrategy, SixMaxBot};
-        use ducy_play::{Deal, Hand, TableRules, Variant, personality::Personality, play_hand};
+        use ducy_bots::personality::Personality;
+        use ducy_play::{Deal, Hand, TableRules, Variant, play_hand};
         use std::sync::Arc;
         let strategy = Arc::new(PreflopStrategy::from_solver(&game, &solver));
         let cards = Arc::new(cards);

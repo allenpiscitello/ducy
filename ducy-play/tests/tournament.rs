@@ -3,11 +3,63 @@
 
 use std::collections::HashSet;
 
-use ducy_play::bots::{CallingStation, RandomBot};
 use ducy_play::{
     Action, BettingStructure, Bot, Entrant, Event, Level, Observation, PlayError, Table,
     TableRules, TableSeat, Tournament, TournamentConfig, Variant,
 };
+use rand::{RngExt, SeedableRng, rngs::StdRng};
+
+/// Checks when it can, otherwise calls.
+struct CallingStation;
+
+impl Bot for CallingStation {
+    fn act(&mut self, obs: &Observation) -> Option<Action> {
+        Some(if obs.legal.can_check {
+            Action::Check
+        } else {
+            Action::Call
+        })
+    }
+}
+
+/// Random legal actions, as ducy-bots' RandomBot: check/call most often,
+/// then bet/raise to a random size, then fold.
+struct RandomBot {
+    rng: StdRng,
+}
+
+impl RandomBot {
+    fn new(seed: Option<u64>) -> Self {
+        Self {
+            rng: StdRng::seed_from_u64(seed.unwrap_or(0)),
+        }
+    }
+}
+
+impl Bot for RandomBot {
+    fn act(&mut self, obs: &Observation) -> Option<Action> {
+        let legal = &obs.legal;
+        let roll = self.rng.random_range(0..10);
+        if roll < 2 && legal.can_fold {
+            return Some(Action::Fold);
+        }
+        if roll >= 7 {
+            if let Some(r) = legal.bet.or(legal.raise) {
+                let to = self.rng.random_range(r.min_to..=r.max_to);
+                return Some(if legal.bet.is_some() {
+                    Action::Bet(to)
+                } else {
+                    Action::Raise(to)
+                });
+            }
+        }
+        Some(if legal.can_check {
+            Action::Check
+        } else {
+            Action::Call
+        })
+    }
+}
 
 /// Shoves every hand: raises or bets all in, or calls an all-in.
 struct Shover;

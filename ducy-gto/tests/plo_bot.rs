@@ -1,5 +1,11 @@
 use std::{cell::Cell, rc::Rc, sync::Arc};
 
+use ducy_bots::{
+    MatchConfig,
+    bots::{CallingStation, RandomBot},
+    personality::Personality,
+    run_match,
+};
 use ducy_gto::{
     Config, Discount, Mccfr,
     holdem::{
@@ -11,12 +17,7 @@ use ducy_gto::{
         bot::PloGtoBot,
     },
 };
-use ducy_play::{
-    Action, Bot, HandSummary, MatchConfig, Observation, TableRules, Variant,
-    bots::{CallingStation, RandomBot},
-    personality::Personality,
-    run_match,
-};
+use ducy_play::{Action, Bot, HandSummary, Observation, TableRules, Variant};
 
 /// The bot, sharing its off-tree count.
 struct Watched(PloGtoBot, Rc<Cell<u32>>);

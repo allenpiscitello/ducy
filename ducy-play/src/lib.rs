@@ -32,15 +32,13 @@
 //!   tournament can be saved mid-hand and restored ([`snapshot`]).
 //! - [`Tournament`]: several tables with blind [`Level`]s, eliminations,
 //!   balancing and hand-for-hand play on the bubble.
-//! - Bots: the [`Bot`] trait, simple [`bots`], 15 [`Personality`] bots,
-//!   [`run_match`] for duplicate matches, and `ProcessBot` (feature
-//!   `process`) for bots in any language, talking JSON over stdin/stdout.
+//! - [`Bot`]: a seat played by code, given only what that seat may see
+//!   ([`play_hand`]). Ready-made bots are the `ducy-bots` crate's.
 //!
 //! # Features
 //!
-//! - `process` (default): `ProcessBot`, and `serde`.
-//! - `serde`: `Serialize`/`Deserialize` for rules, actions, events, views,
-//!   commands and updates (JSON for external bots and clients) and snapshots.
+//! - `serde` (default): `Serialize`/`Deserialize` for rules, actions,
+//!   events, views and snapshots (JSON for external bots and clients).
 //!
 //! A seed makes deals reproducible. Without one ([`Deal::random`] with
 //! `None`, or [`Table::with_secure_deals`]) every deal comes from fresh system
@@ -53,32 +51,18 @@
 pub struct ReadmeDoctests;
 
 mod bot;
-pub mod bots;
 mod deal;
 mod error;
 pub mod fair_deal;
-pub mod features;
-pub mod generic;
 mod hand;
 pub mod hands;
-mod matchup;
-pub mod net;
-pub mod net_data;
-pub mod personality;
-#[cfg(feature = "process")]
-mod process;
-pub mod ranges;
 pub mod replay;
 mod rules;
 mod showdown;
 pub mod snapshot;
-pub mod stats;
-pub mod strength;
 pub mod structure;
 mod table;
 mod tournament;
-pub mod traits;
-mod variants;
 
 pub use bot::{Bot, HandOutcome, HandSummary, Observation, SeatView, fallback_action, play_hand};
 pub use deal::{Deal, Dealer, HiddenDeal};
@@ -86,12 +70,8 @@ pub use error::PlayError;
 pub use hand::{
     Action, Awaiting, Event, Hand, HandResult, LegalActions, MAX_PLAYERS, Post, RaiseRange, Street,
 };
-pub use matchup::{MatchConfig, MatchResult, run_match};
-pub use personality::{Personality, PersonalityBot, Style, position_strength, scale_for_table};
-#[cfg(feature = "process")]
-pub use process::ProcessBot;
 pub use rules::{BettingStructure, TableRules, Variant};
-pub use showdown::{Award, Pot};
+pub use showdown::{Award, Pot, best_hands};
 pub use snapshot::{
     HandSnapshot, SNAPSHOT_VERSION, SeatSnapshot, TOURNAMENT_SNAPSHOT_VERSION, TableSnapshot,
     TournamentSnapshot,
@@ -100,4 +80,3 @@ pub use table::{BombPots, SeatState, Table, TableSeat, TableView};
 pub use tournament::{
     Entrant, Finish, HandReport, Level, Move, SeatRef, Standing, Tournament, TournamentConfig,
 };
-pub use variants::{Comparison, VariantResult, run_variants};

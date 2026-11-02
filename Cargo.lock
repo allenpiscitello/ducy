@@ -348,11 +348,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ducy-bots"
+version = "0.1.0"
+dependencies = [
+ "ducy",
+ "ducy-play",
+ "rand 0.10.3",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ducy-gto"
 version = "0.1.0"
 dependencies = [
  "criterion",
  "ducy",
+ "ducy-bots",
  "ducy-play",
  "rand 0.10.3",
  "rayon",
@@ -365,6 +377,7 @@ name = "ducy-host"
 version = "0.1.0"
 dependencies = [
  "ducy",
+ "ducy-bots",
  "ducy-play",
  "rand 0.10.3",
  "serde",

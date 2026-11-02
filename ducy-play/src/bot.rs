@@ -71,9 +71,9 @@ pub struct HandSummary {
     pub history: Vec<Event>,
 }
 
-/// A poker player. Implement this to plug a strategy into
-/// [`play_hand`] or [`crate::run_match`]; to write a bot in another
-/// language, run it as a separate program with [`crate::ProcessBot`].
+/// A poker player. Implement this to plug a strategy into [`play_hand`], a
+/// [`crate::Table`] seat or a [`crate::Tournament`] entrant. The `ducy-bots`
+/// crate has ready-made ones, and runs bots written in other languages.
 pub trait Bot {
     /// Chooses an action for `obs.seat`. Returning `None`, or an action that
     /// isn't legal, makes the bot check if it can and fold otherwise.

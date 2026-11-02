@@ -52,6 +52,7 @@ use std::{
 /// Deals played so far, over all bots, for `--progress`.
 static PLAYED: AtomicU64 = AtomicU64::new(0);
 
+use ducy_bots::{bots::EquityBot, personality::Personality};
 use ducy_gto::{
     Config, Discount, Mccfr, Profile,
     holdem::{
@@ -74,10 +75,7 @@ use ducy_gto::{
         spot::{SpotBot, SpotGame},
     },
 };
-use ducy_play::{
-    Bot, Deal, Event, Hand, Street, TableRules, Variant, bots::EquityBot, personality::Personality,
-    play_hand,
-};
+use ducy_play::{Bot, Deal, Event, Hand, Street, TableRules, Variant, play_hand};
 
 const SEATS: usize = 6;
 /// Positions by seats after the button.

@@ -27,11 +27,12 @@ use std::{
     thread,
 };
 
+use ducy_bots::personality::Personality;
 use ducy_gto::sixmax::{
     bot::{PreflopStrategy, SixMaxBot, position},
     preflop::POSITIONS,
 };
-use ducy_play::{Bot, Deal, Event, Hand, TableRules, personality::Personality, play_hand};
+use ducy_play::{Bot, Deal, Event, Hand, TableRules, play_hand};
 
 const SEATS: usize = 6;
 

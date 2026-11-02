@@ -180,8 +180,17 @@ pub struct Standing {
 /// original would, e.g. after a host or server restarts.
 ///
 /// ```
-/// use ducy_play::{Entrant, Level, Tournament, TournamentConfig, Variant, BettingStructure};
-/// use ducy_play::bots::CallingStation;
+/// use ducy_play::{
+///     Action, BettingStructure, Bot, Entrant, Level, Observation, Tournament, TournamentConfig,
+///     Variant,
+/// };
+///
+/// struct CallingStation;
+/// impl Bot for CallingStation {
+///     fn act(&mut self, obs: &Observation) -> Option<Action> {
+///         Some(if obs.legal.can_check { Action::Check } else { Action::Call })
+///     }
+/// }
 ///
 /// let config = TournamentConfig {
 ///     variant: Variant::Holdem,

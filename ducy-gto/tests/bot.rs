@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use ducy_bots::{MatchConfig, bots::RandomBot, personality::Personality, run_match};
 use ducy_gto::{
     Profile,
     holdem::{
@@ -10,9 +11,7 @@ use ducy_gto::{
         hunl::{BetMenu, Hunl, HunlConfig, Size},
     },
 };
-use ducy_play::{
-    Bot, MatchConfig, TableRules, bots::RandomBot, personality::Personality, run_match,
-};
+use ducy_play::{Bot, TableRules};
 
 /// A bot on the quick abstraction with an untrained (uniform) blueprint:
 /// enough to check that it always plays legally and follows the tree.
@@ -209,7 +208,7 @@ fn river_solving_plays_legally_against_wild_bets() {
 #[test]
 fn river_solving_plays_legally_at_other_stakes() {
     let (illegal, solves) = play_solving(
-        Box::new(ducy_play::bots::CallingStation),
+        Box::new(ducy_bots::bots::CallingStation),
         40,
         TableRules::no_limit_holdem(5, 10),
         400,
@@ -255,7 +254,7 @@ fn turn_solving_plays_legally() {
             200,
         ),
         (
-            Box::new(ducy_play::bots::CallingStation),
+            Box::new(ducy_bots::bots::CallingStation),
             TableRules::no_limit_holdem(5, 10),
             400,
         ),

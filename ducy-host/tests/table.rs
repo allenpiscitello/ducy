@@ -1,9 +1,10 @@
+use ducy_bots::Personality;
 use ducy_host::{Command, Outgoing, Refund, TableHost, Update};
-use ducy_play::{Action, Event, Personality, Table, TableRules, TableSeat, TableView};
+use ducy_play::{Action, Event, Table, TableRules, TableSeat, TableView};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 fn bot_seat(p: Personality, seed: u64) -> TableSeat {
-    TableSeat::bot(p.id(), p.bot(Some(seed)))
+    p.bot(Some(seed)).seat(p.id())
 }
 
 /// Host in seat 0, then three bots; seats 1 and 2 are open.
@@ -317,7 +318,7 @@ fn any_bot_can_take_a_seat() {
         TableSeat::with_bot(
             "Rando",
             "random",
-            Box::new(ducy_play::bots::RandomBot::new(Some(1))),
+            Box::new(ducy_bots::bots::RandomBot::new(Some(1))),
         ),
     ];
     let mut t = Table::new(TableRules::no_limit_holdem(1, 2), seats, 200, 3).unwrap();
@@ -340,7 +341,7 @@ fn reset_stacks_last_into_the_next_hand() {
         TableSeat::with_bot(
             "Rando",
             "random",
-            Box::new(ducy_play::bots::RandomBot::new(Some(1))),
+            Box::new(ducy_bots::bots::RandomBot::new(Some(1))),
         ),
     ];
     let mut t = Table::new(TableRules::no_limit_holdem(1, 2), seats, 200, 3).unwrap();

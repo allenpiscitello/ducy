@@ -9,6 +9,12 @@
 
 use std::sync::Arc;
 
+use ducy_bots::{
+    MatchConfig,
+    bots::{EquityBot, RandomBot},
+    personality::Personality,
+    run_match,
+};
 use ducy_gto::{
     Profile,
     holdem::{
@@ -18,12 +24,7 @@ use ducy_gto::{
         hunl::{Hunl, HunlConfig},
     },
 };
-use ducy_play::{
-    Bot, MatchConfig, TableRules,
-    bots::{EquityBot, RandomBot},
-    personality::Personality,
-    run_match,
-};
+use ducy_play::{Bot, TableRules};
 
 type MakeBot = Box<dyn Fn() -> Box<dyn Bot>>;
 

@@ -50,6 +50,13 @@
 
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Instant};
 
+use ducy_bots::{
+    MatchConfig,
+    bots::{CallingStation, EquityBot},
+    generic::{Family, GenericPlayer},
+    personality::Personality,
+    run_match,
+};
 use ducy_gto::{
     Config, Discount, Mccfr,
     holdem::{
@@ -66,13 +73,7 @@ use ducy_gto::{
         river::PloRiverSolving,
     },
 };
-use ducy_play::{
-    Bot, MatchConfig, TableRules, Variant,
-    bots::{CallingStation, EquityBot},
-    generic::{Family, GenericPlayer},
-    personality::Personality,
-    run_match,
-};
+use ducy_play::{Bot, TableRules, Variant};
 
 /// Blocks of deals the interval is computed over.
 const BLOCKS: usize = 40;

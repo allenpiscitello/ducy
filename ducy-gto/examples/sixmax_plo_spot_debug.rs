@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use ducy_bots::personality::Personality;
 use ducy_gto::{
     Config, Discount, Mccfr,
     holdem::hunl::Buckets,
@@ -23,7 +24,7 @@ use ducy_gto::{
         solver::PreflopSolver,
     },
 };
-use ducy_play::{Bot, Deal, Hand, TableRules, Variant, personality::Personality, play_hand};
+use ducy_play::{Bot, Deal, Hand, TableRules, Variant, play_hand};
 
 fn main() {
     let (mut cards_path, mut solve_path, mut equity_path) =
