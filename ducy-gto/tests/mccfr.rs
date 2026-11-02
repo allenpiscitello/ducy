@@ -1,6 +1,10 @@
 use ducy_gto::{
-    Config, Discount, Mccfr, Prune, exploitability,
-    games::{kuhn::Kuhn, leduc::Leduc},
+    Config, Discount, Mccfr, Prune, best_response_gains, expected_values, exploitability,
+    games::{
+        kuhn::Kuhn,
+        kuhn3::{BET, Kuhn3},
+        leduc::Leduc,
+    },
 };
 
 fn config(discount: Discount) -> Config {
@@ -101,11 +105,44 @@ fn resuming_from_a_checkpoint_matches_an_unbroken_run() {
     assert_eq!(resumed.iterations(), 3_200);
     resumed.run(4_800);
     assert_eq!(resumed.save(), whole.save());
+    let mut streamed = Vec::new();
+    whole.save_to(&mut streamed).expect("write");
+    assert_eq!(streamed, whole.save());
 
     // The wrong seed, or garbage, is refused.
     assert!(Mccfr::load(&Leduc, Config { seed: 99, ..cfg }, &bytes).is_none());
     assert!(Mccfr::load(&Leduc, cfg, &bytes[..bytes.len() - 1]).is_none());
     assert!(Mccfr::load(&Leduc, cfg, b"nonsense").is_none());
+}
+
+#[test]
+fn three_player_kuhn_approaches_an_equilibrium() {
+    let mut m = Mccfr::new(&Kuhn3, config(Discount::DCFR));
+    m.run(2_000);
+    let profile = m.average();
+    let early: f64 = best_response_gains(&Kuhn3, &profile).iter().sum();
+    m.run(400_000);
+    let profile = m.average();
+    // 4 cards × 12 histories where someone acts.
+    assert_eq!(m.num_infosets(), 48);
+    let gains = best_response_gains(&Kuhn3, &profile);
+    let late: f64 = gains.iter().sum();
+    assert!(late < early / 4.0, "{early} -> {late}");
+    for (p, g) in gains.iter().enumerate() {
+        assert!(*g < 0.01, "player {p} gains {g} by deviating ({gains:?})");
+    }
+    // Zero-sum overall, and the dominated choices are learned: the ace always
+    // calls, the jack never does.
+    let ev = expected_values(&Kuhn3, &profile);
+    assert!(ev.iter().sum::<f64>().abs() < 1e-9, "{ev:?}");
+    const FACING_A_BET: [&str; 9] = ["b", "pb", "bp", "bb", "ppb", "pbp", "pbb", "ppbp", "ppbb"];
+    for h in FACING_A_BET {
+        let ace = profile.get(&format!("A:{h}")).expect("seen");
+        assert!(ace[BET] > 0.98, "A:{h}: {ace:?}");
+        let jack = profile.get(&format!("J:{h}")).expect("seen");
+        assert!(jack[BET] < 0.02, "J:{h}: {jack:?}");
+    }
+    println!("gains {gains:?}, values {ev:?}");
 }
 
 #[test]
