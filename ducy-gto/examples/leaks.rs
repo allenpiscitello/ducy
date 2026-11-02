@@ -10,16 +10,14 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use ducy::deck::{Card, Deck};
+use ducy_bots::{personality::Personality, ranges::made_score, traits::no_pair_of_its_own};
 use ducy_gto::holdem::{
     abstraction::CardAbstraction,
     blueprint::Blueprint,
     bot::GtoBot,
     hunl::{BettingTree, Hunl, HunlConfig},
 };
-use ducy_play::{
-    Bot, Deal, Event, Hand, Street, TableRules, Variant, personality::Personality, play_hand,
-    ranges::made_score, traits::no_pair_of_its_own,
-};
+use ducy_play::{Bot, Deal, Event, Hand, Street, TableRules, Variant, play_hand};
 
 /// The lowest two pair: below it, a pair or less.
 fn two_pair_floor() -> u32 {

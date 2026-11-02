@@ -288,12 +288,12 @@ fn snapshots_of_another_version_are_refused() {
 
 #[test]
 fn bots_are_asked_for_again_and_a_missing_one_fails_the_load() {
-    use ducy_play::Personality;
+    use ducy_bots::Personality;
     let p = Personality::ALL[0];
     let seats = vec![
         TableSeat::human("Host", "you"),
-        TableSeat::bot(p.id(), p.bot(Some(1))),
-        TableSeat::bot(p.id(), p.bot(Some(2))),
+        p.bot(Some(1)).seat(p.id()),
+        p.bot(Some(2)).seat(p.id()),
     ];
     let table = Table::new(TableRules::no_limit_holdem(1, 2), seats, 200, 4).unwrap();
     let mut h = TableHost::new(table, vec![false, true, false], 0).unwrap();

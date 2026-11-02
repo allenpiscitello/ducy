@@ -250,10 +250,9 @@ fn bots_go_along_with_the_person() {
     // The host against a bot, all-in: the host's yes is enough.
     let seats = vec![
         TableSeat::human("Host", "you"),
-        TableSeat::bot(
-            ducy_play::Personality::ALL[0].id(),
-            ducy_play::Personality::ALL[0].bot(Some(1)),
-        ),
+        ducy_bots::Personality::ALL[0]
+            .bot(Some(1))
+            .seat(ducy_bots::Personality::ALL[0].id()),
     ];
     let mut table = Table::new(TableRules::no_limit_holdem(1, 2), seats, 100, 3).unwrap();
     table.set_run_it_twice(true);

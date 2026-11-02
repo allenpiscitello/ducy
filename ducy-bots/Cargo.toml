@@ -1,0 +1,40 @@
+[package]
+name = "ducy-bots"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+license = "MIT"
+description = "Poker bots for ducy-play: personality bots, hand reading, a small neural-net bot, duplicate matches and bots in any language over JSON."
+repository = "https://github.com/allenpiscitello/ducy"
+documentation = "https://docs.rs/ducy-bots"
+readme = "README.md"
+categories = ["game-engines"]
+keywords = ["poker", "holdem", "omaha", "bot"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["process"]
+# Serialize opponent stats (and ducy-play's types).
+serde = ["dep:serde", "ducy-play/serde"]
+# Run bots as separate programs that talk JSON over stdin/stdout.
+process = ["serde", "dep:serde_json"]
+
+[dependencies]
+ducy = { version = "0.3.0", path = "..", default-features = false }
+ducy-play = { version = "0.2.0", path = "../ducy-play", default-features = false }
+rand = "0.10.2"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+
+[[test]]
+name = "bots"
+required-features = ["process"]
+
+[[example]]
+name = "bot_match"
+required-features = ["process"]

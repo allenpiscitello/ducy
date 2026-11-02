@@ -77,7 +77,11 @@ pub(crate) fn build_pots(contributed: &[u64], folded: &[bool]) -> Vec<(u64, Vec<
 
 /// The best hands among `seats` on a complete board, as seat numbers plus a
 /// description of the winning hand.
-pub(crate) fn best_hands(
+///
+/// # Errors
+///
+/// When the cards don't make a valid deal for `variant`.
+pub fn best_hands(
     variant: Variant,
     hole_cards: &[Deck],
     board: &[Card; 5],

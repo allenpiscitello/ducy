@@ -565,7 +565,7 @@ pub(crate) fn fallback(obs: &Observation, rng: &mut StdRng) -> Action {
         return Action::Check;
     }
     let call = legal.call.unwrap_or(0);
-    let equity = ducy_play::strength::observation_equity(obs, 200, rng);
+    let equity = ducy_bots::strength::observation_equity(obs, 200, rng);
     if equity * (obs.pot + call) as f64 >= call as f64 {
         Action::Call
     } else {

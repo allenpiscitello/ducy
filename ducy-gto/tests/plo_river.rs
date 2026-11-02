@@ -1,5 +1,10 @@
 use std::{cell::Cell, rc::Rc, sync::Arc};
 
+use ducy_bots::{
+    MatchConfig,
+    bots::{CallingStation, RandomBot},
+    run_match,
+};
 use ducy_gto::{
     Config, Discount, Game, Mccfr, Rng, Turn,
     holdem::{
@@ -13,11 +18,7 @@ use ducy_gto::{
         river::{PloRiverSolver, PloRiverSolving, RiverRange, best_response_value, sample_range},
     },
 };
-use ducy_play::{
-    Bot, MatchConfig, TableRules, Variant,
-    bots::{CallingStation, RandomBot},
-    run_match,
-};
+use ducy_play::{Bot, TableRules, Variant};
 
 /// A small abstraction for `H` hole cards and a briefly trained 10 big
 /// blind blueprint.

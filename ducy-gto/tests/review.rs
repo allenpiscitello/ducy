@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use ducy_bots::{MatchConfig, bots::RandomBot, run_match};
 use ducy_gto::{
     Profile, Rng,
     holdem::{
@@ -14,10 +15,7 @@ use ducy_gto::{
         },
     },
 };
-use ducy_play::{
-    Bot, Event, HandSummary, MatchConfig, Observation, Street, TableRules, bots::RandomBot,
-    run_match,
-};
+use ducy_play::{Bot, Event, HandSummary, Observation, Street, TableRules};
 
 const BUCKETS: usize = 8;
 

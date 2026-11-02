@@ -31,6 +31,7 @@ use std::{
 
 use std::{collections::HashMap, sync::atomic::AtomicU32};
 
+use ducy_bots::personality::Personality;
 use ducy_gto::{
     holdem::{
         cards::Card,
@@ -46,7 +47,7 @@ use ducy_gto::{
         preflop::{Node, POSITIONS, PreflopGame},
     },
 };
-use ducy_play::{Bot, Deal, Hand, TableRules, personality::Personality, play_hand};
+use ducy_play::{Bot, Deal, Hand, TableRules, play_hand};
 
 const SEATS: usize = 6;
 const ACTIONS: [&str; 4] = ["fold", "call", "raise", "allin"];

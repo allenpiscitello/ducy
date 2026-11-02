@@ -4,9 +4,23 @@
 
 use ducy::deck::{Card, Deck};
 use ducy_play::{
-    Action, BombPots, Deal, Event, Hand, Personality, PlayError, Street, Table, TableRules,
+    Action, BombPots, Bot, Deal, Event, Hand, Observation, PlayError, Street, Table, TableRules,
     TableSeat, Variant,
 };
+
+/// Bets the minimum when it can, otherwise checks or calls.
+struct MinBettor;
+
+impl Bot for MinBettor {
+    fn act(&mut self, obs: &Observation) -> Option<Action> {
+        let legal = &obs.legal;
+        Some(match (legal.bet, legal.raise) {
+            (Some(r), _) => Action::Bet(r.min_to),
+            _ if legal.can_check => Action::Check,
+            _ => Action::Call,
+        })
+    }
+}
 
 fn card(s: &str) -> Card {
     Card::parse(s).unwrap()
@@ -132,10 +146,7 @@ fn a_bomb_pot_needs_an_ante() {
 /// Three bots at PLO 2/5 with a $5 bomb pot on two boards every third hand.
 fn bomb_table() -> Table {
     let seats = (0..3)
-        .map(|i| {
-            let p = Personality::ALL[i];
-            TableSeat::bot(p.id(), p.bot(Some(i as u64)))
-        })
+        .map(|i| TableSeat::with_bot(format!("Bot {i}"), format!("b{i}"), Box::new(MinBettor)))
         .collect();
     let mut table = Table::new(TableRules::pot_limit_omaha(2, 5), seats, 500, 9).unwrap();
     table
@@ -194,11 +205,7 @@ fn bomb_pots_need_an_interval_and_an_ante_and_are_saved() {
         Err(PlayError::InvalidSetup)
     );
     let snap = table.snapshot();
-    let restored = Table::restore(&snap, |i| {
-        let p = Personality::ALL[i];
-        Some(Box::new(p.bot(Some(i as u64))) as Box<dyn ducy_play::Bot>)
-    })
-    .unwrap();
+    let restored = Table::restore(&snap, |_| Some(Box::new(MinBettor) as Box<dyn Bot>)).unwrap();
     assert_eq!(restored.bomb_pots(), table.bomb_pots());
     table.set_bomb_pots(None).unwrap();
     assert_eq!(table.bomb_pots(), None);

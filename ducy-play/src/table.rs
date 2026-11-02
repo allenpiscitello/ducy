@@ -1,7 +1,7 @@
 //! A table that plays hand after hand: seats, stacks, the button and bots.
 //!
 //! [`Table`] is the game state a host keeps. Seats are played by people or by
-//! personality bots, and a seat can switch between the two between hands. A
+//! bots, and a seat can switch between the two between hands. A
 //! seat can also be empty, and a person can sit out: each hand is dealt only
 //! to the seats in play, so a table of friends can wait for people to join.
 //! [`Table::view`] builds what one seat may see, with seats renumbered so
@@ -11,8 +11,7 @@ use ducy::deck::{Card, Deck};
 
 use crate::{
     Action, Awaiting, BettingStructure, Bot, Deal, Event, Hand, HiddenDeal, LegalActions,
-    Observation, PersonalityBot, PlayError, Post, Pot, SeatView, Street, TableRules, Variant,
-    fallback_action,
+    Observation, PlayError, Post, Pot, SeatView, Street, TableRules, Variant, fallback_action,
     snapshot::{SeatSnapshot, TableSnapshot},
 };
 
@@ -74,12 +73,6 @@ impl TableSeat {
         } else {
             self.bot.is_some()
         }
-    }
-
-    /// A seat played by a personality bot.
-    pub fn bot(id: impl Into<String>, bot: PersonalityBot) -> Self {
-        let name = bot.name();
-        Self::with_bot(name, id, Box::new(bot))
     }
 
     /// A seat played by any bot, shown as `name`.

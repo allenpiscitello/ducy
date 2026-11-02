@@ -17,6 +17,12 @@ use std::{
     time::Instant,
 };
 
+use ducy_bots::{
+    MatchConfig,
+    bots::{CallingStation, EquityBot},
+    personality::Personality,
+    run_match,
+};
 use ducy_gto::holdem::{
     abstraction::CardAbstraction,
     blueprint::Blueprint,
@@ -25,12 +31,7 @@ use ducy_gto::holdem::{
     range::BucketCache,
     review::{Evaluator, HandRecord, ReviewConfig, Reviewer, SessionReview, replay},
 };
-use ducy_play::{
-    Bot, HandSummary, MatchConfig, Observation, TableRules,
-    bots::{CallingStation, EquityBot},
-    personality::Personality,
-    run_match,
-};
+use ducy_play::{Bot, HandSummary, Observation, TableRules};
 
 /// Passes through to a bot and keeps each hand's summary for its seat.
 struct Recorder {
