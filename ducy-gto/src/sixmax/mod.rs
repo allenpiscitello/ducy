@@ -15,11 +15,14 @@
 //!   the tree, for solving against that field.
 //! - [`plo`]: six-handed pot-limit Omaha (#290): the PLO abstraction's
 //!   preflop buckets as hand classes, their equity, and the dealer.
+//! - [`multiway`]: the whole six-handed game to the river (#338), Hold'em or
+//!   PLO, for training a blueprint with [`Mccfr`](crate::Mccfr).
 
 pub mod bot;
 pub mod chart;
 pub mod equity;
 pub mod field;
+pub mod multiway;
 pub mod plo;
 pub mod plo_spot;
 pub mod preflop;

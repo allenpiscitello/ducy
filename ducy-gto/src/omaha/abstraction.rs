@@ -1540,4 +1540,16 @@ impl Buckets for PloAbstraction {
         }
         out
     }
+
+    fn table_buckets(&self, hole: &[&[Card]], board: &[Card; 5], out: &mut [[u16; 4]]) {
+        for (b, h) in out.iter_mut().zip(hole) {
+            b[0] = self.preflop_bucket(h);
+        }
+        for (street, n) in [(1, 3), (2, 4), (3, 5)] {
+            let view = self.view(&board[..n]);
+            for (b, h) in out.iter_mut().zip(hole) {
+                b[street] = self.bucket_on(h, &view);
+            }
+        }
+    }
 }
