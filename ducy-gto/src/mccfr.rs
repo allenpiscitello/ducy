@@ -2,9 +2,15 @@
 //! too big to walk in full.
 //!
 //! Each iteration traverses the tree once per player. The traverser explores
-//! all of their own actions, while chance and the opponent each play one
+//! all of their own actions, while chance and the opponents each play one
 //! sampled action. That gives unbiased regret estimates at a tiny fraction of
 //! a full walk's cost.
+//!
+//! It works for any number of players ([`Game::num_players`]), each with
+//! their own payoff ([`Game::utility_for`]), as in Pluribus (Brown and
+//! Sandholm 2019): nothing assumes the game is zero-sum. With three or more
+//! players CFR has no equilibrium guarantee, but in poker it finds strong
+//! strategies in practice.
 //!
 //! On top of that:
 //! - **Discounting** ([`Discount`]): early iterations, played with a poor
@@ -277,7 +283,7 @@ where
                 .config
                 .prune
                 .is_some_and(|p| i >= p.after && (p.full_every == 0 || i % p.full_every != 0));
-            for player in 0..2 {
+            for player in 0..self.game.num_players() {
                 self.traverse(&root, player, prune, &mut rng, &mut delta);
             }
         }
@@ -294,10 +300,7 @@ where
         delta: &mut Delta<G::Info>,
     ) -> f64 {
         match self.game.turn(s) {
-            Turn::Terminal => {
-                let u = self.game.utility(s);
-                if player == 0 { u } else { -u }
-            }
+            Turn::Terminal => self.game.utility_for(s, player),
             Turn::Chance => {
                 let next = self.game.sample_chance(s, rng);
                 self.traverse(&next, player, prune, rng, delta)
@@ -424,6 +427,15 @@ where
     /// in slot order with its regrets and strategy sums.
     pub fn save(&self) -> Vec<u8> {
         let mut out = Vec::new();
+        self.save_to(&mut out).expect("writing to memory");
+        out
+    }
+
+    /// [`Self::save`]'s bytes, written to `w` as they're made, so a big
+    /// table needn't be copied whole into memory first. Wrap files in a
+    /// `BufWriter`.
+    pub fn save_to(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
+        let mut out = Vec::with_capacity(1 << 16);
         out.extend(MAGIC);
         out.extend(self.iterations.to_le_bytes());
         out.extend(self.batches.to_le_bytes());
@@ -440,8 +452,12 @@ where
                 out.extend(self.table.regret[i].to_le_bytes());
                 out.extend(self.table.sum[i].to_le_bytes());
             }
+            if out.len() >= 1 << 16 {
+                w.write_all(&out)?;
+                out.clear();
+            }
         }
-        out
+        w.write_all(&out)
     }
 
     /// Resumes from [`Self::save`]'s bytes. `config` should match the saved

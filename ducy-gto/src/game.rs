@@ -13,11 +13,18 @@ pub enum Turn {
     Terminal,
     /// Chance (the deal) moves; see [`Game::chance_outcomes`].
     Chance,
-    /// Player 0 or 1 chooses one of [`Game::num_actions`] actions.
+    /// A player (0 to [`Game::num_players`] - 1) chooses one of
+    /// [`Game::num_actions`] actions.
     Player(usize),
 }
 
-/// A two-player zero-sum game with imperfect information and perfect recall.
+/// A game with imperfect information and perfect recall: two-player zero-sum
+/// by default, or any number of players with a payoff each
+/// ([`Game::num_players`], [`Game::utility_for`]).
+///
+/// The exact tools ([`Cfr`](crate::Cfr), [`exploitability`](crate::exploitability),
+/// [`expected_value`](crate::expected_value)) are for two-player zero-sum games;
+/// [`Mccfr`](crate::Mccfr) trains any number of players.
 pub trait Game {
     /// A node of the game tree, including every card dealt so far.
     type State: Clone;
@@ -27,8 +34,21 @@ pub trait Game {
 
     fn root(&self) -> Self::State;
     fn turn(&self, state: &Self::State) -> Turn;
-    /// Player 0's payoff at a terminal state; player 1 gets the negation.
+    /// Player 0's payoff at a terminal state; in a two-player game, player 1
+    /// gets the negation.
     fn utility(&self, state: &Self::State) -> f64;
+    /// How many players the game has: 2 unless a game says otherwise.
+    fn num_players(&self) -> usize {
+        2
+    }
+    /// `player`'s payoff at a terminal state. By default the two-player
+    /// zero-sum one: [`Game::utility`] for player 0, its negation for player
+    /// 1. Games with more players override it.
+    #[inline]
+    fn utility_for(&self, state: &Self::State, player: usize) -> f64 {
+        let u = self.utility(state);
+        if player == 0 { u } else { -u }
+    }
     /// The states chance can move to and their probabilities (summing to 1).
     /// Games whose deals are too many to list (Hold'em) may return an empty
     /// list and implement [`Game::sample_chance`] instead; they can then be

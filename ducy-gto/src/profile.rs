@@ -82,8 +82,9 @@ pub fn expected_value<G: Game>(game: &G, profile: &Profile<G::Info>) -> f64 {
     ev(game, profile, &game.root())
 }
 
-/// What `player` wins on average with a best response to the other player's
-/// strategy in `profile`, from `player`'s point of view.
+/// What `player` wins on average with a best response to the other players'
+/// strategies in `profile`, from `player`'s point of view
+/// ([`Game::utility_for`]).
 ///
 /// A best response picks one action per information set (not per state), so
 /// it can only use what that player knows. It's computed exactly: every state
@@ -98,8 +99,48 @@ pub fn best_response_value<G: Game>(game: &G, profile: &Profile<G::Info>, player
         choice: HashMap::new(),
     };
     br.collect(&game.root(), 1.0);
-    let v = br.value(&game.root());
-    if player == 0 { v } else { -v }
+    br.value(&game.root())
+}
+
+/// Every player's expected payoff ([`Game::utility_for`]) when all follow
+/// `profile`. Works for any number of players.
+pub fn expected_values<G: Game>(game: &G, profile: &Profile<G::Info>) -> Vec<f64> {
+    fn ev<G: Game>(game: &G, profile: &Profile<G::Info>, s: &G::State, out: &mut [f64], w: f64) {
+        match game.turn(s) {
+            Turn::Terminal => {
+                for (p, o) in out.iter_mut().enumerate() {
+                    *o += w * game.utility_for(s, p);
+                }
+            }
+            Turn::Chance => {
+                for (next, p) in game.chance_outcomes(s) {
+                    ev(game, profile, &next, out, w * p);
+                }
+            }
+            Turn::Player(_) => {
+                let n = game.num_actions(s);
+                let probs = profile.probs(&game.info(s), n);
+                for (a, &q) in probs.iter().enumerate() {
+                    if q > 0.0 {
+                        ev(game, profile, &game.apply(s, a), out, w * q);
+                    }
+                }
+            }
+        }
+    }
+    let mut out = vec![0.0; game.num_players()];
+    ev(game, profile, &game.root(), &mut out, 1.0);
+    out
+}
+
+/// For each player, how much more a best response would win than `profile`
+/// does, with everyone else following it. All zero exactly at a Nash
+/// equilibrium, for any number of players; their sum is the "NashConv".
+pub fn best_response_gains<G: Game>(game: &G, profile: &Profile<G::Info>) -> Vec<f64> {
+    let ev = expected_values(game, profile);
+    (0..game.num_players())
+        .map(|p| best_response_value(game, profile, p) - ev[p])
+        .collect()
 }
 
 /// How much a best-responding opponent wins against `profile` on average,
@@ -150,11 +191,11 @@ impl<G: Game> BestResponse<'_, G> {
         }
     }
 
-    /// Player 0's payoff from `s` with the best responder playing its choices
-    /// and the opponent following the profile.
+    /// The best responder's payoff from `s`, playing its choices with the
+    /// others following the profile.
     fn value(&mut self, s: &G::State) -> f64 {
         match self.game.turn(s) {
-            Turn::Terminal => self.game.utility(s),
+            Turn::Terminal => self.game.utility_for(s, self.player),
             Turn::Chance => self
                 .game
                 .chance_outcomes(s)
@@ -182,12 +223,11 @@ impl<G: Game> BestResponse<'_, G> {
         }
         let members = self.members.get(info).cloned().unwrap_or_default();
         let n = members.first().map_or(1, |(s, _)| self.game.num_actions(s));
-        let sign = if self.player == 0 { 1.0 } else { -1.0 };
         let mut best = (0, f64::NEG_INFINITY);
         for a in 0..n {
             let v: f64 = members
                 .iter()
-                .map(|(s, w)| w * sign * self.value(&self.game.apply(s, a)))
+                .map(|(s, w)| w * self.value(&self.game.apply(s, a)))
                 .sum();
             if v > best.1 {
                 best = (a, v);
