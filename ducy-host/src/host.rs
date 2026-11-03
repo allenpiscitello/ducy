@@ -529,6 +529,11 @@ impl TableHost {
         self.seq
     }
 
+    /// Whether the host plays seat 0 (else seat 0 is anyone's).
+    pub fn has_host(&self) -> bool {
+        self.has_host
+    }
+
     /// The host's own view (seat 0). Without a host seat, a spectator's view
     /// from seat 0: no one's cards until they're shown down, and nothing to
     /// act on.

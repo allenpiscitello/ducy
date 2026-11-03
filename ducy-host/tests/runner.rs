@@ -3,8 +3,8 @@
 //! club table.
 
 use ducy_host::runner::{
-    ASK_MS, Action, Event, FAIR_STEP_MS, IDLE_MS, PlayerCommand, RESUME_GRACE_MS, RunnerConfig,
-    RunnerUpdate, Step, TableResult, TableRunner,
+    ASK_MS, Action, Event, FAIR_STEP_MS, FAIR_WAIT_MS, HostCommand, IDLE_MS, PlayerCommand,
+    RESUME_GRACE_MS, RunnerConfig, RunnerUpdate, Step, TableResult, TableRunner,
 };
 use ducy_host::{Command, TableHost};
 use ducy_play::fair_deal::{Reveal, hand_seed};
@@ -497,4 +497,186 @@ fn the_clubs_answers_reach_the_table() {
     let res = results(&step);
     assert_eq!(res[0].departed.len(), 1);
     assert_eq!(res[0].departed[0].chips, 100);
+}
+
+/// A friends table: the host in seat 0 with 100 chips, three empty seats,
+/// buy-ins 40 to 200, dealt by the host, no idle checks.
+fn friends(config: RunnerConfig) -> TableRunner {
+    let mut seats = vec![TableSeat::human("Host", "you")];
+    seats.extend((1..4).map(|_| TableSeat::empty()));
+    let table = Table::new(TableRules::no_limit_holdem(1, 2), seats, 100, 3).unwrap();
+    let host = TableHost::new(table, vec![false, true, true, true], 20_000)
+        .and_then(|h| h.with_bank(40, 200))
+        .unwrap();
+    TableRunner::new(
+        host,
+        RunnerConfig {
+            id: "f1".into(),
+            auto_deal: false,
+            idle_ms: 0,
+            ..config
+        },
+    )
+}
+
+fn dealt(step: &Step) -> bool {
+    results(step).iter().any(|res| !res.state.complete)
+}
+
+/// The host and Bo check or call until the hand is over.
+fn play_out_with_host(r: &mut TableRunner, now: u64) -> Step {
+    let mut last = r.event(Event::State, now);
+    while r.host().table().in_hand() {
+        let seat = r.host().table().to_act().expect("someone to act");
+        let legal = r.host().table().view(seat).legal.expect("their turn");
+        let kind = if legal.can_check { "check" } else { "call" };
+        last = if seat == 0 {
+            r.event(
+                Event::Host {
+                    cmd: HostCommand::Act {
+                        kind: kind.into(),
+                        amount: 0,
+                    },
+                },
+                now,
+            )
+        } else {
+            let seq = r.host().seq();
+            r.event(
+                cmd(
+                    "b",
+                    Command::Act {
+                        seq,
+                        kind: kind.into(),
+                        amount: 0,
+                    },
+                    None,
+                ),
+                now,
+            )
+        };
+    }
+    last
+}
+
+#[test]
+fn a_friends_table_deals_when_the_host_says() {
+    let mut r = friends(RunnerConfig::default());
+    let step = sit(&mut r, "b", 1, true, 0);
+    assert_eq!(step.deal_at, None);
+    assert!(
+        run_until(&mut r, step.wake, 60_000, dealt).is_none(),
+        "not on its own"
+    );
+    // The deal waits for the fair-deal round Bo is asked to join; he doesn't
+    // answer, so it's the host's value alone.
+    let step = r.event(Event::Deal, 1000);
+    let (t, step) = run_until(&mut r, step.wake, 20_000, dealt).expect("dealt");
+    assert!(t <= 1000 + FAIR_WAIT_MS, "dealt at {t}");
+    assert!(
+        results(&step)
+            .iter()
+            .any(|res| matches!(res.seed, Some(Some(_)))),
+        "from the round"
+    );
+    let seq = r.host().seq();
+    r.event(Event::Deal, t + 10);
+    assert_eq!(r.host().seq(), seq, "no second deal mid-hand");
+    // The hand over: Bo's check of the deal counts the host's seat, which
+    // was dealt first; the host is sent nothing.
+    let step = play_out_with_host(&mut r, t + 100);
+    let got: Vec<_> = sends(&step)
+        .into_iter()
+        .filter_map(|(to, u)| match u {
+            RunnerUpdate::FairResult(f) => Some((to, f.index, f.dealt)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(got, [("b", 1, 2)]);
+    // No idle checks: nothing wakes it an hour later.
+    let step = r.event(Event::Wake, t + 3_600_000);
+    assert!(idle(&step).is_empty());
+    assert!(!dealt(&step));
+}
+
+#[test]
+fn the_host_plays_their_own_seat() {
+    let mut r = friends(RunnerConfig::default());
+    sit(&mut r, "b", 1, true, 0);
+    let step = r.event(Event::Deal, 0);
+    let (t, _) = run_until(&mut r, step.wake, 20_000, dealt).expect("dealt");
+    // More chips than the table allows: refused, with why.
+    let step = r.event(
+        Event::Host {
+            cmd: HostCommand::Chips { amount: 1000 },
+        },
+        t,
+    );
+    assert!(
+        step.actions
+            .iter()
+            .any(|a| matches!(a, Action::Refused { .. }))
+    );
+    // Fifty more: before the next hand, since the host is in this one.
+    let step = r.event(
+        Event::Host {
+            cmd: HostCommand::Chips { amount: 50 },
+        },
+        t,
+    );
+    assert!(
+        !step
+            .actions
+            .iter()
+            .any(|a| matches!(a, Action::Refused { .. }))
+    );
+    assert_eq!(r.host().host_pending_chips(), 50);
+    // The host's move when it isn't their turn doesn't count either.
+    let to_act = r.host().table().to_act().unwrap();
+    let step = r.event(
+        Event::Host {
+            cmd: HostCommand::Act {
+                kind: "fold".into(),
+                amount: 0,
+            },
+        },
+        t,
+    );
+    assert_eq!(
+        step.actions
+            .iter()
+            .any(|a| matches!(a, Action::Refused { .. })),
+        to_act != 0
+    );
+}
+
+#[test]
+fn auto_deal_deals_each_hand_after_the_hosts_wait() {
+    let mut r = friends(RunnerConfig::default());
+    sit(&mut r, "b", 1, true, 0);
+    let step = r.event(Event::Deal, 0);
+    let (t, _) = run_until(&mut r, step.wake, 20_000, dealt).expect("dealt");
+    let step = r.event(
+        Event::AutoDeal {
+            on: true,
+            after_ms: 1000,
+        },
+        t,
+    );
+    assert_eq!(step.deal_at, None, "not mid-hand");
+    let step = play_out_with_host(&mut r, t + 10_000);
+    assert_eq!(step.deal_at, Some(t + 11_000));
+    let (at, _) = run_until(&mut r, step.wake, t + 60_000, dealt).expect("dealt again");
+    assert_eq!(at, t + 11_000);
+    // Off again: the hand after this one waits for the host.
+    r.event(
+        Event::AutoDeal {
+            on: false,
+            after_ms: 1000,
+        },
+        at,
+    );
+    let step = play_out_with_host(&mut r, at + 10_000);
+    assert_eq!(step.deal_at, None);
+    assert!(run_until(&mut r, step.wake, at + 120_000, dealt).is_none());
 }
