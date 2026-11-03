@@ -11,7 +11,7 @@ stack depths), so expect breaking changes between 0.x releases.
 
 ```toml
 [dependencies]
-ducy-gto = "0.1"
+ducy-gto = "0.2"
 ```
 
 **Trained models aren't in the crate.** They're too big; download them from
