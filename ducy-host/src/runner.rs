@@ -1,10 +1,15 @@
-//! One club table's loop: a [`TableHost`] and everything that happens at it
+//! One hosted table's loop: a [`TableHost`] and everything that happens at it
 //! with time. The turn clock, the next hand, away players' moves, fair deals,
 //! idle seats, the wait for people after a restart, and the clock that stops
 //! while no one can be reached. It has no timers and no I/O: every
 //! [`Event`] comes with the time, and the [`Step`] it returns says what
 //! happened and when to wake it next. The club keeps the money, the members
 //! and the transport.
+//!
+//! A table whose host plays seat 0 (a friends table) runs the same way: the
+//! host's own moves come as [`Event::Host`], and the host may deal each hand
+//! ([`Event::Deal`]) rather than have it dealt on its own
+//! ([`Event::AutoDeal`]).
 //!
 //! Ported from ducy-web's `table-runner.js` (ducy-web #452), which it has
 //! since replaced.
@@ -91,6 +96,28 @@ impl PlayerCommand {
     }
 }
 
+/// The host's own move, at a table where the host plays seat 0.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HostCommand {
+    /// An action in the hand, as [`TableHost::host_act`] takes it.
+    Act {
+        /// "fold", "check", "call", "bet", "raise" or "all_in".
+        kind: String,
+        /// The bet or raise to, in chips.
+        amount: u64,
+    },
+    /// The host's answer to running it twice.
+    RunTwice {
+        /// Twice.
+        yes: bool,
+    },
+    /// Chips for the host's own stack, within the buy-in limits.
+    Chips {
+        /// How many.
+        amount: u64,
+    },
+}
+
 /// What happens to a table, with the time it happens.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -150,6 +177,22 @@ pub enum Event {
     Open {
         /// Dealing.
         on: bool,
+    },
+    /// The host's own move (a table with a host seat).
+    Host {
+        /// What.
+        cmd: HostCommand,
+    },
+    /// Deal the next hand now, if one can be: between hands, with two or
+    /// more in, and the clock running.
+    Deal,
+    /// Deal each hand on its own, `after_ms` after the last one ends (on),
+    /// or only on [`Event::Deal`] (off). Changing it starts the wait again.
+    AutoDeal {
+        /// On its own.
+        on: bool,
+        /// The wait between hands.
+        after_ms: u64,
     },
     /// The table as it is.
     State,
@@ -253,6 +296,11 @@ pub enum Action {
         /// Who.
         id: String,
     },
+    /// The host's own move didn't count.
+    Refused {
+        /// Why.
+        reason: String,
+    },
 }
 
 /// What an event did, and when to wake the runner next.
@@ -266,6 +314,8 @@ pub struct Step {
     pub stopped: bool,
     /// A restored table is waiting for its people.
     pub paused: bool,
+    /// When the next hand is due, while one is.
+    pub deal_at: Option<u64>,
 }
 
 /// How a runner starts.
@@ -283,12 +333,14 @@ pub struct RunnerConfig {
     pub paused: bool,
     /// Each seated member's last activity (a restored table's).
     pub active: Vec<(String, u64)>,
-    /// Idle time before someone is asked or stood up.
+    /// Idle time before someone is asked or stood up; 0: no one is.
     pub idle_ms: u64,
     /// Time to answer "Still here?".
     pub ask_ms: u64,
     /// The next hand is dealt this long after the last one ends.
     pub next_hand_ms: u64,
+    /// Hands are dealt on their own (else only on [`Event::Deal`]).
+    pub auto_deal: bool,
 }
 
 impl Default for RunnerConfig {
@@ -303,6 +355,7 @@ impl Default for RunnerConfig {
             idle_ms: IDLE_MS,
             ask_ms: ASK_MS,
             next_hand_ms: NEXT_HAND_MS,
+            auto_deal: true,
         }
     }
 }
@@ -336,10 +389,11 @@ struct Dealt {
     seed: Bytes32,
     list: Vec<(String, Bytes32)>,
     used: Vec<(String, Reveal)>,
-    seats: Vec<(String, usize)>,
+    /// Each seat dealt in and who has it (none: the host's own).
+    seats: Vec<(Option<String>, usize)>,
 }
 
-/// One club table's loop. See the module docs.
+/// One hosted table's loop. See the module docs.
 pub struct TableRunner {
     host: TableHost,
     id: String,
@@ -347,6 +401,7 @@ pub struct TableRunner {
     idle_ms: u64,
     ask_ms: u64,
     next_hand_ms: u64,
+    auto_deal: bool,
     due: Due,
     grace_unset: bool,
     now: u64,
@@ -384,6 +439,7 @@ impl TableRunner {
             idle_ms: config.idle_ms,
             ask_ms: config.ask_ms,
             next_hand_ms: config.next_hand_ms,
+            auto_deal: config.auto_deal,
             due: Due::default(),
             grace_unset: config.paused,
             now: 0,
@@ -495,6 +551,16 @@ impl TableRunner {
                 self.host.set_must_play(&id, on, t);
             }
             Event::Open { on } => self.open = on,
+            Event::Host { cmd } => self.host_cmd(cmd),
+            Event::Deal => self.deal_now(),
+            Event::AutoDeal { on, after_ms } => {
+                self.auto_deal = on;
+                self.next_hand_ms = after_ms;
+                self.due.deal = None;
+                if on {
+                    self.state();
+                }
+            }
             Event::State => self.state(),
             Event::Wake => self.wake(),
         }
@@ -516,7 +582,41 @@ impl TableRunner {
             wake,
             stopped: self.stopped,
             paused: self.paused,
+            deal_at: self.due.deal,
         }
+    }
+
+    /// The host's own move; one that doesn't count says why.
+    fn host_cmd(&mut self, cmd: HostCommand) {
+        let t = self.time();
+        let res = match cmd {
+            HostCommand::Act { kind, amount } => self.host.host_act(&kind, amount, t),
+            HostCommand::RunTwice { yes } => self.host.host_run_twice(yes, t),
+            HostCommand::Chips { amount } => self.host.host_chips(amount, t),
+        };
+        match res {
+            Ok(out) => self.took(out, None),
+            Err(e) => {
+                self.actions.push(Action::Refused {
+                    reason: e.to_string(),
+                });
+                self.state();
+            }
+        }
+    }
+
+    /// The host deals now: from the fair-deal round under way, or one
+    /// started for it (the deal waits a little for it, as always).
+    fn deal_now(&mut self) {
+        if !self.complete || self.paused || self.stopped || !self.open || self.host.players_in() < 2
+        {
+            return;
+        }
+        if self.round.is_none() {
+            self.fair_start();
+        }
+        self.due.deal = None;
+        self.deal();
     }
 
     fn set_online(&mut self, id: &str, on: bool) {
@@ -630,7 +730,12 @@ impl TableRunner {
             self.due.advance = Some(self.now + BOT_PACE_MS);
         }
         // A restored table deals no new hand until its people are back.
-        if self.complete && !self.paused && self.due.deal.is_none() && self.open && players_in >= 2
+        if self.auto_deal
+            && self.complete
+            && !self.paused
+            && self.due.deal.is_none()
+            && self.open
+            && players_in >= 2
         {
             // The next hand's fair-deal round, if one isn't under way already.
             if self.round.is_none() {
@@ -679,13 +784,18 @@ impl TableRunner {
                 .filter(|o| matches!(&o.update, Update::State { view, .. } if view.seats.first().is_some_and(|s| s.cards.is_some())))
                 .map(|o| o.to.as_str())
                 .collect();
-            let seats = self
+            let mut seats: Vec<(Option<String>, usize)> = self
                 .host
                 .seated()
                 .into_iter()
                 .filter(|p| dealt_in.contains(p.client_id.as_str()))
-                .map(|p| (p.client_id, p.seat))
+                .map(|p| (Some(p.client_id), p.seat))
                 .collect();
+            // The host's own seat is dealt cards too, which counts for where
+            // everyone else's are.
+            if self.host.has_host() && self.host.table().hand_index(0).is_some() {
+                seats.push((None, 0));
+            }
             self.dealt = Some(Dealt {
                 hand: self.host.host_view().hand_number,
                 seed,
@@ -833,6 +943,7 @@ impl TableRunner {
         let mut order = d.seats.clone();
         order.sort_by_key(|(_, seat)| *seat);
         for (index, (id, _)) in order.iter().enumerate() {
+            let Some(id) = id else { continue };
             let r = FairResult {
                 hand: d.hand,
                 game: self.game.clone(),
@@ -874,7 +985,7 @@ impl TableRunner {
     /// When the idle check is next due, for whoever's due first.
     fn idle_due(&self) -> Option<u64> {
         // A closing table stands everyone up anyway.
-        if !self.open {
+        if !self.open || self.idle_ms == 0 {
             return None;
         }
         let at = self
@@ -895,7 +1006,7 @@ impl TableRunner {
 
     /// Asks or stands up whoever's been idle too long.
     fn check_idle(&mut self) {
-        if !self.link || self.paused || !self.open {
+        if !self.link || self.paused || !self.open || self.idle_ms == 0 {
             return;
         }
         let ids: Vec<String> = self.players.iter().map(|p| p.client_id.clone()).collect();

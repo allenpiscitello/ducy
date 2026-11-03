@@ -11,6 +11,7 @@
 //! - [`runner`] and [`tourney_runner`]: a host's loop: when to deal the next
 //!   hand, absent players' moves at a human pace, provably fair or hidden
 //!   deals, and what to send and save.
+//! - [`chat`]: table chat as the host checks it.
 //!
 //! Bots take seats as any [`ducy_play::Bot`]; this crate has none of its own.
 //!
@@ -20,6 +21,7 @@
 
 #![warn(missing_docs)]
 
+pub mod chat;
 mod host;
 pub mod runner;
 pub mod snapshot;
