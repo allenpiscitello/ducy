@@ -176,6 +176,14 @@ impl MultiwayConfig {
             ),
         ]
     }
+
+    /// The menu named `name` in [`Self::presets`], at `big_blinds` deep.
+    pub fn preset(name: &str, big_blinds: u32) -> Option<Self> {
+        Self::presets(big_blinds)
+            .into_iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, c)| c)
+    }
 }
 
 /// An action, with amounts as the street total ("raise to").
