@@ -1124,6 +1124,39 @@ small blind, and stops by itself if its tables pass `--max-gb`. The
 blueprint (`MultiwayBlueprint`) keeps each probability in a byte, about 12
 bytes per information set.
 
+### Playing it: `MultiwayBot`
+
+`sixmax::multiway_bot::MultiwayBot` plays a blueprint at a real six-handed
+table, Hold'em or PLO. `MultiwayPlayer::load(blueprint, cards)` reads the
+menu, depth and hole cards from the blueprint's settings and refuses an
+abstraction other than the one it was trained on. Like `GtoBot`, the bot
+replays the hand on the tree (seats as positions, other players' sizes
+mapped to the menu with the pseudo-harmonic mapping, a limp the menu
+doesn't have taken as the smallest open), buckets its cards, samples the
+strategy and sizes its bets as the same fraction of the real pot. When the
+hand leaves the tree it plays a pot-odds fallback, and `MwCounts` counts
+those decisions and why.
+
+On the GTO field, `sixmax_match` takes `mw@BLUEPRINT:CARDS` in `--bots` or
+`--field` and prints the off-tree rates after the results:
+
+```sh
+L=compact-live-100.bin
+cargo run --release -p ducy-gto --example sixmax_match -- --deals 20000 \
+    --bots "doug_poker,gto6@$L,mw@holdem6.bin:holdem-50.bin" \
+    --field "gto6@$L,gto6@$L,gto6loose@$L,gto6tight@$L,gto6aggro@$L,gto6passive@$L"
+cargo run --release -p ducy-gto --example sixmax_match -- --deals 20000 \
+    --game plo --cards plo6-cards.bin --equity equity.bin --solve solve.bin \
+    --bots "doug_poker,plo6,mw@plo6.bin:plo6-cards.bin" \
+    --field "plo6,plo6,plo6loose,plo6tight,plo6aggro,plo6passive"
+```
+
+Smoke runs (3,000 deals, blueprints trained for a minute or so, so mostly
+untrained): Hold'em at 1M iterations −85 ± 26 bb/100 with 0.2% of
+decisions off the tree; PLO6 at 300K iterations −161 ± 29 bb/100 with
+0.7% off. Most of what's left off the tree is a real round that outlasts
+the tree's raise cap.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)

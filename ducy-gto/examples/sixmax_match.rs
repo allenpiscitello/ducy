@@ -41,8 +41,17 @@
 //! play hold'em. `plo6loose`, `plo6tight`, `plo6aggro` and `plo6passive`
 //! are `plo6` with its preflop skewed like the `gto6` ones, for a field of
 //! the PLO bot with flaws to exploit (`--field plo6,plo6loose,...`).
+//!
+//! `mw@BLUEPRINT:CARDS` plays a six-handed blueprint to the river
+//! (`train_sixmax`, #338) with the card abstraction it was trained on, in
+//! `--bots` or `--field`, Hold'em or (with `--game plo`) PLO with the
+//! blueprint's hole cards. Each blueprint loads once however often it's
+//! named. After the results, the tool prints how often each `mw` bot's hands
+//! left the betting tree (decisions played by the fallback rule).
 
 use std::{
+    cell::RefCell,
+    collections::HashMap,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
@@ -70,6 +79,7 @@ use ducy_gto::{
     sixmax::{
         bot::{PreflopStrategy, SixMaxBot},
         equity::PreflopEquity,
+        multiway_bot::{MultiwayBot, MultiwayPlayer, MwCounts, OffTree},
         plo_spot::{PloSpotBot, PloSpotGame},
         preflop::{Act, PreflopGame},
         realize::Realization,
@@ -105,6 +115,18 @@ fn lineup(d: u64, k: usize, n: usize) -> Vec<usize> {
         out.push(if n >= k { pool.swap_remove(i) } else { pool[i] });
     }
     out
+}
+
+/// `mw@<blueprint>:<cards>` shortened for the tables: the blueprint's folder
+/// and file name.
+fn mw_label(spec: &str) -> String {
+    let f = spec.split_once('@').map_or(spec, |(_, f)| f);
+    let bp = f.rsplit_once(':').map_or(f, |(bp, _)| bp);
+    let parts: Vec<&str> = bp.rsplit('/').take(2).collect();
+    format!(
+        "mw@{}",
+        parts.into_iter().rev().collect::<Vec<_>>().join("/")
+    )
 }
 
 fn regular(p: Personality) -> Make {
@@ -397,6 +419,11 @@ fn main() {
         return;
     }
 
+    // Six-handed blueprints by spec, loaded once however often they're named,
+    // and every mw bot's decision counts (spec, counts) for the off-tree
+    // report.
+    let multiway: RefCell<HashMap<String, Arc<MultiwayPlayer>>> = RefCell::default();
+    let mw_counts: RefCell<Vec<(String, Arc<MwCounts>)>> = RefCell::default();
     let build = |name: &str| -> (String, Make) {
         let (kind, solve_file) = match name.split_once('@') {
             Some((k, f)) => (k, Some(f.to_string())),
@@ -404,6 +431,37 @@ fn main() {
         };
         let make: Make = match kind {
             "equity" => Arc::new(|s| Box::new(EquityBot::new(200, Some(s))) as Box<dyn Bot>),
+            "mw" => {
+                // mw@<blueprint>:<cards>: a train_sixmax blueprint and the
+                // card abstraction it was trained on.
+                let spec = solve_file.clone().expect("mw@<blueprint>:<cards>");
+                let player = multiway
+                    .borrow_mut()
+                    .entry(spec.clone())
+                    .or_insert_with(|| {
+                        let (bp, cards) = spec.rsplit_once(':').expect("mw@<blueprint>:<cards>");
+                        let read =
+                            |f: &str| std::fs::read(f).unwrap_or_else(|e| panic!("read {f}: {e}"));
+                        let player = MultiwayPlayer::load(&read(bp), &read(cards))
+                            .unwrap_or_else(|e| panic!("{bp}: {e}"));
+                        let table = plo_cards.as_ref().map_or(2, |c| c.config.hole_cards);
+                        assert_eq!(
+                            player.hole_cards, table,
+                            "{bp}: a blueprint for {} hole cards at a {table}-card table",
+                            player.hole_cards
+                        );
+                        Arc::new(player)
+                    })
+                    .clone();
+                let counts = Arc::new(MwCounts::default());
+                mw_counts
+                    .borrow_mut()
+                    .push((name.to_string(), counts.clone()));
+                Arc::new(move |s| {
+                    Box::new(MultiwayBot::new(player.clone(), s).with_counts(counts.clone()))
+                        as Box<dyn Bot>
+                })
+            }
             "plo6" | "plo6hu" | "plo6s" | "plo6loose" | "plo6tight" | "plo6aggro"
             | "plo6passive" => {
                 let cards = plo_cards.clone().expect("plo6 needs --game plo");
@@ -635,12 +693,15 @@ fn main() {
         };
         // A solve's file by its name alone, so the table stays readable.
         let shown = match name.split_once('@') {
+            // mw: the blueprint's folder and name, without the cards.
+            Some(("mw", _)) => mw_label(name),
             Some((k, f)) => format!("{k}@{}", f.rsplit('/').next().unwrap_or(f)),
             None => name.to_string(),
         };
         (shown, make)
     };
     let bots: Vec<(String, Make)> = names.split(',').map(build).collect();
+    let bot_mw = mw_counts.borrow().len();
     // The opponents: every Regular, or the bots named in --field.
     let field: Vec<Make> = match &field_names {
         Some(f) => f.split(',').map(|n| build(n).1).collect(),
@@ -702,6 +763,32 @@ fn main() {
         }
         println!();
         results.push(s.per_deal);
+    }
+    // How often the six-handed blueprints could follow their hands.
+    let mw_counts = mw_counts.into_inner();
+    if !mw_counts.is_empty() {
+        println!("\nsix-handed blueprints off the tree (fallback decisions, hands with one):");
+        for (k, (spec, c)) in mw_counts.iter().enumerate() {
+            let role = if k < bot_mw { "bot" } else { "field" };
+            let (by_decision, by_hand) = c.rates();
+            println!(
+                "{:>18} {role:>5}: {:>10} decisions, {:>5.2}% off the tree, {:>5.2}% of {} hands",
+                mw_label(spec),
+                c.decisions.load(Relaxed),
+                100.0 * by_decision,
+                100.0 * by_hand,
+                c.hands.load(Relaxed),
+            );
+            let off = c.off_tree.load(Relaxed).max(1) as f64;
+            let why: Vec<String> = OffTree::ALL
+                .iter()
+                .map(|&r| {
+                    let n = c.by_reason[r as usize].load(Relaxed) as f64;
+                    format!("{} {:.0}%", r.name(), 100.0 * n / off)
+                })
+                .collect();
+            println!("{:>25} why: {}", "", why.join(", "));
+        }
     }
     finished.store(true, Relaxed);
     if let Some(r) = reporter {

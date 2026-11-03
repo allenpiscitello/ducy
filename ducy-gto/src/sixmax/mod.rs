@@ -17,12 +17,14 @@
 //!   preflop buckets as hand classes, their equity, and the dealer.
 //! - [`multiway`]: the whole six-handed game to the river (#338), Hold'em or
 //!   PLO, for training a blueprint with [`Mccfr`](crate::Mccfr).
+//! - [`multiway_bot`]: a bot that plays that blueprint at a real table.
 
 pub mod bot;
 pub mod chart;
 pub mod equity;
 pub mod field;
 pub mod multiway;
+pub mod multiway_bot;
 pub mod plo;
 pub mod plo_spot;
 pub mod preflop;
