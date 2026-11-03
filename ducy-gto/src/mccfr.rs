@@ -283,8 +283,15 @@ where
                 .config
                 .prune
                 .is_some_and(|p| i >= p.after && (p.full_every == 0 || i % p.full_every != 0));
+            let dealt;
+            let start = if self.game.shared_deal() && self.game.turn(&root) == Turn::Chance {
+                dealt = self.game.sample_chance(&root, &mut rng);
+                &dealt
+            } else {
+                &root
+            };
             for player in 0..self.game.num_players() {
-                self.traverse(&root, player, prune, &mut rng, &mut delta);
+                self.traverse(start, player, prune, &mut rng, &mut delta);
             }
         }
         delta
@@ -404,6 +411,27 @@ where
         } else {
             vec![1.0 / s.len() as f64; s.len()]
         })
+    }
+
+    /// Calls `f` with every information set seen and its average strategy,
+    /// in the order they were first seen, without building a [`Profile`]:
+    /// for tables too big to copy.
+    pub fn average_each(&self, mut f: impl FnMut(&G::Info, &[f64])) {
+        let mut keys: Vec<(&G::Info, u32)> =
+            self.table.index.iter().map(|(k, &v)| (k, v)).collect();
+        keys.sort_by_key(|&(_, id)| id);
+        let mut probs = Vec::new();
+        for (info, id) in keys {
+            let s = &self.table.sum[self.table.range(id)];
+            let total: f64 = s.iter().map(|&x| x as f64).sum();
+            probs.clear();
+            if total > 0.0 {
+                probs.extend(s.iter().map(|&x| x as f64 / total));
+            } else {
+                probs.extend(std::iter::repeat_n(1.0 / s.len() as f64, s.len()));
+            }
+            f(info, &probs);
+        }
     }
 
     /// The average strategy, which converges to an equilibrium.

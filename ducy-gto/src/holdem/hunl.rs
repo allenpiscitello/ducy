@@ -18,7 +18,7 @@
 
 use super::{
     abstraction::CardAbstraction,
-    cards::{Card, NUM_CARDS, bit, showdown_score},
+    cards::{Card, NUM_CARDS, bit, mask, score, showdown_score},
 };
 use crate::{
     game::{Game, Turn},
@@ -490,6 +490,15 @@ pub trait Buckets {
         }
         out
     }
+    /// Every hand's buckets on every street for one deal at a bigger table
+    /// (`out[i]` for `hole[i]`). By default each is [`Buckets::hand_bucket`].
+    fn table_buckets(&self, hole: &[&[Card]], board: &[Card; 5], out: &mut [[u16; 4]]) {
+        for (b, h) in out.iter_mut().zip(hole) {
+            for (street, n) in [0usize, 3, 4, 5].into_iter().enumerate() {
+                b[street] = self.hand_bucket(h, &board[..n]);
+            }
+        }
+    }
 }
 
 impl Buckets for CardAbstraction {
@@ -503,6 +512,45 @@ impl Buckets for CardAbstraction {
 
     fn settings(&self) -> String {
         format!("{:?}", self.config)
+    }
+
+    /// The same buckets as [`Buckets::hand_bucket`], but on the river the
+    /// 1,081 opponent hands are scored once for the whole table rather than
+    /// once per hand (the equity is [`river_equity`]'s, bit for bit).
+    ///
+    /// [`river_equity`]: super::equity::river_equity
+    fn table_buckets(&self, hole: &[&[Card]], board: &[Card; 5], out: &mut [[u16; 4]]) {
+        for (b, h) in out.iter_mut().zip(hole) {
+            for (street, n) in [0usize, 3, 4].into_iter().enumerate() {
+                b[street] = self.hand_bucket(h, &board[..n]);
+            }
+        }
+        let board_mask = mask(board);
+        let free: Vec<Card> = (0..NUM_CARDS as Card)
+            .filter(|&c| board_mask & bit(c) == 0)
+            .collect();
+        let mut others: Vec<(u32, u64)> = Vec::with_capacity(1081);
+        for (i, &a) in free.iter().enumerate() {
+            for &c in &free[i + 1..] {
+                let m = bit(a) | bit(c);
+                others.push((score(board_mask | m), m));
+            }
+        }
+        for (b, h) in out.iter_mut().zip(hole) {
+            let mine = bit(h[0]) | bit(h[1]);
+            let me = score(board_mask | mine);
+            // Wins count 2, ties 1.
+            let halves: u32 = others
+                .iter()
+                .filter(|(_, m)| m & mine == 0)
+                .map(|&(s, _)| match me.cmp(&s) {
+                    std::cmp::Ordering::Greater => 2,
+                    std::cmp::Ordering::Equal => 1,
+                    std::cmp::Ordering::Less => 0,
+                })
+                .sum();
+            b[3] = self.river_bucket(halves as f32 * 0.5 / 990.0);
+        }
     }
 }
 

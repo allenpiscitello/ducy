@@ -62,6 +62,13 @@ pub trait Game {
         let i = rng.sample(&probs);
         outcomes.into_iter().nth(i).expect("chance has outcomes").0
     }
+    /// Whether [`Mccfr`](crate::Mccfr) deals once per iteration: one sample
+    /// of the root's chance node shared by every player's traversal, as in
+    /// Pluribus, rather than one per traversal. Worth it when dealing is
+    /// costly (bucketing six hands); off by default.
+    fn shared_deal(&self) -> bool {
+        false
+    }
     /// How many actions the player to act has (at least 1).
     fn num_actions(&self, state: &Self::State) -> usize;
     fn apply(&self, state: &Self::State, action: usize) -> Self::State;

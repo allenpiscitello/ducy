@@ -1070,6 +1070,60 @@ cargo run --release -p ducy-gto --example sixmax_export -- \
   times the deepest (100 BB alone covers 70 to 140 BB). After the flop, and
   at any other depth or table size, it plays Doug Poker's game.
 
+## Six-handed to the river (#338)
+
+`Mccfr` trains games with any number of players: `Game::num_players` and
+`Game::utility_for` give each player its own payoff, and every iteration
+traverses once per player (Pluribus-style external sampling, nothing
+zero-sum assumed). Three-player Kuhn poker (`games::kuhn3`) checks it: after
+400k iterations no player gains more than 0.004 chips a hand by deviating
+(`best_response_gains`).
+
+`sixmax::multiway` is the whole six-handed game: blinds, 100 BB, preflop to
+the river, folded players out, side pots, a small menu with capped raises
+per street (no-limit for Hold'em, pot-limit for PLO), and the existing card
+abstractions (Hold'em's, or PLO's with 4 to 6 hole cards). An information
+set is a node of the compiled betting tree (8 bytes a node) and the player's
+bucket on the street. The six traversals of an iteration share one deal
+(`Game::shared_deal`): bucketing six hands is most of the cost, and sharing
+it made training 3.5 times faster.
+
+`sixmax_size` sizes a configuration before any long run: tree counts,
+information sets (an upper bound: the solver only stores what it reaches),
+memory, checkpoint size, and a timed run on all cores.
+
+| Menu, buckets (pre / flop / turn / river) | Infosets (max) | Memory | Checkpoint | Speed (12 cores) | Hours at 1,000 visits per infoset |
+|---|---|---|---|---|---|
+| `holdem-lean`, 169 / 50 / 50 / 50 | 100M | 6.7 GB | 2.6 GB | 13,000 it/s, 2.1M visits/s | 13 |
+| `holdem-lean`, 169 / 200 / 200 / 200 | 399M | 26 GB | 10.3 GB | same | 52 |
+| `holdem`, 169 / 50 / 50 / 50 | 225M | 15 GB | 5.9 GB | 11,000 it/s | 29 |
+| `plo-lean` PLO4, 200 / 100 / 100 / 100 | 54M | 3.5 GB | 1.4 GB | 5,000 it/s, 1.25M visits/s | 12 |
+| `plo-lean` PLO4, 500 / 200 / 200 / 200 | 108M | 7.1 GB | 2.7 GB | same | 24 |
+| `plo-lean` PLO4, 500 / 500 / 500 / 200 (today's nuts-first) | 176M | 11.5 GB | 4.4 GB | same | 39 |
+| `plo-lean` PLO5 / PLO6, 500 / 200 / 200 / 200 | 108M | 7.1 GB | 2.7 GB | 4,400 it/s, 1.1M visits/s | 27 |
+
+Measured at `nice -n 19` beside the training queue. The heads-up blueprint
+gets about 11,700 visits per information set by 300M iterations; giving the
+six-handed game as many would take about 12 times the hours above. Letting
+anyone limp (`-limp`) multiplies the trees by 8 (multiway limped pots), so
+only the small blind limps. Speed barely depends on the bucket counts.
+
+```sh
+cargo run --release -p ducy-gto --example build_abstraction -- holdem-50.bin 50 50 50
+cargo run --release -p ducy-gto --example train_sixmax -- \
+    --cards holdem-50.bin --menu holdem-lean --iters 500000000 --every 20000000 \
+    --checkpoint holdem6.ckpt --out holdem6.bin
+cargo run --release -p ducy-gto --example train_sixmax -- \
+    --plo-cards plo4-cards.bin --menu plo-lean ...
+```
+
+`train_sixmax` resumes from `--checkpoint`, writes it (and the blueprint)
+through a temporary file, so a run needs about twice the checkpoint's size
+in free disk, reports the opening frequencies of UTG, the button and the
+small blind, and stops by itself if its tables pass `--max-gb`. The
+blueprint (`MultiwayBlueprint`) keeps each probability in a byte, about 12
+bytes per information set.
+
 ## Next steps
 
 1. **Done:** CFR engine, exact exploitability on Kuhn and Leduc (#85)
