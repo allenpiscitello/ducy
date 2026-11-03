@@ -7,6 +7,8 @@ license = "MIT"
 description = "Player identities for ducy: signed message envelopes, player IDs and their checks, as ducy-web's pages and relay use them."
 repository = "https://github.com/allenpiscitello/ducy"
 readme = "README.md"
+# Only ducy-web uses it (pinned by git rev); it stays off crates.io.
+publish = false
 categories = ["cryptography"]
 keywords = ["poker", "ed25519", "ecdsa", "signatures"]
 
