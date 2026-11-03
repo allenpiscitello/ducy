@@ -34,7 +34,7 @@ Add ducy to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ducy = "0.3"
+ducy = "0.4"
 ```
 
 ### Evaluate a Hold'em hand

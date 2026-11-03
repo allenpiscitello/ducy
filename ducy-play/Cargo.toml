@@ -1,6 +1,6 @@
 [package]
 name = "ducy-play"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT"
@@ -20,7 +20,7 @@ default = ["serde"]
 serde = ["dep:serde", "ducy/serde"]
 
 [dependencies]
-ducy = { version = "0.3.0", path = "..", default-features = false }
+ducy = { version = "0.4.0", path = "..", default-features = false }
 rand = "0.10.2"
 sha2 = "0.10"
 serde = { version = "1", features = ["derive"], optional = true }

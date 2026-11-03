@@ -16,7 +16,7 @@ networking or table logic.
 
 ```toml
 [dependencies]
-ducy-shuffle = "0.1"
+ducy-shuffle = "0.2"
 ```
 
 It builds natively and for WebAssembly (`wasm32-unknown-unknown`, with

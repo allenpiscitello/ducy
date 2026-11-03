@@ -3,7 +3,7 @@ members = [".", "ducy-play", "ducy-bots", "ducy-host", "ducy-play-wasm", "ducy-g
 
 [package]
 name = "ducy"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT"
