@@ -597,8 +597,8 @@ impl HoldemRange {
         let range = range.trim();
 
         // Specific combo: "AhKs" (rank-suit-rank-suit)
-        if range.len() == 4 && !range.ends_with('+') {
-            let chars: Vec<char> = range.chars().collect();
+        let chars: Vec<char> = range.chars().collect();
+        if chars.len() == 4 && !range.ends_with('+') {
             if let (Ok(r1), Ok(s1), Ok(r2), Ok(s2)) = (
                 Rank::try_from_char(&chars[0]),
                 Suit::try_from_char(&chars[1]),
@@ -756,25 +756,14 @@ impl HoldemRange {
     /// at it.
     pub fn report(text: &str, dead: Deck) -> Result<RangeReport, RangeTextError> {
         let mut range = Self::new();
-        let mut start = None;
-        for (i, ch) in text
-            .char_indices()
-            .chain(std::iter::once((text.len(), ',')))
-        {
-            if matches!(ch, ',' | ' ' | '\t' | '\n' | '\r') {
-                if let Some(s) = start.take() {
-                    let term = &text[s..i];
-                    range.add(term, Decimal::ONE).map_err(|_| RangeTextError {
-                        term: term.to_string(),
-                        start: s,
-                        message: format!(
-                            "“{term}” isn’t a hand or range (e.g. QQ+, AKs, A5s-A2s, KQo, AhKh)."
-                        ),
-                    })?;
-                }
-            } else if start.is_none() {
-                start = Some(i);
-            }
+        for (start, term) in crate::deck::range::terms(text) {
+            range.add(term, Decimal::ONE).map_err(|_| RangeTextError {
+                term: term.to_string(),
+                start,
+                message: format!(
+                    "“{term}” isn’t a hand or range (e.g. QQ+, AKs, A5s-A2s, KQo, AhKh)."
+                ),
+            })?;
         }
         let dead = u64::from(dead);
         let mut combos = 0;
@@ -1049,6 +1038,15 @@ mod test {
     pub fn test_invalid_range_garbage() {
         let mut range = HoldemRange::new();
         assert!(range.add("xyz", dec!(1)).is_err());
+    }
+
+    #[test]
+    pub fn test_invalid_range_wide_characters() {
+        // Four bytes, but one character (or two): an error, not a panic.
+        let mut range = HoldemRange::new();
+        for term in ["🂡", "Aé", "é", "A🂡"] {
+            assert!(range.add(term, dec!(1)).is_err(), "{term}");
+        }
     }
 
     #[test]

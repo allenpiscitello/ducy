@@ -6,7 +6,7 @@ use crate::{
         range::{Range, RangeBase, RangeItem},
     },
     error::DucyError,
-    games::CardDealer,
+    games::{CardDealer, holdem::RangeTextError},
 };
 
 /// A hand property written after `$` in a term.
@@ -384,6 +384,40 @@ impl OmahaRange {
         let total: Decimal = self.iter().map(|item| item.get_weight()).sum();
         f64::try_from(total).unwrap_or(0.0) / self.total_hands() as f64
     }
+
+    /// Parses terms like [`OmahaRange::parse`] and reports what share of
+    /// hands of `cards_per_player` cards they cover. A term that doesn't
+    /// parse is named, with where it starts, so a page can point at it.
+    pub fn report(text: &str, cards_per_player: usize) -> Result<OmahaRangeReport, RangeTextError> {
+        let mut range = Self::new(cards_per_player);
+        for (start, term) in crate::deck::range::terms(text) {
+            range.add(term, Decimal::ONE).map_err(|_| RangeTextError {
+                term: term.to_string(),
+                start,
+                message: format!(
+                    "“{term}” isn’t an Omaha range term (e.g. AAxx$ds, $rd0-1, KK$ss)."
+                ),
+            })?;
+        }
+        Ok(OmahaRangeReport {
+            combos: range.combos(),
+            total: range.total_hands(),
+            coverage: range.coverage(),
+        })
+    }
+}
+
+/// What an Omaha range's text covers: its hands, all possible hands and the
+/// share between them.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct OmahaRangeReport {
+    /// Hands in the range.
+    pub combos: u64,
+    /// Possible starting hands, e.g. 270,725 for 4 cards.
+    pub total: u64,
+    /// `combos / total`, 0 to 1.
+    pub coverage: f64,
 }
 
 /// Draws hands from an [`OmahaRange`] in proportion to their weights,
@@ -458,6 +492,16 @@ mod test {
         assert_eq!(total_hands(5), 2_598_960);
         assert_eq!(count("xxxx"), 270_725);
         assert_eq!(count("$ds"), count("xxxx$ds"));
+    }
+
+    #[test]
+    fn test_report() {
+        let r = OmahaRange::report("AAKK, AAAA", 4).unwrap();
+        assert_eq!((r.combos, r.total), (37, 270_725));
+        assert!((r.coverage - 37.0 / 270_725.0).abs() < 1e-12);
+        let e = OmahaRange::report("AAxx, $nonsense", 4).unwrap_err();
+        assert_eq!((e.term.as_str(), e.start), ("$nonsense", 6));
+        assert!(e.message.contains("$nonsense"));
     }
 
     #[test]
