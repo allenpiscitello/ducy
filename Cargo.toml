@@ -1,9 +1,13 @@
 [workspace]
 members = [".", "ducy-play", "ducy-bots", "ducy-host", "ducy-play-wasm", "ducy-gto", "ducy-shuffle", "ducy-identity"]
 
+# Every crate in the workspace shares one version.
+[workspace.package]
+version = "0.4.0"
+
 [package]
 name = "ducy"
-version = "0.4.0"
+version.workspace = true
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT"

@@ -1,12 +1,14 @@
 [package]
 name = "ducy-identity"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT"
 description = "Player identities for ducy: signed message envelopes, player IDs and their checks, as ducy-web's pages and relay use them."
 repository = "https://github.com/allenpiscitello/ducy"
 readme = "README.md"
+# Only ducy-web uses it (pinned by git rev); it stays off crates.io.
+publish = false
 categories = ["cryptography"]
 keywords = ["poker", "ed25519", "ecdsa", "signatures"]
 
