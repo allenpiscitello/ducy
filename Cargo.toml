@@ -3,7 +3,7 @@ members = [".", "ducy-play", "ducy-bots", "ducy-host", "ducy-play-wasm", "ducy-g
 
 # Every crate in the workspace shares one version and minimum Rust.
 [workspace.package]
-version = "0.5.0"
+version = "0.5.1"
 rust-version = "1.87.0"
 
 [package]
