@@ -254,7 +254,7 @@ fn combo_indexes_cover_every_hand_once() {
                     let i = combo_index(&[a, c, d, b]);
                     assert!(!seen[i], "index {i} twice");
                     seen[i] = true;
-                    if i % 997 == 0 {
+                    if i.is_multiple_of(997) {
                         assert_eq!(combo_cards(i, 4), vec![d, c, b, a]);
                     }
                 }

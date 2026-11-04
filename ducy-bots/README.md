@@ -9,8 +9,8 @@ deals, and `ProcessBot` for bots written in any language.
 
 ```toml
 [dependencies]
-ducy-play = "0.4"
-ducy-bots = "0.4"
+ducy-play = "0.5"
+ducy-bots = "0.5"
 ```
 
 Features: `process` (default) adds `ProcessBot` and `serde`.

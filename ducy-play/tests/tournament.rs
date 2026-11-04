@@ -699,7 +699,7 @@ fn stateless_field(n: usize) -> Vec<Entrant> {
 
 fn bot_for(id: &str) -> Option<Box<dyn Bot>> {
     let i: usize = id.strip_prefix('p')?.parse().ok()?;
-    Some(if i % 3 == 0 {
+    Some(if i.is_multiple_of(3) {
         Box::new(Shover)
     } else {
         Box::new(CallingStation)

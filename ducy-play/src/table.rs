@@ -581,7 +581,7 @@ impl Table {
     /// pots are on one.
     fn rules_for_hand(&self, hand: u64, hidden: bool) -> TableRules {
         match self.bomb_pots {
-            Some(b) if hand % b.every == 0 => {
+            Some(b) if hand.is_multiple_of(b.every) => {
                 self.rules.bomb_pot(b.ante, b.double_board && !hidden)
             }
             _ => self.rules,

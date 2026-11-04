@@ -152,7 +152,7 @@ impl FlopPass {
                     p.turn_hist[(t as usize * NUM_HOLES + h) * turn_bins + tb] += 1.0;
                     p.turn_hist[(r as usize * NUM_HOLES + h) * turn_bins + tb] += 1.0;
                     n += 1;
-                    if n % river_stride == 0 {
+                    if n.is_multiple_of(river_stride) {
                         p.river.push(e);
                     }
                 }

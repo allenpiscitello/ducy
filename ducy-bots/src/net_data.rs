@@ -127,7 +127,7 @@ pub fn read_records(bytes: &[u8]) -> Result<Vec<Record>, DataError> {
         return Err(DataError::Mismatch);
     }
     let body = &bytes[HEADER_BYTES..];
-    if body.len() % RECORD_BYTES != 0 {
+    if !body.len().is_multiple_of(RECORD_BYTES) {
         return Err(DataError::Truncated);
     }
     Ok(body.chunks_exact(RECORD_BYTES).map(Record::read).collect())

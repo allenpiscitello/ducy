@@ -17,7 +17,7 @@ rounds, side pots and the showdown.
 
 ```toml
 [dependencies]
-ducy-play = "0.4"
+ducy-play = "0.5"
 ```
 
 Features: `serde` (default) serializes rules, actions, events, views and
