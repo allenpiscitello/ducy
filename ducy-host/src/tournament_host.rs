@@ -353,6 +353,12 @@ impl TournamentHost {
         self.events.level = Some(self.t.level());
     }
 
+    /// Adds a level past the last for blinds that still rise (ducy-play's
+    /// `Tournament::add_rising_level`). Returns its index.
+    pub fn add_rising_level(&mut self) -> usize {
+        self.t.add_rising_level()
+    }
+
     /// Time left for whoever is acting at table `id`, if a person is on the clock.
     pub fn turn_ms_left(&self, id: usize, now: u64) -> Option<u64> {
         self.deadlines.get(&id).map(|d| d.saturating_sub(now))

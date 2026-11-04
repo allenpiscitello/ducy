@@ -1,7 +1,9 @@
 //! One club tournament's loop: a [`TournamentHost`] and everything that
 //! happens there with time. The level clock with its breaks, the next hands,
 //! absent players' moves, the turn clocks, and which tables have just
-//! finished a hand. It has no timers and no I/O: every [`TourneyEvent`]
+//! finished a hand. The blinds keep rising until the big blind is a fifth of
+//! the chips in play: past the structure's last level the runner adds levels
+//! (as long as the last), and once there it stays. It has no timers and no I/O: every [`TourneyEvent`]
 //! comes with the time, and the [`TourneyStep`] it returns says what
 //! happened and when to wake it next. The club keeps registration,
 //! knockouts, prizes, saving and the transport.
@@ -11,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use ducy_play::{PlayError, Standing, TableView};
+use ducy_play::{Level, PlayError, Standing, TableView};
 
 use crate::{Command, Outgoing, TournamentEvents, TournamentHost, Update};
 
@@ -52,6 +54,8 @@ pub struct TourneyResult {
     pub tables: Vec<TableInfo>,
     /// The blind level (from 0).
     pub level: usize,
+    /// Its blinds, which past the structure's last level are ones it added.
+    pub blinds: Level,
     /// Players still in.
     pub players_left: usize,
     /// Every chip in play.
@@ -89,6 +93,7 @@ impl TourneyResult {
             standings: host.standings(),
             tables,
             level: t.level(),
+            blinds: t.current_level(),
             players_left: t.players_left(),
             total_chips: t.total_chips(),
             hand_for_hand: t.hand_for_hand(),
@@ -153,7 +158,8 @@ pub struct TourneyStep {
     pub wake: Option<u64>,
     /// The structure's step being played (a level or a break).
     pub step: usize,
-    /// When it ends; `None`: the last level, which stays.
+    /// When it ends; `None`: a level that stays, the big blind a fifth of
+    /// the chips in play or more.
     pub step_ends_at: Option<u64>,
     /// It's a break.
     pub on_break: bool,
@@ -209,6 +215,15 @@ impl Default for TourneyConfig {
     }
 }
 
+/// The length of the structure's last level, if it has one.
+fn last_level_minutes(structure: &[StructureStep]) -> Option<u64> {
+    structure
+        .iter()
+        .rev()
+        .find(|s| !s.is_break)
+        .map(|s| s.minutes)
+}
+
 #[derive(Default)]
 struct Due {
     level: Option<u64>,
@@ -234,7 +249,18 @@ pub struct TourneyRunner {
 
 impl TourneyRunner {
     /// Runs `host` (a new tournament, or one restored).
-    pub fn new(host: TournamentHost, config: TourneyConfig) -> Self {
+    pub fn new(host: TournamentHost, mut config: TourneyConfig) -> Self {
+        // A restored one may have risen past its structure: those levels
+        // too, each as long as the structure's last.
+        let have = config.structure.iter().filter(|s| !s.is_break).count();
+        if let Some(minutes) = last_level_minutes(&config.structure) {
+            for _ in have..host.tournament().config().levels.len() {
+                config.structure.push(StructureStep {
+                    minutes,
+                    is_break: false,
+                });
+            }
+        }
         Self {
             host,
             cur: config.step,
@@ -281,6 +307,16 @@ impl TourneyRunner {
             TourneyEvent::AddEntry { id, name } => {
                 let out = self.host.add_entry(&id, &name, now)?;
                 self.took(out);
+                // More chips in play: blinds that had stopped may rise again.
+                if !self.over
+                    && !self.on_break
+                    && self.due.level.is_none()
+                    && self.host.tournament().blinds_rise()
+                {
+                    let ms = self.step_ms(self.config.structure[self.cur]);
+                    self.step_ends_at = Some(now + ms);
+                    self.due.level = self.step_ends_at;
+                }
             }
             TourneyEvent::State => self.took(Vec::new()),
             TourneyEvent::Wake => self.wake(),
@@ -359,31 +395,54 @@ impl TourneyRunner {
         d.tick = left.map(|ms| now + ms + 50);
     }
 
+    /// How long step `s` lasts.
+    fn step_ms(&self, s: StructureStep) -> u64 {
+        self.config.level_ms.unwrap_or(s.minutes * 60_000)
+    }
+
     /// The level clock: step `i` of the structure (a level, or a break)
-    /// starts now, or, resuming, goes on with `left_ms` to go. The last level
-    /// stays once it's reached.
+    /// starts now, or, resuming, goes on with `left_ms` to go. Past the last
+    /// step the blinds rise on, a level at a time, while the big blind is
+    /// under a fifth of the chips in play; a level at or above that stays.
     fn start_step(&mut self, i: usize, left_ms: Option<u64>) {
-        let steps = &self.config.structure;
-        let Some(last) = steps.len().checked_sub(1) else {
+        let Some(minutes) = last_level_minutes(&self.config.structure) else {
             self.took(Vec::new());
             return;
         };
-        self.cur = i.min(last);
-        let s = steps[self.cur];
+        let mut i = i;
+        if i >= self.config.structure.len() {
+            if self.host.tournament().blinds_rise() {
+                self.host.add_rising_level();
+                self.config.structure.push(StructureStep {
+                    minutes,
+                    is_break: false,
+                });
+                i = self.config.structure.len() - 1;
+            } else {
+                i = self
+                    .config
+                    .structure
+                    .iter()
+                    .rposition(|s| !s.is_break)
+                    .unwrap_or(0);
+            }
+        }
+        let steps = &self.config.structure;
+        self.cur = i;
+        let s = steps[i];
         self.on_break = s.is_break;
-        let level = steps[..=self.cur]
+        let level = steps[..=i]
             .iter()
             .filter(|x| !x.is_break)
             .count()
             .saturating_sub(1);
-        let ms = left_ms
-            .or(self.config.level_ms)
-            .unwrap_or(s.minutes * 60_000);
-        self.step_ends_at = (i < steps.len()).then_some(self.now + ms);
-        self.due.level = (i < last || s.is_break).then_some(self.now + ms);
         if !self.on_break && level != self.level {
             self.host.set_level(level);
         }
+        let ms = left_ms.unwrap_or_else(|| self.step_ms(s));
+        let ends = s.is_break || self.host.tournament().blinds_rise();
+        self.step_ends_at = ends.then_some(self.now + ms);
+        self.due.level = self.step_ends_at;
         self.took(Vec::new());
     }
 

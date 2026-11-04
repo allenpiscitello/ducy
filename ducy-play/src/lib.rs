@@ -78,5 +78,6 @@ pub use snapshot::{
 };
 pub use table::{BombPots, SeatState, Table, TableSeat, TableView};
 pub use tournament::{
-    Entrant, Finish, HandReport, Level, Move, SeatRef, Standing, Tournament, TournamentConfig,
+    Entrant, Finish, HandReport, Level, Move, SeatRef, Standing, TOP_BB_SHARE, Tournament,
+    TournamentConfig,
 };

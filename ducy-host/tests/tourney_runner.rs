@@ -58,7 +58,7 @@ fn ev(r: &mut TourneyRunner, e: TourneyEvent, now: u64) -> TourneyStep {
 }
 
 #[test]
-fn the_level_clock_runs_its_levels_and_a_break_and_the_last_stays() {
+fn the_level_clock_runs_its_levels_and_a_break_and_rises_past_the_last() {
     let mut r = runner(host(4), TourneyConfig::default());
     let step = ev(&mut r, TourneyEvent::Begin, 0);
     assert_eq!(
@@ -95,14 +95,90 @@ fn the_level_clock_runs_its_levels_and_a_break_and_the_last_stays() {
     let step = ev(&mut r, TourneyEvent::Wake, 15 * MIN);
     assert_eq!((step.step, step.level, step.on_break), (2, 1, false));
     assert_eq!(r.host().tournament().level(), 1);
-    // Level 3 is the last: it stays.
+    // Level 3 is the structure's last, but its 100 big blind is under a
+    // fifth of the 800 chips in play: the blinds rise on, as from 50 to 100.
     let step = ev(&mut r, TourneyEvent::Wake, 25 * MIN);
     assert_eq!(
         (step.step, step.level, step.step_ends_at),
         (3, 2, Some(35 * MIN))
     );
     let step = ev(&mut r, TourneyEvent::Wake, 35 * MIN);
-    assert_eq!((step.step, step.level), (3, 2));
+    assert_eq!((step.step, step.level), (4, 3));
+    assert_eq!(
+        r.host().tournament().current_level(),
+        Level::new(100, 200, 20)
+    );
+    // 200 is a fifth of the chips or more: it stays.
+    assert_eq!(step.step_ends_at, None);
+    let TourneyAction::Engine(res) = step.actions.last().unwrap() else {
+        panic!("an engine result")
+    };
+    assert_eq!(res.blinds, Level::new(100, 200, 20));
+    // A late entry brings 200 more chips in: 1000, and 200 is a fifth.
+    let step = ev(
+        &mut r,
+        TourneyEvent::AddEntry {
+            id: "p9".into(),
+            name: "P9".into(),
+        },
+        36 * MIN,
+    );
+    assert_eq!(step.step_ends_at, None);
+    // Another: 1200, and they rise again a level's time on.
+    let step = ev(
+        &mut r,
+        TourneyEvent::AddEntry {
+            id: "p10".into(),
+            name: "P10".into(),
+        },
+        37 * MIN,
+    );
+    assert_eq!(step.step_ends_at, Some(47 * MIN));
+    let step = ev(&mut r, TourneyEvent::Wake, 47 * MIN);
+    assert_eq!((step.step, step.level, step.step_ends_at), (5, 4, None));
+    assert_eq!(
+        r.host().tournament().current_level(),
+        Level::new(200, 400, 40)
+    );
+}
+
+#[test]
+fn a_level_at_a_fifth_of_the_chips_stays_and_a_restored_one_keeps_its_risen_levels() {
+    // 2 players, 400 chips: level 2's 50 big blind is under 80, level 3's
+    // 100 isn't, so level 3 stays.
+    let mut r = runner(host(2), TourneyConfig::default());
+    ev(&mut r, TourneyEvent::Begin, 0);
+    ev(&mut r, TourneyEvent::Wake, 10 * MIN);
+    let step = ev(&mut r, TourneyEvent::Wake, 15 * MIN);
+    assert_eq!((step.step, step.step_ends_at), (2, Some(25 * MIN)));
+    let step = ev(&mut r, TourneyEvent::Wake, 25 * MIN);
+    assert_eq!((step.step, step.level, step.step_ends_at), (3, 2, None));
+
+    // 8 players, 1600 chips: it rises to 200 and 400 past the structure;
+    // saved and restored there, the runner knows those levels.
+    let mut r = runner(host(8), TourneyConfig::default());
+    ev(&mut r, TourneyEvent::Begin, 0);
+    let mut now = 0;
+    let mut step = ev(&mut r, TourneyEvent::Wake, now);
+    while let Some(t) = step.step_ends_at {
+        now = t;
+        step = ev(&mut r, TourneyEvent::Wake, now);
+    }
+    assert_eq!((step.step, step.level), (5, 4));
+    assert_eq!(r.host().tournament().current_level().big_blind, 400);
+    let saved = r.host().snapshot(now);
+    let h = TournamentHost::restore(&saved, now, |_| None).unwrap();
+    let mut r = runner(
+        h,
+        TourneyConfig {
+            step: 5,
+            level: 4,
+            step_left_ms: Some(MIN),
+            ..TourneyConfig::default()
+        },
+    );
+    let step = ev(&mut r, TourneyEvent::Begin, now);
+    assert_eq!((step.step, step.level, step.step_ends_at), (5, 4, None));
 }
 
 #[test]
