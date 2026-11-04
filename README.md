@@ -34,7 +34,7 @@ Add ducy to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ducy = "0.4"
+ducy = "0.5"
 ```
 
 ### Evaluate a Hold'em hand
@@ -118,7 +118,7 @@ the `OmahaRange` docs for more examples.
 
 ## Minimum supported Rust version
 
-1.85.0 (edition 2024)
+1.87.0 (edition 2024)
 
 ## License
 

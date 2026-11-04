@@ -702,7 +702,7 @@ impl Hand {
         // between chips goes to the nearest whole chip in the legal range
         // (so bots that size bets as a share of the pot still play).
         let chip = self.rules.chip.max(1);
-        let to = if to == all_in_to || to % chip == 0 {
+        let to = if to == all_in_to || to.is_multiple_of(chip) {
             to
         } else {
             let near = (to + chip / 2) / chip * chip;

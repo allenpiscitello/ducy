@@ -302,7 +302,7 @@ fn main() {
                 if let Some(f) = out.as_mut() {
                     writeln!(f, "{r}").expect("write --log");
                 }
-                if s.hands % 100 == 0 || s.hands == hands {
+                if s.hands.is_multiple_of(100) || s.hands == hands {
                     let (w, wc) = Stats::rate(&s.won);
                     let (b, bc) = Stats::rate(&s.vs_base);
                     println!(
