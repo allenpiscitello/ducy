@@ -790,3 +790,44 @@ fn a_bad_tournament_snapshot_is_refused() {
     ));
     assert!(Tournament::restore(&t.snapshot(), bot_for).is_ok());
 }
+
+#[test]
+fn blinds_rise_past_the_last_level_until_a_fifth_of_the_chips() {
+    // As the last two levels did, to round numbers, the small blind and
+    // ante keeping their share.
+    let last = Level::new(50, 100, 10);
+    assert_eq!(
+        last.rise(Some(&Level::new(25, 50, 5))),
+        Level::new(100, 200, 20)
+    );
+    assert_eq!(
+        last.rise(Some(&Level::new(45, 90, 10))),
+        Level::new(60, 120, 12)
+    );
+    // No level before: half again. Growth stays 1.2 to 2 times.
+    assert_eq!(last.rise(None), Level::new(75, 150, 15));
+    assert_eq!(last.rise(Some(&Level::new(5, 10, 0))).big_blind, 200);
+    assert_eq!(last.rise(Some(&Level::new(50, 99, 0))).big_blind, 120);
+    assert_eq!(
+        Level::new(1, 2, 0).rise(Some(&Level::new(1, 1, 0))),
+        Level::new(2, 4, 0)
+    );
+
+    // 12 entries of the config's stack: the blinds rise while the big blind
+    // is under a fifth of the chips in play.
+    let mut t = Tournament::new(config(10, 5, 2), stateless_field(12)).unwrap();
+    let chips = t.total_chips();
+    let mut levels = t.config().levels.len();
+    t.set_level(levels - 1);
+    while t.blinds_rise() {
+        assert_eq!(t.add_rising_level(), levels);
+        levels += 1;
+        t.set_level(levels - 1);
+        assert!(t.current_level().big_blind > t.config().levels[levels - 2].big_blind);
+    }
+    assert!(t.current_level().big_blind * ducy_play::TOP_BB_SHARE >= chips);
+    assert!(t.config().levels[levels - 2].big_blind * ducy_play::TOP_BB_SHARE < chips);
+    // A snapshot keeps the levels added.
+    let back = Tournament::restore(&t.snapshot(), bot_for).unwrap();
+    assert_eq!(back.config().levels.len(), levels);
+}

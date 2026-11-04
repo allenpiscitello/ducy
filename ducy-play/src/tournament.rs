@@ -29,7 +29,33 @@ impl Level {
             ante,
         }
     }
+
+    /// The level after this one, past the end of a structure: the big blind
+    /// grows as it did from `before` (1.2 to 2 times; 1.5 times with no
+    /// level before), to a round number, and the small blind and the ante
+    /// keep their share of it.
+    pub fn rise(&self, before: Option<&Level>) -> Level {
+        use crate::structure::{nice_at_least, nice_at_most};
+        let bb = self.big_blind.max(1) as f64;
+        let growth = before
+            .filter(|b| b.big_blind > 0)
+            .map_or(1.5, |b| (bb / b.big_blind as f64).clamp(1.2, 2.0));
+        let next = nice_at_least(bb * growth * 0.97).ceil().max(bb + 1.0);
+        let sb = (next * self.small_blind as f64 / bb)
+            .floor()
+            .clamp(1.0, next);
+        let ante = if self.ante > 0 {
+            nice_at_most(next * self.ante as f64 / bb)
+        } else {
+            0.0
+        };
+        Level::new(sb as u64, next as u64, ante as u64)
+    }
 }
+
+/// The blinds stop rising once the big blind is this share of the chips in
+/// play: a fifth.
+pub const TOP_BB_SHARE: u64 = 5;
 
 /// How a tournament is played.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,7 +69,8 @@ pub struct TournamentConfig {
     pub table_size: usize,
     /// Chips for every entry, re-entries included.
     pub starting_stack: u64,
-    /// The blind levels in order. The last one stays once it's reached.
+    /// The blind levels in order. The last one stays once it's reached,
+    /// unless more are added ([`Tournament::add_rising_level`]).
     pub levels: Vec<Level>,
     /// Places paid. Hand-for-hand play starts with one more player left than
     /// this, while there's more than one table. 0 turns it off.
@@ -397,6 +424,21 @@ impl Tournament {
     /// from its next hand.
     pub fn set_level(&mut self, level: usize) {
         self.level = level.min(self.config.levels.len() - 1);
+    }
+
+    /// Whether the blinds still rise: the big blind now is under a fifth of
+    /// the chips in play ([`TOP_BB_SHARE`]).
+    pub fn blinds_rise(&self) -> bool {
+        self.current_level().big_blind.saturating_mul(TOP_BB_SHARE) < self.total_chips()
+    }
+
+    /// Adds a level past the last one ([`Level::rise`]), for blinds that
+    /// still rise at the end of the structure. Returns its index.
+    pub fn add_rising_level(&mut self) -> usize {
+        let n = self.config.levels.len();
+        let next = self.config.levels[n - 1].rise(n.checked_sub(2).map(|i| &self.config.levels[i]));
+        self.config.levels.push(next);
+        n
     }
 
     /// The ids of the tables still in play.

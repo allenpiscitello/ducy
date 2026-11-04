@@ -2,8 +2,9 @@
 //! a structure someone typed in, and about how long a tournament will take.
 //!
 //! A structure is a list of [`Step`]s: levels and the breaks between them.
-//! The last level stays once it's reached ([`crate::Tournament`] does the
-//! same with its [`Level`](crate::Level)s).
+//! The blinds keep rising until the big blind is a fifth of the chips in
+//! play ([`crate::Tournament::blinds_rise`]): past a structure's last level
+//! they go on rising as its last two levels did ([`crate::Level::rise`]).
 //!
 //! The estimate is a simple model of players busting as stacks get short
 //! against the blinds, fitted to bot-only tournaments this crate plays (see
@@ -122,7 +123,7 @@ pub const PRESETS: [Preset; 3] = [
 // Round numbers blinds are made of: 1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 × 10^k.
 const NICE: [f64; 10] = [1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0];
 
-fn nice_at_least(x: f64) -> f64 {
+pub(crate) fn nice_at_least(x: f64) -> f64 {
     let mut p = 10f64.powf(x.max(1.0).log10().floor());
     loop {
         for m in NICE {
@@ -135,7 +136,7 @@ fn nice_at_least(x: f64) -> f64 {
 }
 
 // The largest whole round number at most x (0 below 1).
-fn nice_at_most(x: f64) -> f64 {
+pub(crate) fn nice_at_most(x: f64) -> f64 {
     if x < 1.0 {
         return 0.0;
     }
