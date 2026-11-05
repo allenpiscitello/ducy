@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use ducy_play::{Action, Bot, Event, HandSummary, Observation, Street};
+use ducy_play::{Action, Bot, Event, HandSummary, LegalActions, Observation, RaiseRange, Street};
 
 use super::{
     preflop::{Act, Node, PreflopGame, SEATS},
@@ -413,20 +413,23 @@ impl<B: Bot> SixMaxBot<B> {
             Act::Fold => Action::Fold,
             Act::Call if legal.can_check => Action::Check,
             Act::Call => Action::Call,
-            Act::Raise(to) => match legal.raise.or(legal.bet) {
-                Some(r) => {
-                    let to = chips(to).clamp(r.min_to, r.max_to);
-                    if to == r.max_to {
-                        Action::AllIn
-                    } else {
-                        Action::Raise(to)
-                    }
-                }
-                None if legal.can_check => Action::Check,
-                None => Action::Call,
-            },
-            Act::AllIn => Action::AllIn,
+            // A raise to the most allowed, not "all-in": at pot limit the
+            // most is often less than the stack, and the engine refuses an
+            // all-in there (as a fold).
+            Act::Raise(to) => raise_to(legal, |r| chips(to).clamp(r.min_to, r.max_to)),
+            Act::AllIn => raise_to(legal, |r| r.max_to),
         })
+    }
+}
+
+/// A raise (or a bet when no one has bet) to the total `to` picks from the
+/// legal range; a check or call when the player can't raise.
+fn raise_to(legal: &LegalActions, to: impl Fn(&RaiseRange) -> u64) -> Action {
+    match (legal.raise, legal.bet) {
+        (Some(r), _) => Action::Raise(to(&r)),
+        (None, Some(b)) => Action::Bet(to(&b)),
+        _ if legal.can_check => Action::Check,
+        _ => Action::Call,
     }
 }
 

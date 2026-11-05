@@ -180,7 +180,32 @@ fn skew(style: &str, actions: &[(Act, u32)], p: &mut [f32]) {
     }
 }
 
-/// The measured bot's chips over one deal from each seat, by position.
+/// Whether `seat` put chips in voluntarily before the flop, and whether it
+/// raised there.
+fn preflop(hand: &Hand, seat: usize) -> (bool, bool) {
+    let (mut vpip, mut pfr) = (false, false);
+    for e in hand.events() {
+        match e {
+            Event::Board { .. } => break,
+            Event::Call { seat: s, .. } if *s == seat => vpip = true,
+            Event::Bet { seat: s, .. } | Event::Raise { seat: s, .. } if *s == seat => {
+                vpip = true;
+                pfr = true;
+            }
+            _ => {}
+        }
+    }
+    (vpip, pfr)
+}
+
+/// One deal played from each seat: the measured bot's chips, and whether it
+/// played (VPIP) and raised (PFR) preflop, by position.
+struct DealResult {
+    chips: [i64; SEATS],
+    vpip: [bool; SEATS],
+    pfr: [bool; SEATS],
+}
+
 fn play_deal(
     make: &Make,
     field: &[Make],
@@ -188,11 +213,13 @@ fn play_deal(
     stack: u64,
     d: u64,
     seed: u64,
-) -> [i64; SEATS] {
+) -> DealResult {
     let deal = Deal::random(rules.variant, SEATS, Some(seed.wrapping_add(d))).expect("deal");
     let button = (d as usize) % SEATS;
     let opponents = lineup(d ^ seed, SEATS - 1, field.len());
     let mut by_position = [0i64; SEATS];
+    let mut vpip = [false; SEATS];
+    let mut pfr = [false; SEATS];
     for hero in 0..SEATS {
         let mut bots: Vec<Box<dyn Bot>> = Vec::with_capacity(SEATS);
         let mut o = 0;
@@ -213,14 +240,22 @@ fn play_deal(
         let outcome = play_hand(&mut hand, &mut seated).expect("play");
         let position = (hero + SEATS - button) % SEATS;
         by_position[position] += outcome.result.net[hero];
+        (vpip[position], pfr[position]) = preflop(&hand, hero);
     }
-    by_position
+    DealResult {
+        chips: by_position,
+        vpip,
+        pfr,
+    }
 }
 
 struct Stats {
     /// Per deal: chips over the six seats.
     per_deal: Vec<i64>,
     by_position: [i64; SEATS],
+    /// Hands played and raised preflop, by position (one hand each per deal).
+    vpip: [u64; SEATS],
+    pfr: [u64; SEATS],
 }
 
 fn run(
@@ -232,7 +267,7 @@ fn run(
     seed: u64,
     threads: u64,
 ) -> Stats {
-    let chunks: Vec<Vec<(i64, [i64; SEATS])>> = thread::scope(|scope| {
+    let chunks: Vec<Vec<(i64, DealResult)>> = thread::scope(|scope| {
         let handles: Vec<_> = (0..threads)
             .map(|t| {
                 let make = make.clone();
@@ -242,7 +277,7 @@ fn run(
                         .map(|d| {
                             let p = play_deal(&make, field, rules, stack, d, seed);
                             PLAYED.fetch_add(1, Relaxed);
-                            (p.iter().sum(), p)
+                            (p.chips.iter().sum(), p)
                         })
                         .collect()
                 })
@@ -254,7 +289,7 @@ fn run(
             .collect()
     });
     // Back in deal order, so bots can be paired deal by deal.
-    let mut rows: Vec<(u64, i64, [i64; SEATS])> = Vec::with_capacity(deals as usize);
+    let mut rows: Vec<(u64, i64, DealResult)> = Vec::with_capacity(deals as usize);
     for (t, chunk) in chunks.into_iter().enumerate() {
         for (i, (sum, p)) in chunk.into_iter().enumerate() {
             rows.push((t as u64 + i as u64 * threads, sum, p));
@@ -262,14 +297,20 @@ fn run(
     }
     rows.sort_by_key(|r| r.0);
     let mut by_position = [0i64; SEATS];
+    let mut vpip = [0u64; SEATS];
+    let mut pfr = [0u64; SEATS];
     for (_, _, p) in &rows {
-        for (a, b) in by_position.iter_mut().zip(p) {
-            *a += b;
+        for k in 0..SEATS {
+            by_position[k] += p.chips[k];
+            vpip[k] += p.vpip[k] as u64;
+            pfr[k] += p.pfr[k] as u64;
         }
     }
     Stats {
         per_deal: rows.into_iter().map(|r| r.1).collect(),
         by_position,
+        vpip,
+        pfr,
     }
 }
 
@@ -748,6 +789,7 @@ fn main() {
         rate(&d, bb)
     };
     let mut results: Vec<Vec<i64>> = Vec::new();
+    let mut preflop_rows: Vec<(String, [u64; SEATS], [u64; SEATS])> = Vec::new();
     for (name, make) in &bots {
         let s = run(make, &field, rules, stack, deals, seed, threads);
         let per_deal: Vec<f64> = s.per_deal.iter().map(|&x| x as f64).collect();
@@ -763,6 +805,22 @@ fn main() {
         }
         println!();
         results.push(s.per_deal);
+        preflop_rows.push((name.clone(), s.vpip, s.pfr));
+    }
+    println!("\npreflop VPIP / PFR by position (% of hands):");
+    print!("{:>18} {:>11}", "bot", "all");
+    for p in POSITIONS {
+        print!(" {p:>11}");
+    }
+    println!();
+    let pct = |n: u64, of: u64| 100.0 * n as f64 / of.max(1) as f64;
+    for (name, vpip, pfr) in &preflop_rows {
+        let all = |c: &[u64; SEATS]| pct(c.iter().sum(), deals * SEATS as u64);
+        print!("{name:>18} {:>5.1}/{:<5.1}", all(vpip), all(pfr));
+        for k in 0..SEATS {
+            print!(" {:>5.1}/{:<5.1}", pct(vpip[k], deals), pct(pfr[k], deals));
+        }
+        println!();
     }
     // How often the six-handed blueprints could follow their hands.
     let mw_counts = mw_counts.into_inner();
