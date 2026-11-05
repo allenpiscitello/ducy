@@ -106,25 +106,64 @@ struct Slot {
     n: u8,
 }
 
+/// One batch's discount factors: for positive regrets, for the others, and
+/// for strategy sums.
+type Factors = [f32; 3];
+
+/// Scales a regret by each batch's factor in turn, as eager discounting
+/// after every batch would have.
+fn discount_regret(mut x: f32, pending: &[Factors]) -> f32 {
+    for f in pending {
+        x *= if x > 0.0 { f[0] } else { f[1] };
+    }
+    x
+}
+
+/// Scales a strategy sum by each batch's factor in turn.
+fn discount_sum(mut x: f32, pending: &[Factors]) -> f32 {
+    for f in pending {
+        x *= f[2];
+    }
+    x
+}
+
 /// Regrets and strategy sums for every information set seen so far.
+///
+/// Discounting is lazy: rather than scaling the whole table after every
+/// batch, each batch's factors are kept, and an information set's values
+/// are scaled when it's next touched, or read for an average or a
+/// checkpoint. The same multiplications happen in the same order as when
+/// scaling everything after each batch, so the results are identical, but
+/// a batch only costs the information sets it visits.
 struct Table<I> {
     index: HashMap<I, u32>,
     slots: Vec<Slot>,
     regret: Vec<f32>,
     sum: Vec<f32>,
+    /// Per information set, the batch through which its values are
+    /// discounted.
+    discounted: Vec<u32>,
+    /// The factors of batches `base + 1`, `base + 2`, … up to the last one
+    /// that discounted (discounting only ever stops, never restarts).
+    factors: Vec<Factors>,
+    base: u64,
 }
 
 impl<I: Key> Table<I> {
-    fn new() -> Self {
+    fn new(base: u64) -> Self {
         Self {
             index: HashMap::new(),
             slots: Vec::new(),
             regret: Vec::new(),
             sum: Vec::new(),
+            discounted: Vec::new(),
+            factors: Vec::new(),
+            base,
         }
     }
 
-    fn insert(&mut self, info: I, n: usize) -> u32 {
+    /// Adds an information set, discounted through batch `through`.
+    fn insert(&mut self, info: I, n: usize, through: u64) -> u32 {
         let id = self.slots.len() as u32;
         self.slots.push(Slot {
             start: self.regret.len() as u32,
@@ -132,6 +171,7 @@ impl<I: Key> Table<I> {
         });
         self.regret.extend(std::iter::repeat_n(0.0, n));
         self.sum.extend(std::iter::repeat_n(0.0, n));
+        self.discounted.push(through as u32);
         self.index.insert(info, id);
         id
     }
@@ -141,22 +181,70 @@ impl<I: Key> Table<I> {
         s.start as usize..s.start as usize + s.n as usize
     }
 
+    /// The factors not yet applied to `id`'s values.
+    fn pending(&self, id: u32) -> &[Factors] {
+        pending(&self.factors, self.base, self.discounted[id as usize])
+    }
+
+    /// `id`'s regret for action `k`, discounted through the last batch.
+    fn regret_at(&self, id: u32, k: usize) -> f32 {
+        discount_regret(self.regret[self.range(id)][k], self.pending(id))
+    }
+
+    /// `id`'s strategy sums, discounted through the last batch.
+    fn sums(&self, id: u32, out: &mut Vec<f32>) {
+        let pending = self.pending(id);
+        out.clear();
+        out.extend(
+            self.sum[self.range(id)]
+                .iter()
+                .map(|&x| discount_sum(x, pending)),
+        );
+    }
+
     /// Regret matching: play in proportion to positive regret.
     fn strategy(&self, id: Option<u32>, n: usize, out: &mut [f64]) {
         let Some(id) = id else {
             out.fill(1.0 / n as f64);
             return;
         };
-        let r = &self.regret[self.range(id)];
-        let positive: f64 = r.iter().map(|&x| (x as f64).max(0.0)).sum();
-        for (o, &x) in out.iter_mut().zip(r) {
+        let pending = self.pending(id);
+        for (o, &x) in out.iter_mut().zip(&self.regret[self.range(id)]) {
+            *o = discount_regret(x, pending) as f64;
+        }
+        let positive: f64 = out.iter().map(|&x| x.max(0.0)).sum();
+        for o in out.iter_mut() {
             *o = if positive > 0.0 {
-                (x as f64).max(0.0) / positive
+                o.max(0.0) / positive
             } else {
                 1.0 / n as f64
             };
         }
     }
+
+    /// Brings `id`'s values up to date (all factors applied).
+    fn settle(&mut self, id: u32) {
+        let through = self.base + self.factors.len() as u64;
+        let pending = pending(&self.factors, self.base, self.discounted[id as usize]);
+        if pending.is_empty() {
+            return;
+        }
+        let r = self.range(id);
+        for x in &mut self.regret[r.clone()] {
+            *x = discount_regret(*x, pending);
+        }
+        for x in &mut self.sum[r] {
+            *x = discount_sum(*x, pending);
+        }
+        self.discounted[id as usize] = through as u32;
+    }
+}
+
+/// The factors after batch `discounted`.
+fn pending(factors: &[Factors], base: u64, discounted: u32) -> &[Factors] {
+    factors
+        .get((discounted as u64 - base) as usize..)
+        .unwrap_or(&[])
 }
 
 /// Changes found by one chunk of iterations, applied after the batch.
@@ -220,7 +308,7 @@ where
         Self {
             game,
             config,
-            table: Table::new(),
+            table: Table::new(0),
             iterations: 0,
             batches: 0,
         }
@@ -260,6 +348,7 @@ where
         }
         self.iterations = last;
         self.batches += 1;
+        assert!(self.batches < u32::MAX as u64, "too many batches");
         self.discount();
     }
 
@@ -326,7 +415,7 @@ where
                     for a in 0..n {
                         if prune
                             && let Some(id) = id
-                            && (self.table.regret[self.table.range(id)][a] as f64) < threshold
+                            && (self.table.regret_at(id, a) as f64) < threshold
                         {
                             explored[a] = false;
                             continue;
@@ -354,8 +443,10 @@ where
         }
     }
 
+    /// Adds one chunk's changes, before this batch's discount.
     fn apply(&mut self, d: Delta<G::Info>) {
         for (id, (regret, sum)) in d.known {
+            self.table.settle(id);
             let r = self.table.range(id);
             for (k, i) in r.enumerate() {
                 self.table.regret[i] += regret[k] as f32;
@@ -366,7 +457,7 @@ where
             // Seen by an earlier chunk of this batch: now a known slot.
             let id = match self.table.index.get(&info) {
                 Some(&id) => id,
-                None => self.table.insert(info, regret.len()),
+                None => self.table.insert(info, regret.len(), self.batches),
             };
             let r = self.table.range(id);
             for (k, i) in r.enumerate() {
@@ -393,18 +484,21 @@ where
                 (t / (t + 1.0)).powf(gamma),
             ),
         };
-        for r in &mut self.table.regret {
-            *r *= if *r > 0.0 { pos as f32 } else { neg as f32 };
-        }
-        for s in &mut self.table.sum {
-            *s *= avg as f32;
-        }
+        // Applied lazily (see `Table`). Every batch so far has discounted.
+        debug_assert_eq!(
+            self.table.base + self.table.factors.len() as u64 + 1,
+            self.batches
+        );
+        self.table
+            .factors
+            .push([pos as f32, neg as f32, avg as f32]);
     }
 
     /// The average strategy at one information set, if it has been seen.
     pub fn average_at(&self, info: &G::Info) -> Option<Vec<f64>> {
         let &id = self.table.index.get(info)?;
-        let s = &self.table.sum[self.table.range(id)];
+        let mut s = Vec::new();
+        self.table.sums(id, &mut s);
         let total: f64 = s.iter().map(|&x| x as f64).sum();
         Some(if total > 0.0 {
             s.iter().map(|&x| x as f64 / total).collect()
@@ -421,8 +515,9 @@ where
             self.table.index.iter().map(|(k, &v)| (k, v)).collect();
         keys.sort_by_key(|&(_, id)| id);
         let mut probs = Vec::new();
+        let mut s = Vec::new();
         for (info, id) in keys {
-            let s = &self.table.sum[self.table.range(id)];
+            self.table.sums(id, &mut s);
             let total: f64 = s.iter().map(|&x| x as f64).sum();
             probs.clear();
             if total > 0.0 {
@@ -437,8 +532,9 @@ where
     /// The average strategy, which converges to an equilibrium.
     pub fn average(&self) -> Profile<G::Info> {
         let mut profile = Profile::new();
+        let mut s = Vec::new();
         for (info, &id) in &self.table.index {
-            let s = &self.table.sum[self.table.range(id)];
+            self.table.sums(id, &mut s);
             let total: f64 = s.iter().map(|&x| x as f64).sum();
             let n = s.len();
             let probs = if total > 0.0 {
@@ -476,9 +572,12 @@ where
             info.write(&mut out);
             let r = self.table.range(id);
             out.push(r.len() as u8);
+            // As eager discounting would have left them.
+            let pending = self.table.pending(id);
             for i in r {
-                out.extend(self.table.regret[i].to_le_bytes());
-                out.extend(self.table.sum[i].to_le_bytes());
+                let regret = discount_regret(self.table.regret[i], pending);
+                out.extend(regret.to_le_bytes());
+                out.extend(discount_sum(self.table.sum[i], pending).to_le_bytes());
             }
             if out.len() >= 1 << 16 {
                 w.write_all(&out)?;
@@ -503,11 +602,14 @@ where
             return None;
         }
         let count = read_u64(input)?;
-        let mut table = Table::new();
+        if batches >= u32::MAX as u64 {
+            return None;
+        }
+        let mut table = Table::new(batches);
         for _ in 0..count {
             let info = G::Info::read(input)?;
             let n = *take(input, 1)?.first()? as usize;
-            let id = table.insert(info, n);
+            let id = table.insert(info, n, batches);
             let r = table.range(id);
             for i in r {
                 let b = take(input, 8)?;
@@ -526,3 +628,101 @@ where
 }
 
 const MAGIC: &[u8] = b"DUCYMCCF\x01";
+
+#[cfg(test)]
+mod reference;
+
+#[cfg(test)]
+mod tests {
+    use super::{reference::Reference, *};
+    use crate::{
+        games::{kuhn3::Kuhn3, leduc::Leduc},
+        holdem::abstraction::CardAbstraction,
+        sixmax::multiway::{MultiwayConfig, MultiwayGame},
+    };
+
+    /// Trains `game` with this solver and the pre-#352 one side by side,
+    /// `steps` iterations at a time, and checks that every checkpoint is
+    /// byte for byte the same, then that a run resumed from the reference's
+    /// checkpoint stays the same.
+    fn matches_reference<G>(game: &G, config: Config, steps: &[u64])
+    where
+        G: Game + Sync,
+        G::State: Send,
+        G::Info: Key,
+    {
+        let mut fast = Mccfr::new(game, config);
+        let mut slow = Reference::new(game, config);
+        for &n in steps {
+            fast.run(n);
+            slow.run(n);
+            let bytes = slow.save();
+            assert!(
+                fast.save() == bytes,
+                "{config:?}: differs at {}",
+                fast.iterations()
+            );
+            let mut streamed = Vec::new();
+            fast.save_to(&mut streamed).expect("write");
+            assert!(streamed == bytes);
+        }
+        let mut resumed = Mccfr::load(game, config, &slow.save()).expect("a checkpoint");
+        resumed.run(steps[0]);
+        slow.run(steps[0]);
+        assert!(
+            resumed.save() == slow.save(),
+            "{config:?}: differs after resuming"
+        );
+    }
+
+    fn config(discount: Discount, batch: u64) -> Config {
+        Config {
+            seed: 5,
+            batch,
+            discount,
+            prune: None,
+        }
+    }
+
+    #[test]
+    fn leduc_matches_the_reference_solver() {
+        for d in [
+            Discount::None,
+            Discount::Linear { until: 3_000 },
+            Discount::DCFR,
+        ] {
+            matches_reference(&Leduc, config(d, 64), &[1_000, 2_000, 5_000]);
+        }
+        let prune = Some(Prune {
+            after: 1_000,
+            threshold: -5.0,
+            full_every: 20,
+        });
+        matches_reference(
+            &Leduc,
+            Config {
+                prune,
+                ..config(Discount::DCFR, 128)
+            },
+            &[1_500, 6_000],
+        );
+    }
+
+    #[test]
+    fn three_player_kuhn_matches_the_reference_solver() {
+        matches_reference(&Kuhn3, config(Discount::DCFR, 32), &[500, 3_000]);
+    }
+
+    #[test]
+    fn six_handed_holdem_matches_the_reference_solver() {
+        let cards = CardAbstraction::quick(4);
+        let game = MultiwayGame::<_, 2>::new(
+            MultiwayConfig {
+                stack: 20,
+                ..MultiwayConfig::holdem(10)
+            },
+            Some(&cards),
+        );
+        matches_reference(&game, config(Discount::DCFR, 64), &[256, 512]);
+    }
+}
