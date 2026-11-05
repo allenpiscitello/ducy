@@ -240,11 +240,12 @@ pub struct Table {
 
 /// Where the next hand's cards come from.
 #[derive(Clone, Copy)]
-enum DealFrom<'a> {
+enum DealFrom {
     /// The table's own shuffle (seeded, or system randomness).
     Random,
     /// A provably fair seed (`fair_deal`).
-    Seed(&'a [u8; 32]),
+    #[cfg(feature = "fair-deal")]
+    Seed([u8; 32]),
     /// Cards the engine never sees (a trustless shuffle).
     Hidden,
 }
@@ -630,8 +631,9 @@ impl Table {
     /// to the dealt seats in seat order ([`Table::dealt`] once dealt),
     /// so anyone with the seed can check every card. Sit out anyone who
     /// didn't reveal before calling this.
+    #[cfg(feature = "fair-deal")]
     pub fn new_hand_from_seed(&mut self, seed: &[u8; 32]) -> Result<(), PlayError> {
-        self.deal_next(DealFrom::Seed(seed))
+        self.deal_next(DealFrom::Seed(*seed))
     }
 
     fn deal_next(&mut self, from: DealFrom) -> Result<(), PlayError> {
@@ -760,11 +762,12 @@ impl Table {
                     &posts,
                 )?
             }
+            #[cfg(feature = "fair-deal")]
             DealFrom::Seed(seed) => Hand::with_posts(
                 rules,
                 &stacks,
                 button,
-                Deal::from_seed(variant, players, seed)?,
+                Deal::from_seed(variant, players, &seed)?,
                 &posts,
             )?,
             DealFrom::Hidden => {

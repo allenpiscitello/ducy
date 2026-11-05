@@ -1,6 +1,3 @@
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
-
 use crate::{
     deck::{Card, Deck},
     error::DucyError,
@@ -187,7 +184,7 @@ pub struct OmahaBombPotGameEvaluation {}
 impl OmahaBombPotGameEvaluation {
     /// Evaluates winners for each board independently. Pot is split equally among boards.
     pub fn evaluate_winners(&self, game_state: &OmahaBombPotGameState) -> BombPotResult {
-        let board_share = dec!(1) / Decimal::from(game_state.num_boards as u64);
+        let board_share = 1.0 / game_state.num_boards as f64;
         let mut board_winners = Vec::with_capacity(game_state.num_boards);
 
         for board in &game_state.boards {
@@ -225,16 +222,16 @@ impl OmahaBombPotGameEvaluation {
     /// Evaluates equity across all possible runouts for all boards.
     /// Each board's runout is enumerated independently; the pot is split
     /// equally among boards.
-    pub fn evaluate_equity(&self, game_state: &OmahaBombPotGameState) -> Vec<Decimal> {
+    pub fn evaluate_equity(&self, game_state: &OmahaBombPotGameState) -> Vec<f64> {
         let num_players = game_state.hole_cards.len();
         let num_boards = game_state.num_boards;
 
         if num_boards == 0 || num_players == 0 {
-            return vec![Decimal::ZERO; num_players];
+            return vec![0.0; num_players];
         }
 
-        let board_weight = Decimal::from(1) / Decimal::from(num_boards as u64);
-        let mut total_equity = vec![Decimal::ZERO; num_players];
+        let board_weight = 1.0 / num_boards as f64;
+        let mut total_equity = vec![0.0; num_players];
 
         let player_combos: Vec<_> = game_state.hole_cards.iter().map(hole_card_combos).collect();
 
@@ -450,7 +447,6 @@ pub struct BombPotSamples {
 
 #[cfg(test)]
 mod test {
-    use rust_decimal_macros::dec;
 
     use crate::deck::{Card, Deck};
     use crate::error::DucyError;
@@ -658,12 +654,12 @@ mod test {
         // Board 1: Player 0 wins
         assert_eq!(result.board_winners[0].len(), 1);
         assert_eq!(result.board_winners[0][0].player_index(), 0);
-        assert_eq!(result.board_winners[0][0].pot_amount(), dec!(0.5));
+        assert_eq!(result.board_winners[0][0].pot_amount(), 0.5);
 
         // Board 2: Player 1 wins
         assert_eq!(result.board_winners[1].len(), 1);
         assert_eq!(result.board_winners[1][0].player_index(), 1);
-        assert_eq!(result.board_winners[1][0].pot_amount(), dec!(0.5));
+        assert_eq!(result.board_winners[1][0].pot_amount(), 0.5);
     }
 
     #[test]
@@ -702,8 +698,8 @@ mod test {
         assert_eq!(result.board_winners[0][0].player_index(), 0);
         assert_eq!(result.board_winners[1][0].player_index(), 0);
         // Each board is half the pot
-        assert_eq!(result.board_winners[0][0].pot_amount(), dec!(0.5));
-        assert_eq!(result.board_winners[1][0].pot_amount(), dec!(0.5));
+        assert_eq!(result.board_winners[0][0].pot_amount(), 0.5);
+        assert_eq!(result.board_winners[1][0].pot_amount(), 0.5);
     }
 
     #[test]
@@ -740,9 +736,9 @@ mod test {
 
         assert_eq!(equity.len(), 2);
         // Each player wins one board, so equity should be 50/50
-        assert_eq!(equity[0] + equity[1], dec!(1));
-        assert_eq!(equity[0], dec!(0.5));
-        assert_eq!(equity[1], dec!(0.5));
+        assert_eq!(equity[0] + equity[1], 1.0);
+        assert_eq!(equity[0], 0.5);
+        assert_eq!(equity[1], 0.5);
     }
 
     #[test]

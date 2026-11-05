@@ -2,8 +2,6 @@ use std::fmt::Display;
 use std::ops::{BitOr, BitOrAssign, Sub, SubAssign};
 use std::str::FromStr;
 
-use strum_macros::EnumIter;
-
 use crate::error::DucyError;
 use crate::ranking::standard_hand_ranker::RankOrder;
 
@@ -11,7 +9,7 @@ use crate::ranking::standard_hand_ranker::RankOrder;
 pub mod range;
 
 /// Represents the rank of a playing card (Two through Ace).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Rank {
     /// 2
@@ -43,6 +41,28 @@ pub enum Rank {
 }
 
 impl Rank {
+    /// Every rank, Two through Ace.
+    pub const ALL: [Rank; 13] = [
+        Rank::Two,
+        Rank::Three,
+        Rank::Four,
+        Rank::Five,
+        Rank::Six,
+        Rank::Seven,
+        Rank::Eight,
+        Rank::Nine,
+        Rank::Ten,
+        Rank::Jack,
+        Rank::Queen,
+        Rank::King,
+        Rank::Ace,
+    ];
+
+    /// Iterates over every rank, Two through Ace.
+    pub fn iter() -> std::array::IntoIter<Rank, 13> {
+        Self::ALL.into_iter()
+    }
+
     /// Tries to create a `Rank` from a character representation.
     /// Returns `Ok(Rank)` if successful, or `Err(String)` if the character is invalid.
     /// Characters representing ranks are: '2'-'9', 'T' (Ten), 'J' (Jack), 'Q' (Queen), 'K' (King), 'A' (Ace).
@@ -87,7 +107,7 @@ impl Display for Rank {
 }
 
 /// Represents the suit of a playing card (Clubs, Diamonds, Hearts, Spades).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Suit {
     /// Clubs (c)
@@ -101,6 +121,14 @@ pub enum Suit {
 }
 
 impl Suit {
+    /// Every suit, in declaration order.
+    pub const ALL: [Suit; 4] = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
+
+    /// Iterates over every suit, in declaration order.
+    pub fn iter() -> std::array::IntoIter<Suit, 4> {
+        Self::ALL.into_iter()
+    }
+
     /// Tries to create a `Suit` from a character representation.
     /// Returns `Ok(Suit)` if successful, or `Err(String)` if the character is invalid.
     /// Characters representing suits are: 'c' (Clubs), 'd' (Diamonds), 'h' (Hearts), 's' (Spades).
@@ -979,6 +1007,14 @@ mod test {
     pub fn test_deck_display() {
         let deck = Deck::all_cards();
         println!("{}", deck);
+    }
+
+    #[test]
+    fn every_rank_and_suit_once_in_order() {
+        let ranks: Vec<String> = Rank::iter().map(|r| r.to_string()).collect();
+        assert_eq!(ranks.concat(), "23456789TJQKA");
+        let suits: Vec<String> = Suit::iter().map(|s| s.to_string()).collect();
+        assert_eq!(suits.concat(), "cdhs");
     }
 
     #[test]

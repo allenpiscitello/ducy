@@ -1,5 +1,3 @@
-use rust_decimal::Decimal;
-
 use crate::{
     deck::{Card, Deck, Suit},
     error::DucyError,
@@ -142,7 +140,7 @@ impl GameEvaluation<OmahaGameState, StandardHandRanks> for OmahaGameEvaluation {
 impl GameEquityEvaluation<OmahaGameState, StandardHandRanks, OmahaGameEvaluation>
     for OmahaGameEvaluation
 {
-    fn evaluate_equity(&self, game_state: &OmahaGameState) -> Vec<Decimal> {
+    fn evaluate_equity(&self, game_state: &OmahaGameState) -> Vec<f64> {
         let runouts = game_state
             .flop_game_state
             .enumerate_runout_community_cards()
@@ -153,7 +151,7 @@ impl GameEquityEvaluation<OmahaGameState, StandardHandRanks, OmahaGameEvaluation
 
 impl OmahaGameEvaluation {
     /// Estimates equity from `samples` random runouts instead of enumerating all of them.
-    pub fn sample_equity(&self, game_state: &OmahaGameState, samples: usize) -> Vec<Decimal> {
+    pub fn sample_equity(&self, game_state: &OmahaGameState, samples: usize) -> Vec<f64> {
         self.sample_equity_seeded(game_state, samples, None)
     }
 
@@ -163,7 +161,7 @@ impl OmahaGameEvaluation {
         game_state: &OmahaGameState,
         samples: usize,
         seed: Option<u64>,
-    ) -> Vec<Decimal> {
+    ) -> Vec<f64> {
         let runouts = game_state
             .flop_game_state
             .sample_runout_community_cards(samples, seed);
@@ -232,7 +230,6 @@ pub(crate) fn high_winners(community: &Deck, player_combos: &[HoleCombos]) -> Fa
 
 #[cfg(test)]
 mod test {
-    use rust_decimal_macros::dec;
 
     use crate::{
         deck::{Card, Deck, Rank, Suit},
@@ -269,7 +266,7 @@ mod test {
             winners[0],
             GameWinner {
                 player_index: 1,
-                pot_amount: dec!(1),
+                pot_amount: 1.0,
                 winning_hand: StandardHandRanks::Straight { s: Rank::Queen }
             }
         );
@@ -283,7 +280,7 @@ mod test {
             winners[0],
             GameWinner {
                 player_index: 0,
-                pot_amount: dec!(1),
+                pot_amount: 1.0,
                 winning_hand: StandardHandRanks::FullHouse {
                     t: Rank::Jack,
                     p: Rank::Ten
@@ -293,8 +290,8 @@ mod test {
 
         let equity = evaluator.evaluate_equity(&state);
         assert_eq!(equity.len(), 2);
-        assert_eq!(equity[0], dec!(38) / dec!(40));
-        assert_eq!(equity[1], dec!(2) / dec!(40));
+        assert!((equity[0] - 38.0 / 40.0).abs() < 1e-12);
+        assert!((equity[1] - 2.0 / 40.0).abs() < 1e-12);
 
         state.set_river(Card::parse("Qh").unwrap()).unwrap();
 
@@ -309,7 +306,7 @@ mod test {
             winners[0],
             GameWinner {
                 player_index: 1,
-                pot_amount: dec!(1),
+                pot_amount: 1.0,
                 winning_hand: StandardHandRanks::StraightFlush { sf: Rank::Queen }
             }
         );
@@ -331,10 +328,10 @@ mod test {
         let evaluator = OmahaGameEvaluation {};
         let winners = evaluator.evaluate_winners(&state);
         assert_eq!(winners.len(), 2);
-        assert!(winners.iter().all(|w| w.pot_amount == dec!(0.5)));
+        assert!(winners.iter().all(|w| w.pot_amount == 0.5));
 
         let equity = evaluator.evaluate_equity(&state);
-        assert_eq!(equity, vec![dec!(0.5), dec!(0.5)]);
+        assert_eq!(equity, vec![0.5, 0.5]);
     }
 
     #[test]
@@ -400,7 +397,7 @@ mod test {
         let exact = evaluator.evaluate_equity(&state);
         let sampled = evaluator.sample_equity(&state, 20_000);
         for (e, s) in exact.iter().zip(&sampled) {
-            assert!((e - s).abs() < dec!(0.02), "{exact:?} vs {sampled:?}");
+            assert!((e - s).abs() < 0.02, "{exact:?} vs {sampled:?}");
         }
 
         let seeded = evaluator.sample_equity_seeded(&state, 2_000, Some(42));
@@ -461,10 +458,7 @@ mod test {
         let exact = eval.evaluate_equity(&state);
         let sampled = eval.sample_equity_seeded(&state, 40_000, Some(3));
         for (e, s) in exact.iter().zip(&sampled) {
-            assert!(
-                (e - s).abs() < dec!(0.01),
-                "exact {exact:?} sampled {sampled:?}"
-            );
+            assert!((e - s).abs() < 0.01, "exact {exact:?} sampled {sampled:?}");
         }
         assert_eq!(
             sampled,

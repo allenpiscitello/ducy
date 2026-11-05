@@ -20,13 +20,14 @@ default = ["serde"]
 serde = ["dep:serde", "ducy-play/serde"]
 
 [dependencies]
-ducy = { version = "0.5.1", path = "..", default-features = false }
-ducy-play = { version = "0.5.1", path = "../ducy-play", default-features = false }
+ducy = { version = "0.6.0", path = "..", default-features = false }
+# fair-deal: the runner deals from commit–reveal rounds.
+ducy-play = { version = "0.6.0", path = "../ducy-play", default-features = false, features = ["fair-deal"] }
 serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
-ducy-play = { version = "0.5.1", path = "../ducy-play" }
-ducy-bots = { version = "0.5.1", path = "../ducy-bots" }
+ducy-play = { version = "0.6.0", path = "../ducy-play" }
+ducy-bots = { version = "0.6.0", path = "../ducy-bots" }
 rand = "0.10.2"
 serde_json = "1"
 

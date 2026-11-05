@@ -34,7 +34,7 @@ Add ducy to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ducy = "0.5"
+ducy = "0.6"
 ```
 
 ### Evaluate a Hold'em hand
@@ -71,7 +71,7 @@ game.set_turn(Card::parse("Jd").unwrap()).unwrap();
 
 let evaluator = OmahaGameEvaluation {};
 let equity = evaluator.evaluate_equity(&game);
-println!("Player 0 equity: {:.1}%", equity[0] * rust_decimal::Decimal::from(100));
+println!("Player 0 equity: {:.1}%", equity[0] * 100.0);
 ```
 
 ### Omaha ranges and preflop coverage

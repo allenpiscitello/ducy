@@ -1,6 +1,3 @@
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
-
 use crate::{
     deck::{Card, Deck},
     error::DucyError,
@@ -129,10 +126,10 @@ impl OmahaHiLoGameEvaluation {
             let mut high_winners = high_tracker.into_results();
             let mut low_winners = low_tracker.into_results();
             for w in &mut high_winners {
-                w.pot_amount *= dec!(0.5);
+                w.pot_amount *= 0.5;
             }
             for w in &mut low_winners {
-                w.pot_amount *= dec!(0.5);
+                w.pot_amount *= 0.5;
             }
             HiLoResult {
                 high_winners,
@@ -148,7 +145,7 @@ impl OmahaHiLoGameEvaluation {
 
     /// Evaluates equity across all possible runouts, returning each player's
     /// expected pot share accounting for high/low splits and scooping.
-    pub fn evaluate_equity(&self, game_state: &OmahaHiLoGameState) -> Vec<Decimal> {
+    pub fn evaluate_equity(&self, game_state: &OmahaHiLoGameState) -> Vec<f64> {
         let runouts = game_state
             .flop_game_state
             .enumerate_runout_community_cards()
@@ -157,7 +154,7 @@ impl OmahaHiLoGameEvaluation {
     }
 
     /// Estimates equity from `samples` random runouts instead of enumerating all of them.
-    pub fn sample_equity(&self, game_state: &OmahaHiLoGameState, samples: usize) -> Vec<Decimal> {
+    pub fn sample_equity(&self, game_state: &OmahaHiLoGameState, samples: usize) -> Vec<f64> {
         self.sample_equity_seeded(game_state, samples, None)
     }
 
@@ -167,7 +164,7 @@ impl OmahaHiLoGameEvaluation {
         game_state: &OmahaHiLoGameState,
         samples: usize,
         seed: Option<u64>,
-    ) -> Vec<Decimal> {
+    ) -> Vec<f64> {
         let runouts = game_state
             .flop_game_state
             .sample_runout_community_cards(samples, seed);
@@ -264,7 +261,6 @@ pub(crate) fn hilo_distribute(community: &Deck, player_combos: &[HiLoCombos], sh
 
 #[cfg(test)]
 mod test {
-    use rust_decimal_macros::dec;
 
     use crate::{
         deck::{Card, Deck},
@@ -292,7 +288,7 @@ mod test {
 
         assert_eq!(result.high_winners.len(), 1);
         assert_eq!(result.high_winners[0].player_index(), 0);
-        assert_eq!(result.high_winners[0].pot_amount(), dec!(1));
+        assert_eq!(result.high_winners[0].pot_amount(), 1.0);
         assert!(result.low_winners.is_empty());
     }
 
@@ -317,12 +313,12 @@ mod test {
         // Player 0 should win high (trips kings)
         assert_eq!(result.high_winners.len(), 1);
         assert_eq!(result.high_winners[0].player_index(), 0);
-        assert_eq!(result.high_winners[0].pot_amount(), dec!(0.5));
+        assert_eq!(result.high_winners[0].pot_amount(), 0.5);
 
         // Player 1 should win low (A-2-3-5-7 or similar)
         assert_eq!(result.low_winners.len(), 1);
         assert_eq!(result.low_winners[0].player_index(), 1);
-        assert_eq!(result.low_winners[0].pot_amount(), dec!(0.5));
+        assert_eq!(result.low_winners[0].pot_amount(), 0.5);
     }
 
     #[test]
@@ -346,11 +342,11 @@ mod test {
         // Player 0 wins high (trips kings) and low (A-2-3-4-5)
         assert_eq!(result.high_winners.len(), 1);
         assert_eq!(result.high_winners[0].player_index(), 0);
-        assert_eq!(result.high_winners[0].pot_amount(), dec!(0.5));
+        assert_eq!(result.high_winners[0].pot_amount(), 0.5);
 
         assert_eq!(result.low_winners.len(), 1);
         assert_eq!(result.low_winners[0].player_index(), 0);
-        assert_eq!(result.low_winners[0].pot_amount(), dec!(0.5));
+        assert_eq!(result.low_winners[0].pot_amount(), 0.5);
     }
 
     #[test]
@@ -368,7 +364,7 @@ mod test {
         state.set_flop(Deck::parse("5h 6c Jd").unwrap()).unwrap();
 
         let evaluator = OmahaHiLoGameEvaluation {};
-        let mut expected = [dec!(0); 3];
+        let mut expected = [0.0; 3];
         let mut runouts = 0;
         for runout in state.get_final_states() {
             let result = evaluator.evaluate_winners(&runout);
@@ -380,19 +376,16 @@ mod test {
             }
             runouts += 1;
         }
-        let expected: Vec<_> = expected
-            .iter()
-            .map(|e| e / rust_decimal::Decimal::from(runouts))
-            .collect();
+        let expected: Vec<_> = expected.iter().map(|e| e / f64::from(runouts)).collect();
 
         let equity = evaluator.evaluate_equity(&state);
         for (e, x) in equity.iter().zip(&expected) {
-            assert!((e - x).abs() < dec!(0.000001), "{equity:?} vs {expected:?}");
+            assert!((e - x).abs() < 0.000001, "{equity:?} vs {expected:?}");
         }
 
         let sampled = evaluator.sample_equity(&state, 20_000);
         for (e, s) in equity.iter().zip(&sampled) {
-            assert!((e - s).abs() < dec!(0.02), "{equity:?} vs {sampled:?}");
+            assert!((e - s).abs() < 0.02, "{equity:?} vs {sampled:?}");
         }
     }
 
@@ -434,7 +427,7 @@ mod test {
         let equities = evaluator.evaluate_equity(&state);
 
         assert_eq!(equities.len(), 2);
-        assert_eq!(equities[0] + equities[1], dec!(1));
-        assert_eq!(equities[0], dec!(1));
+        assert_eq!(equities[0] + equities[1], 1.0);
+        assert_eq!(equities[0], 1.0);
     }
 }

@@ -53,7 +53,6 @@ impl GameEvaluation<DeuceToSevenGameState, DeuceToSevenRanks> for DeuceToSevenGa
 
 #[cfg(test)]
 mod test {
-    use rust_decimal_macros::dec;
 
     use super::*;
     use crate::deck::Deck;
@@ -73,7 +72,7 @@ mod test {
         let winners = eval.evaluate_winners(&state);
         assert_eq!(winners.len(), 1);
         assert_eq!(winners[0].player_index(), 0);
-        assert_eq!(winners[0].pot_amount(), dec!(1));
+        assert_eq!(winners[0].pot_amount(), 1.0);
     }
 
     #[test]
@@ -105,6 +104,6 @@ mod test {
         let eval = DeuceToSevenGameEvaluation;
         let winners = eval.evaluate_winners(&state);
         assert_eq!(winners.len(), 2);
-        assert_eq!(winners[0].pot_amount(), dec!(0.5));
+        assert_eq!(winners[0].pot_amount(), 0.5);
     }
 }
