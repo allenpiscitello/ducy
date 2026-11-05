@@ -31,7 +31,6 @@ use ducy::games::flop_game::FlopGame;
 use ducy::games::holdem::{HoldemGameEvaluation, HoldemGameState, HoldemRange};
 use ducy::ranking::hand_rank::{StandardHandRanker, StandardHandRanks};
 use rayon::prelude::*;
-use rust_decimal::prelude::ToPrimitive;
 
 const RANKS: &[u8] = b"AKQJT98765432";
 const ANY_TWO: &str = "22+, A2s+, K2s+, Q2s+, J2s+, T2s+, 92s+, 82s+, 72s+, 62s+, 52s+, 42s+, 32s, \
@@ -218,7 +217,7 @@ fn main() {
                             s.add_player(*hand).unwrap();
                             s.add_player(opp).unwrap();
                             s.set_flop(flop).unwrap();
-                            eq += eval.evaluate_equity(&s)[0].to_f64().unwrap_or(0.0);
+                            eq += eval.evaluate_equity(&s)[0];
 
                             // Implied odds: on sampled turns and rivers, how often the hand
                             // makes a big hand of its own (trips or better, beating the

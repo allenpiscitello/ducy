@@ -17,7 +17,7 @@ Bots take seats as any `ducy_play::Bot`; this crate has none of its own.
 
 ```toml
 [dependencies]
-ducy-host = "0.5"
+ducy-host = "0.6"
 ```
 
 Features: `serde` serializes commands, updates and snapshots.

@@ -1,5 +1,3 @@
-use rust_decimal::Decimal;
-
 use crate::{
     deck::{
         Card, Deck, Rank, Suit,
@@ -338,14 +336,18 @@ impl OmahaRange {
             .split([',', ' ', '\t', '\n'])
             .filter(|p| !p.is_empty())
         {
-            range.add(part, Decimal::ONE)?;
+            range.add(part, 1.0)?;
         }
         Ok(range)
     }
 
     /// Adds every hand matching `term` with the given weight, replacing the
-    /// weight of hands already in the range.
-    pub fn add(&mut self, term: &str, weight: Decimal) -> Result<(), DucyError> {
+    /// weight of hands already in the range. A NaN or infinite weight is an
+    /// `InvalidRange` error.
+    pub fn add(&mut self, term: &str, weight: f64) -> Result<(), DucyError> {
+        if !weight.is_finite() {
+            return Err(DucyError::InvalidRange);
+        }
         let term = Term::parse(term.trim(), self.cards_per_player)?;
         for hand in Deck::all_cards().enumerate_combinations(self.cards_per_player) {
             if term.matches(hand) {
@@ -363,9 +365,7 @@ impl OmahaRange {
 
     /// Number of distinct hands in the range with a positive weight.
     pub fn combos(&self) -> u64 {
-        self.iter()
-            .filter(|item| item.get_weight() > Decimal::ZERO)
-            .count() as u64
+        self.iter().filter(|item| item.get_weight() > 0.0).count() as u64
     }
 
     /// Number of possible starting hands, e.g. 270,725 for 4 cards.
@@ -381,8 +381,8 @@ impl OmahaRange {
     /// Fraction of all starting hands in the range, counting each hand by
     /// its weight (a hand at weight 0.5 counts as half).
     pub fn weighted_coverage(&self) -> f64 {
-        let total: Decimal = self.iter().map(|item| item.get_weight()).sum();
-        f64::try_from(total).unwrap_or(0.0) / self.total_hands() as f64
+        let total: f64 = self.iter().map(|item| item.get_weight()).sum();
+        total / self.total_hands() as f64
     }
 
     /// Parses terms like [`OmahaRange::parse`] and reports what share of
@@ -391,7 +391,7 @@ impl OmahaRange {
     pub fn report(text: &str, cards_per_player: usize) -> Result<OmahaRangeReport, RangeTextError> {
         let mut range = Self::new(cards_per_player);
         for (start, term) in crate::deck::range::terms(text) {
-            range.add(term, Decimal::ONE).map_err(|_| RangeTextError {
+            range.add(term, 1.0).map_err(|_| RangeTextError {
                 term: term.to_string(),
                 start,
                 message: format!(
@@ -433,12 +433,7 @@ impl RangeSampler {
     pub(crate) fn new(range: &OmahaRange, available: Deck) -> Result<Self, DucyError> {
         let mut combos: Vec<(Deck, f64)> = range
             .iter()
-            .map(|item| {
-                (
-                    item.get_deck(),
-                    f64::try_from(item.get_weight()).unwrap_or(0.0),
-                )
-            })
+            .map(|item| (item.get_deck(), item.get_weight()))
             .filter(|&(deck, w)| w > 0.0 && available.has_cards(&deck))
             .collect();
         if combos.is_empty() {
@@ -478,7 +473,6 @@ impl Range for OmahaRange {
 
 #[cfg(test)]
 mod test {
-    use rust_decimal_macros::dec;
 
     use super::*;
 
@@ -555,8 +549,8 @@ mod test {
         assert!((range.coverage() - range.combos() as f64 / 270_725.0).abs() < 1e-12);
 
         let mut weighted = OmahaRange::new(4);
-        weighted.add("AAAA", dec!(0.5)).unwrap();
-        weighted.add("KKKK", dec!(1)).unwrap();
+        weighted.add("AAAA", 0.5).unwrap();
+        weighted.add("KKKK", 1.0).unwrap();
         assert!((weighted.weighted_coverage() - 1.5 / 270_725.0).abs() < 1e-15);
     }
 
@@ -568,7 +562,7 @@ mod test {
         ] {
             assert!(OmahaRange::parse(bad, 4).is_err(), "{bad}");
         }
-        assert!(OmahaRange::new(4).add("", Decimal::ONE).is_err());
+        assert!(OmahaRange::new(4).add("", 1.0).is_err());
         assert_eq!(OmahaRange::parse("", 4).unwrap().combos(), 0);
     }
 

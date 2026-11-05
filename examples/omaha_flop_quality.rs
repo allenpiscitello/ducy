@@ -56,7 +56,6 @@ use ducy::games::omaha::{OmahaGameEvaluation, OmahaGameState};
 use ducy::games::omaha_bomb_pot::{OmahaBombPotGameEvaluation, OmahaBombPotGameState};
 use ducy::ranking::hand_rank::StandardHandRanker;
 use rayon::prelude::*;
-use rust_decimal::prelude::ToPrimitive;
 
 const RANKS: &[u8] = b"23456789TJQKA";
 const SUITS: &[u8] = b"shdc";
@@ -296,9 +295,7 @@ fn main() {
                     s.add_player(to_deck(&hero)).unwrap();
                     s.add_player(to_deck(opp)).unwrap();
                     s.set_flop(to_deck(&flops[f])).unwrap();
-                    eq += eval.sample_equity_seeded(&s, runouts, Some(next(&mut rng)))[0]
-                        .to_f64()
-                        .unwrap_or(0.0);
+                    eq += eval.sample_equity_seeded(&s, runouts, Some(next(&mut rng)))[0];
                 }
                 if nuts {
                     for _ in 0..nut_runouts {

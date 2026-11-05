@@ -11,8 +11,6 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use rust_decimal::Decimal;
-
 use crate::{
     deck::Deck,
     error::DucyError,
@@ -70,16 +68,15 @@ impl OmahaRangeSampler {
             .split([',', ' ', '\t', '\n'])
             .filter(|p| !p.is_empty())
         {
-            range.add(part, Decimal::ONE)?;
+            range.add(part, 1.0)?;
         }
         Ok(range)
     }
 
     /// Adds a term. A hand matching several terms takes the weight of the
     /// latest one, as in `OmahaRange`.
-    pub fn add(&mut self, term: &str, weight: Decimal) -> Result<(), DucyError> {
-        let weight = f64::try_from(weight).map_err(|_| DucyError::InvalidRange)?;
-        if weight < 0.0 {
+    pub fn add(&mut self, term: &str, weight: f64) -> Result<(), DucyError> {
+        if !weight.is_finite() || weight < 0.0 {
             return Err(DucyError::InvalidRange);
         }
         self.terms
@@ -420,8 +417,6 @@ impl OmahaHiLoGameEvaluation {
 
 #[cfg(test)]
 mod test {
-    use rust_decimal::Decimal;
-    use rust_decimal_macros::dec;
 
     use super::*;
     use crate::deck::{Card, range::Range};
@@ -438,11 +433,7 @@ mod test {
     }
 
     fn exact(players: &[&str]) -> Vec<f64> {
-        OmahaGameEvaluation {}
-            .evaluate_equity(&turn_state(players))
-            .iter()
-            .map(|d| f64::try_from(*d).unwrap())
-            .collect()
+        OmahaGameEvaluation {}.evaluate_equity(&turn_state(players))
     }
 
     fn close(a: &[f64], b: &[f64], tol: f64) {
@@ -465,8 +456,8 @@ mod test {
     #[test]
     fn test_weighted_two_hand_range_matches_brute_force() {
         let mut range = OmahaRangeSampler::new(4);
-        range.add("AsAhKsKh", dec!(3)).unwrap();
-        range.add("QdQh6s6d", dec!(1)).unwrap();
+        range.add("AsAhKsKh", 3.0).unwrap();
+        range.add("QdQh6s6d", 1.0).unwrap();
         let a = exact(&["Jd Jc 8s 8c", "As Ah Ks Kh"]);
         let b = exact(&["Jd Jc 8s 8c", "Qd Qh 6s 6d"]);
         let expected: Vec<f64> = a.iter().zip(&b).map(|(x, y)| (3.0 * x + y) / 4.0).collect();
@@ -555,7 +546,7 @@ mod test {
         );
         assert!(OmahaRangeSampler::parse("AA$zz", 4).is_err());
         let mut neg = OmahaRangeSampler::new(4);
-        assert!(neg.add("AAxx", Decimal::NEGATIVE_ONE).is_err());
+        assert!(neg.add("AAxx", -1.0).is_err());
     }
 
     #[test]
@@ -572,11 +563,7 @@ mod test {
         full.set_flop(Deck::parse("3h 7c Jd").unwrap()).unwrap();
         full.set_turn(Card::parse("5s").unwrap()).unwrap();
         let eval = OmahaHiLoGameEvaluation {};
-        let want: Vec<f64> = eval
-            .evaluate_equity(&full)
-            .iter()
-            .map(|d| f64::try_from(*d).unwrap())
-            .collect();
+        let want: Vec<f64> = eval.evaluate_equity(&full);
         let range = OmahaRangeSampler::parse("Ah4cQsQh", 4).unwrap();
         let r = eval
             .sample_range_equity_seeded(&s, &[&range], 20_000, Some(4))

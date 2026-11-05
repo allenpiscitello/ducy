@@ -39,6 +39,9 @@
 //!
 //! - `serde` (default): `Serialize`/`Deserialize` for rules, actions,
 //!   events, views and snapshots (JSON for external bots and clients).
+//! - `fair-deal` (default): provably fair commit–reveal deals
+//!   ([`fair_deal`], [`Deal::from_seed`], [`Table::new_hand_from_seed`]),
+//!   with SHA-256 from `sha2`.
 //!
 //! A seed makes deals reproducible. Without one ([`Deal::random`] with
 //! `None`, or [`Table::with_secure_deals`]) every deal comes from fresh system
@@ -53,6 +56,7 @@ pub struct ReadmeDoctests;
 mod bot;
 mod deal;
 mod error;
+#[cfg(feature = "fair-deal")]
 pub mod fair_deal;
 mod hand;
 pub mod hands;

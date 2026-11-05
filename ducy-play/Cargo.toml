@@ -15,15 +15,25 @@ keywords = ["poker", "holdem", "omaha", "simulation"]
 all-features = true
 
 [features]
-default = ["serde"]
+default = ["serde", "fair-deal"]
 # Serialize rules, observations, events and results (JSON for external bots).
 serde = ["dep:serde", "ducy/serde"]
+# Provably fair commit–reveal deals (the `fair_deal` module), with SHA-256.
+fair-deal = ["dep:sha2"]
 
 [dependencies]
-ducy = { version = "0.5.1", path = "..", default-features = false }
+ducy = { version = "0.6.0", path = "..", default-features = false }
 rand = "0.10.2"
-sha2 = "0.11"
+sha2 = { version = "0.11", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 serde_json = "1"
+
+[[test]]
+name = "fair_deal"
+required-features = ["fair-deal"]
+
+[[test]]
+name = "fair_vectors"
+required-features = ["fair-deal"]

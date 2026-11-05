@@ -1,8 +1,5 @@
 use std::cmp::Ordering;
 
-use rust_decimal::Decimal;
-use strum::IntoEnumIterator;
-
 use crate::{
     deck::{
         Card, Deck, Rank, Suit,
@@ -101,7 +98,7 @@ impl GameEvaluation<HoldemGameState, StandardHandRanks> for HoldemGameEvaluation
 impl GameEquityEvaluation<HoldemGameState, StandardHandRanks, HoldemGameEvaluation>
     for HoldemGameEvaluation
 {
-    fn evaluate_equity(&self, game_state: &HoldemGameState) -> Vec<Decimal> {
+    fn evaluate_equity(&self, game_state: &HoldemGameState) -> Vec<f64> {
         let runouts = game_state
             .flop_game_state
             .enumerate_runout_community_cards()
@@ -177,7 +174,7 @@ impl RangeEquitySamples {
 }
 
 /// Weighted 2-card combos a range player can hold given the known cards.
-type RangeCombos = Vec<(Deck, Decimal)>;
+type RangeCombos = Vec<(Deck, f64)>;
 
 // Consecutive conflicting draws allowed before a sample is declared
 // impossible (every combination of combos shares a card).
@@ -203,9 +200,7 @@ impl HoldemGameEvaluation {
             .map(|range| {
                 let mut combos: RangeCombos = range
                     .iter()
-                    .filter(|c| {
-                        c.get_weight() > Decimal::ZERO && available.has_cards(&c.get_deck())
-                    })
+                    .filter(|c| c.get_weight() > 0.0 && available.has_cards(&c.get_deck()))
                     .map(|c| (c.get_deck(), c.get_weight()))
                     .collect();
                 if combos.is_empty() {
@@ -227,7 +222,7 @@ impl HoldemGameEvaluation {
         &self,
         game_state: &HoldemGameState,
         ranges: &[HoldemRange],
-    ) -> Result<Vec<Decimal>, DucyError> {
+    ) -> Result<Vec<f64>, DucyError> {
         let combos = Self::range_combos(game_state, ranges)?;
         let fs = &game_state.flop_game_state;
         let mut hands: Vec<Deck> = fs.hole_cards().to_vec();
@@ -238,12 +233,12 @@ impl HoldemGameEvaluation {
             community: fs.get_community_cards(),
             available: fs.remaining_cards(),
             cards_needed: fs.cards_needed(),
-            totals: vec![Decimal::ZERO; hands.len()],
-            total_weight: Decimal::ZERO,
+            totals: vec![0.0; hands.len()],
+            total_weight: 0.0,
         };
-        acc.visit(&combos, &mut hands, num_fixed, Deck::empty(), Decimal::ONE);
+        acc.visit(&combos, &mut hands, num_fixed, Deck::empty(), 1.0);
 
-        if acc.total_weight.is_zero() {
+        if acc.total_weight == 0.0 {
             return Err(DucyError::InvalidRange);
         }
         Ok(acc.totals.iter().map(|t| t / acc.total_weight).collect())
@@ -302,7 +297,7 @@ impl HoldemGameEvaluation {
             .map(|cs| {
                 cs.iter()
                     .scan(0.0, |total, (_, w)| {
-                        *total += f64::try_from(*w).unwrap_or(0.0);
+                        *total += *w;
                         Some(*total)
                     })
                     .collect()
@@ -362,8 +357,8 @@ struct ExactRangeAcc {
     community: Deck,
     available: Deck,
     cards_needed: usize,
-    totals: Vec<Decimal>,
-    total_weight: Decimal,
+    totals: Vec<f64>,
+    total_weight: f64,
 }
 
 impl ExactRangeAcc {
@@ -373,7 +368,7 @@ impl ExactRangeAcc {
         hands: &mut [Deck],
         next: usize,
         used: Deck,
-        weight: Decimal,
+        weight: f64,
     ) {
         let Some((first, rest)) = combos.split_first() else {
             let mut remaining = self.available;
@@ -429,7 +424,7 @@ impl HoldemRange {
         }
     }
 
-    fn add_pair_combos(&mut self, rank: Rank, weight: Decimal) {
+    fn add_pair_combos(&mut self, rank: Rank, weight: f64) {
         let suits: Vec<Suit> = Suit::iter().collect();
         for i in 0..suits.len() {
             for j in (i + 1)..suits.len() {
@@ -444,7 +439,7 @@ impl HoldemRange {
         &mut self,
         low_rank: Rank,
         high_rank: Rank,
-        weight: Decimal,
+        weight: f64,
     ) -> Result<(), DucyError> {
         let (low, high) = if RankOrder::AceIsHigh.cmp(low_rank, high_rank) == Ordering::Greater {
             (high_rank, low_rank)
@@ -460,7 +455,7 @@ impl HoldemRange {
         Ok(())
     }
 
-    fn add_offsuit_combo(&mut self, first_rank: Rank, second_rank: Rank, weight: Decimal) {
+    fn add_offsuit_combo(&mut self, first_rank: Rank, second_rank: Rank, weight: f64) {
         for s1 in Suit::iter() {
             for s2 in Suit::iter() {
                 if s1 != s2 {
@@ -474,7 +469,7 @@ impl HoldemRange {
         }
     }
 
-    fn add_suited_combo(&mut self, first_rank: Rank, second_rank: Rank, weight: Decimal) {
+    fn add_suited_combo(&mut self, first_rank: Rank, second_rank: Rank, weight: f64) {
         for s in Suit::iter() {
             let mut deck = Deck::empty();
             deck.insert_cards([Card::new(first_rank, s), Card::new(second_rank, s)].iter());
@@ -486,7 +481,7 @@ impl HoldemRange {
         &mut self,
         high_rank: Rank,
         low_rank: Rank,
-        weight: Decimal,
+        weight: f64,
     ) -> Result<(), DucyError> {
         if RankOrder::AceIsHigh.cmp(high_rank, low_rank) != Ordering::Greater {
             return Err(DucyError::InvalidRange);
@@ -501,7 +496,7 @@ impl HoldemRange {
         &mut self,
         high_rank: Rank,
         low_rank: Rank,
-        weight: Decimal,
+        weight: f64,
     ) -> Result<(), DucyError> {
         if RankOrder::AceIsHigh.cmp(high_rank, low_rank) != Ordering::Greater {
             return Err(DucyError::InvalidRange);
@@ -512,12 +507,7 @@ impl HoldemRange {
         Ok(())
     }
 
-    fn parse_dash_range(
-        &mut self,
-        left: &str,
-        right: &str,
-        weight: Decimal,
-    ) -> Result<(), DucyError> {
+    fn parse_dash_range(&mut self, left: &str, right: &str, weight: f64) -> Result<(), DucyError> {
         // One side of the dash: two ranks, high first, and an optional
         // "s" or "o".
         let side = |s: &str| -> Result<(Rank, Rank, Option<char>), DucyError> {
@@ -587,13 +577,17 @@ impl HoldemRange {
             .split([',', ' ', '\t', '\n'])
             .filter(|p| !p.is_empty())
         {
-            range.add(part, Decimal::ONE)?;
+            range.add(part, 1.0)?;
         }
         Ok(range)
     }
 
-    /// Adds hands matching a range string with the given weight.
-    pub fn add(&mut self, range: &str, weight: Decimal) -> Result<(), DucyError> {
+    /// Adds hands matching a range string with the given weight. A NaN or
+    /// infinite weight is an `InvalidRange` error.
+    pub fn add(&mut self, range: &str, weight: f64) -> Result<(), DucyError> {
+        if !weight.is_finite() {
+            return Err(DucyError::InvalidRange);
+        }
         let range = range.trim();
 
         // Specific combo: "AhKs" (rank-suit-rank-suit)
@@ -757,7 +751,7 @@ impl HoldemRange {
     pub fn report(text: &str, dead: Deck) -> Result<RangeReport, RangeTextError> {
         let mut range = Self::new();
         for (start, term) in crate::deck::range::terms(text) {
-            range.add(term, Decimal::ONE).map_err(|_| RangeTextError {
+            range.add(term, 1.0).map_err(|_| RangeTextError {
                 term: term.to_string(),
                 start,
                 message: format!(
@@ -807,7 +801,6 @@ impl Range for HoldemRange {
 
 #[cfg(test)]
 mod test {
-    use rust_decimal::Decimal;
 
     use crate::{
         deck::{Card, Deck, Rank, range::Range},
@@ -819,7 +812,6 @@ mod test {
         },
         ranking::hand_rank::StandardHandRanks,
     };
-    use rust_decimal_macros::dec;
 
     #[test]
     pub fn test_holdem_hand() {
@@ -844,7 +836,7 @@ mod test {
             winners[0],
             GameWinner {
                 player_index: 1,
-                pot_amount: dec!(1),
+                pot_amount: 1.0,
                 winning_hand: StandardHandRanks::ThreeOfAKind {
                     t: Rank::King,
                     c1: Rank::Queen,
@@ -856,8 +848,8 @@ mod test {
         let equities = hand_evaluation.evaluate_equity(&holdem_hand);
 
         assert_eq!(equities.len(), 2);
-        assert_eq!(equities[0], dec!(418) / dec!(1980));
-        assert_eq!(equities[1], dec!(1562) / dec!(1980));
+        assert!((equities[0] - 418.0 / 1980.0).abs() < 1e-12);
+        assert!((equities[1] - 1562.0 / 1980.0).abs() < 1e-12);
 
         holdem_hand.set_turn(Card::parse("Tc").unwrap()).unwrap();
 
@@ -868,7 +860,7 @@ mod test {
             winners[0],
             GameWinner {
                 player_index: 0,
-                pot_amount: dec!(1),
+                pot_amount: 1.0,
                 winning_hand: StandardHandRanks::Straight { s: Rank::Ace }
             }
         );
@@ -876,8 +868,8 @@ mod test {
         let equities = hand_evaluation.evaluate_equity(&holdem_hand);
 
         assert_eq!(equities.len(), 2);
-        assert_eq!(equities[0], dec!(33) / dec!(44));
-        assert_eq!(equities[1], dec!(11) / dec!(44));
+        assert_eq!(equities[0], 33.0 / 44.0);
+        assert_eq!(equities[1], 11.0 / 44.0);
 
         holdem_hand.set_river(Card::parse("Ad").unwrap()).unwrap();
 
@@ -888,7 +880,7 @@ mod test {
             winners[0],
             GameWinner {
                 player_index: 0,
-                pot_amount: dec!(0.5),
+                pot_amount: 0.5,
                 winning_hand: StandardHandRanks::Straight { s: Rank::Ace }
             }
         );
@@ -896,7 +888,7 @@ mod test {
             winners[1],
             GameWinner {
                 player_index: 1,
-                pot_amount: dec!(0.5),
+                pot_amount: 0.5,
                 winning_hand: StandardHandRanks::Straight { s: Rank::Ace }
             }
         );
@@ -904,14 +896,14 @@ mod test {
         let equities = hand_evaluation.evaluate_equity(&holdem_hand);
 
         assert_eq!(equities.len(), 2);
-        assert_eq!(equities[0], dec!(1) / dec!(2));
-        assert_eq!(equities[1], dec!(1) / dec!(2));
+        assert_eq!(equities[0], 1.0 / 2.0);
+        assert_eq!(equities[1], 1.0 / 2.0);
     }
 
     #[test]
     pub fn range_tests() {
         let mut range = HoldemRange::new();
-        range.add("AQo+", dec!(1)).unwrap();
+        range.add("AQo+", 1.0).unwrap();
         let mut range_1 = vec![
             "As Kc", "As Kd", "As Kh", "Ac Ks", "Ac Kh", "Ac Kd", "Ad Ks", "Ad Kc", "Ad Kh",
             "Ah Ks", "Ah Kd", "Ah Kc", "As Qc", "As Qd", "As Qh", "Ac Qs", "Ac Qh", "Ac Qd",
@@ -926,7 +918,7 @@ mod test {
 
         assert_eq!(actual_range_items, range_1);
 
-        range.add("AJs+", dec!(1)).unwrap();
+        range.add("AJs+", 1.0).unwrap();
 
         let mut range_2 = vec![
             "As Ks", "Ac Kc", "Ad Kd", "Ah Kh", "As Qs", "Ah Qh", "Ac Qc", "Ad Qd", "Ac Jc",
@@ -946,14 +938,14 @@ mod test {
     #[test]
     pub fn test_pair_range() {
         let mut range = HoldemRange::new();
-        range.add("TT", dec!(1)).unwrap();
+        range.add("TT", 1.0).unwrap();
         assert_eq!(range.iter().count(), 6); // C(4,2) = 6 combos for one pair
     }
 
     #[test]
     pub fn test_pair_plus_range() {
         let mut range = HoldemRange::new();
-        range.add("QQ+", dec!(1)).unwrap();
+        range.add("QQ+", 1.0).unwrap();
         // QQ, KK, AA = 3 pairs * 6 combos = 18
         assert_eq!(range.iter().count(), 18);
     }
@@ -961,7 +953,7 @@ mod test {
     #[test]
     pub fn test_pair_dash_range() {
         let mut range = HoldemRange::new();
-        range.add("77-TT", dec!(1)).unwrap();
+        range.add("77-TT", 1.0).unwrap();
         // 77, 88, 99, TT = 4 pairs * 6 combos = 24
         assert_eq!(range.iter().count(), 24);
     }
@@ -969,28 +961,28 @@ mod test {
     #[test]
     pub fn test_offsuit_exact() {
         let mut range = HoldemRange::new();
-        range.add("AKo", dec!(1)).unwrap();
+        range.add("AKo", 1.0).unwrap();
         assert_eq!(range.iter().count(), 12); // 4*3 = 12 offsuit combos
     }
 
     #[test]
     pub fn test_suited_exact() {
         let mut range = HoldemRange::new();
-        range.add("AKs", dec!(1)).unwrap();
+        range.add("AKs", 1.0).unwrap();
         assert_eq!(range.iter().count(), 4); // 4 suited combos
     }
 
     #[test]
     pub fn test_mixed_exact() {
         let mut range = HoldemRange::new();
-        range.add("AK", dec!(1)).unwrap();
+        range.add("AK", 1.0).unwrap();
         assert_eq!(range.iter().count(), 16); // 12 offsuit + 4 suited
     }
 
     #[test]
     pub fn test_mixed_plus() {
         let mut range = HoldemRange::new();
-        range.add("AQ+", dec!(1)).unwrap();
+        range.add("AQ+", 1.0).unwrap();
         // AQ (16) + AK (16) = 32
         assert_eq!(range.iter().count(), 32);
     }
@@ -998,7 +990,7 @@ mod test {
     #[test]
     pub fn test_specific_combo() {
         let mut range = HoldemRange::new();
-        range.add("AhKs", dec!(1)).unwrap();
+        range.add("AhKs", 1.0).unwrap();
         assert_eq!(range.iter().count(), 1);
         let item = range.iter().next().unwrap();
         assert_eq!(item.get_deck().to_string(), "Ah Ks");
@@ -1007,7 +999,7 @@ mod test {
     #[test]
     pub fn test_suited_dash_range() {
         let mut range = HoldemRange::new();
-        range.add("A8s-ATs", dec!(1)).unwrap();
+        range.add("A8s-ATs", 1.0).unwrap();
         // A8s, A9s, ATs = 3 * 4 = 12
         assert_eq!(range.iter().count(), 12);
     }
@@ -1015,7 +1007,7 @@ mod test {
     #[test]
     pub fn test_offsuit_dash_range() {
         let mut range = HoldemRange::new();
-        range.add("K9o-KJo", dec!(1)).unwrap();
+        range.add("K9o-KJo", 1.0).unwrap();
         // K9o, KTo, KJo = 3 * 12 = 36
         assert_eq!(range.iter().count(), 36);
     }
@@ -1023,7 +1015,7 @@ mod test {
     #[test]
     pub fn test_offsuit_range_plus_fixed_high_card() {
         let mut range = HoldemRange::new();
-        range.add("KTo+", dec!(1)).unwrap();
+        range.add("KTo+", 1.0).unwrap();
         // KT, KJ, KQ = 3 combos * 12 = 36
         assert_eq!(range.iter().count(), 36);
     }
@@ -1031,13 +1023,15 @@ mod test {
     #[test]
     pub fn test_invalid_range_same_card() {
         let mut range = HoldemRange::new();
-        assert!(range.add("AsAs", dec!(1)).is_err());
+        assert!(range.add("AsAs", 1.0).is_err());
     }
 
     #[test]
     pub fn test_invalid_range_garbage() {
         let mut range = HoldemRange::new();
-        assert!(range.add("xyz", dec!(1)).is_err());
+        assert!(range.add("xyz", 1.0).is_err());
+        assert!(range.add("AK", f64::NAN).is_err());
+        assert!(range.add("AK", f64::INFINITY).is_err());
     }
 
     #[test]
@@ -1045,14 +1039,14 @@ mod test {
         // Four bytes, but one character (or two): an error, not a panic.
         let mut range = HoldemRange::new();
         for term in ["🂡", "Aé", "é", "A🂡"] {
-            assert!(range.add(term, dec!(1)).is_err(), "{term}");
+            assert!(range.add(term, 1.0).is_err(), "{term}");
         }
     }
 
     #[test]
     pub fn test_invalid_pair_with_suit_suffix() {
         let mut range = HoldemRange::new();
-        assert!(range.add("TTs", dec!(1)).is_err());
+        assert!(range.add("TTs", 1.0).is_err());
     }
 
     fn flop_state(players: &[&str], flop: &str) -> HoldemGameState {
@@ -1064,7 +1058,7 @@ mod test {
         state
     }
 
-    fn assert_close(a: &[Decimal], b: &[Decimal], tol: Decimal) {
+    fn assert_close(a: &[f64], b: &[f64], tol: f64) {
         assert_eq!(a.len(), b.len());
         for (x, y) in a.iter().zip(b) {
             assert!((x - y).abs() < tol, "{a:?} vs {b:?}");
@@ -1077,12 +1071,12 @@ mod test {
         flop: &str,
         r0: &HoldemRange,
         r1: &HoldemRange,
-    ) -> Vec<Decimal> {
+    ) -> Vec<f64> {
         let base = flop_state(fixed, flop);
         let available = base.flop_game_state.remaining_cards();
         let n = fixed.len() + 2;
-        let mut totals = vec![Decimal::ZERO; n];
-        let mut weight = Decimal::ZERO;
+        let mut totals = vec![0.0; n];
+        let mut weight = 0.0;
         for a in r0.iter() {
             for b in r1.iter() {
                 let (da, db) = (a.get_deck(), b.get_deck());
@@ -1118,11 +1112,7 @@ mod test {
         let eq = HoldemGameEvaluation {}
             .range_equity(&state, &ranges)
             .unwrap();
-        assert_close(
-            &eq,
-            &[dec!(418) / dec!(1980), dec!(1562) / dec!(1980)],
-            dec!(1e-20),
-        );
+        assert_close(&eq, &[418.0 / 1980.0, 1562.0 / 1980.0], 1e-12);
     }
 
     #[test]
@@ -1139,33 +1129,29 @@ mod test {
                 ],
             )
             .unwrap();
-        assert_close(
-            &eq,
-            &manual_range_equity(&[], "Kc Qd Js", &r0, &r1),
-            dec!(1e-20),
-        );
+        assert_close(&eq, &manual_range_equity(&[], "Kc Qd Js", &r0, &r1), 1e-12);
     }
 
     #[test]
     pub fn test_range_equity_with_fixed_player_and_weights() {
         let mut r0 = HoldemRange::new();
-        r0.add("AsAh", dec!(3)).unwrap();
-        r0.add("KsKh", dec!(1)).unwrap();
-        r0.add("QsQh", dec!(0)).unwrap();
+        r0.add("AsAh", 3.0).unwrap();
+        r0.add("KsKh", 1.0).unwrap();
+        r0.add("QsQh", 0.0).unwrap();
         let r1 = HoldemRange::parse("JJ").unwrap();
         let fixed = ["Tc Td"];
         let state = flop_state(&fixed, "2c 7d 9h");
 
         let mut r0_copy = HoldemRange::new();
-        r0_copy.add("AsAh", dec!(3)).unwrap();
-        r0_copy.add("KsKh", dec!(1)).unwrap();
+        r0_copy.add("AsAh", 3.0).unwrap();
+        r0_copy.add("KsKh", 1.0).unwrap();
         let expected = manual_range_equity(&fixed, "2c 7d 9h", &r0_copy, &r1);
 
         let eq = HoldemGameEvaluation {}
             .range_equity(&state, &[r0, r1])
             .unwrap();
         assert_eq!(eq.len(), 3);
-        assert_close(&eq, &expected, dec!(1e-20));
+        assert_close(&eq, &expected, 1e-12);
     }
 
     #[test]
@@ -1189,7 +1175,6 @@ mod test {
             .zip(sampled.equity())
             .zip(sampled.standard_error())
         {
-            let e = f64::try_from(*e).unwrap();
             assert!(se > 0.0 && se < 0.01, "se {se}");
             assert!(
                 (e - s).abs() < 5.0 * se + 1e-3,
@@ -1203,8 +1188,8 @@ mod test {
         let state = flop_state(&["Tc Td"], "2c 7d 9h");
         let ranges = || {
             let mut r0 = HoldemRange::new();
-            r0.add("AsAh", dec!(3)).unwrap();
-            r0.add("KsKh", dec!(1)).unwrap();
+            r0.add("AsAh", 3.0).unwrap();
+            r0.add("KsKh", 1.0).unwrap();
             [r0, HoldemRange::parse("JJ").unwrap()]
         };
         let eval = HoldemGameEvaluation {};
@@ -1220,7 +1205,6 @@ mod test {
         // Weighted draws converge on the weighted exact result.
         let exact = eval.range_equity(&state, &ranges()).unwrap();
         for ((e, s), se) in exact.iter().zip(a.equity()).zip(a.standard_error()) {
-            let e = f64::try_from(*e).unwrap();
             assert!(
                 (e - s).abs() < 5.0 * se + 1e-3,
                 "exact {e} vs sampled {s} (se {se})"
@@ -1369,7 +1353,6 @@ mod test {
             .unwrap();
         let sampled: Vec<f64> = s.equity_sum.iter().map(|e| e / s.samples as f64).collect();
         for (e, s) in exact.iter().zip(&sampled) {
-            let e: f64 = (*e).try_into().unwrap();
             assert!((e - s).abs() < 0.01, "exact {exact:?} sampled {sampled:?}");
         }
         let again = eval

@@ -1,6 +1,3 @@
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
-
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::deck::Deck;
@@ -47,17 +44,17 @@ pub mod stud_hilo;
 pub trait GameState {}
 
 /// A winning player's result: their index, pot share, and best hand.
-#[derive(Eq, PartialEq, Debug)]
+#[derive(PartialEq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GameWinner<H: HandRanking> {
     pub(crate) player_index: usize,
-    pub(crate) pot_amount: Decimal,
+    pub(crate) pot_amount: f64,
     pub(crate) winning_hand: H,
 }
 
 impl<H: HandRanking> GameWinner<H> {
     /// Creates a new winner result.
-    pub fn new(index: usize, pot_amount: Decimal, winning_hand: H) -> Self {
+    pub fn new(index: usize, pot_amount: f64, winning_hand: H) -> Self {
         Self {
             player_index: index,
             pot_amount,
@@ -72,7 +69,7 @@ impl<H: HandRanking> GameWinner<H> {
 
     /// The share of the pot this winner takes (1 split by the number of
     /// winners, or by the share of runouts won in an equity calculation).
-    pub fn pot_amount(&self) -> Decimal {
+    pub fn pot_amount(&self) -> f64 {
         self.pot_amount
     }
 
@@ -125,7 +122,7 @@ impl<H: HandRanking + Ord + Copy> WinnerTracker<H> {
         if let Some(best_hand) = self.best_hand
             && winner_count > 0
         {
-            let pot_distribution = dec!(1.0) / Decimal::from(winner_count);
+            let pot_distribution = 1.0 / winner_count as f64;
             self.winners
                 .iter()
                 .map(|x| GameWinner::new(*x, pot_distribution, best_hand))
@@ -297,15 +294,12 @@ impl EquityShares {
     }
 
     /// Each player's equity; all zeros when no runouts were evaluated.
-    pub fn equity(&self) -> Vec<Decimal> {
+    pub fn equity(&self) -> Vec<f64> {
         if self.runouts == 0 {
-            return vec![Decimal::ZERO; self.shares.len()];
+            return vec![0.0; self.shares.len()];
         }
-        let divisor = Decimal::from(Self::SCALE) * Decimal::from(self.runouts);
-        self.shares
-            .iter()
-            .map(|&s| Decimal::from(s) / divisor)
-            .collect()
+        let divisor = Self::SCALE as f64 * self.runouts as f64;
+        self.shares.iter().map(|&s| s as f64 / divisor).collect()
     }
 
     /// Each player's summed equity over the runouts (shares / SCALE).
@@ -321,7 +315,7 @@ pub(crate) fn accumulate_equity<F>(
     runouts: Vec<crate::deck::Deck>,
     num_players: usize,
     eval: F,
-) -> Vec<Decimal>
+) -> Vec<f64>
 where
     F: Fn(&crate::deck::Deck, &mut [u64]) + Send + Sync,
 {
@@ -393,5 +387,5 @@ pub trait GameEvaluation<GS: GameState, H: HandRanking> {
 /// Evaluates equity (expected pot share) across all possible runouts.
 pub trait GameEquityEvaluation<GS: GameState, H: HandRanking, GE: GameEvaluation<GS, H>> {
     /// Returns each player's equity as a fraction of the pot.
-    fn evaluate_equity(&self, game_state: &GS) -> Vec<Decimal>;
+    fn evaluate_equity(&self, game_state: &GS) -> Vec<f64>;
 }

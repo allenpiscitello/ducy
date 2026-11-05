@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 
 use crate::deck::Deck;
-use rust_decimal::Decimal;
 
 /// A single hand in a range with its associated weight.
 pub struct RangeItem {
     deck: Deck,
-    weight: Decimal,
+    weight: f64,
 }
 
 impl RangeItem {
@@ -15,7 +14,7 @@ impl RangeItem {
         self.deck
     }
     /// Returns the weight (frequency) of this range item.
-    pub fn get_weight(&self) -> Decimal {
+    pub fn get_weight(&self) -> f64 {
         self.weight
     }
 }
@@ -49,7 +48,7 @@ pub trait Range {
 /// Stores deck-to-weight mappings for building ranges.
 #[derive(Clone)]
 pub struct RangeBase {
-    weights: HashMap<Deck, Decimal>,
+    weights: HashMap<Deck, f64>,
 }
 impl RangeBase {
     pub(crate) fn new() -> Self {
@@ -59,7 +58,7 @@ impl RangeBase {
     }
 
     /// Adds or replaces the weight for a specific hand.
-    pub fn add_deck_weight(&mut self, deck: Deck, weight: Decimal) {
+    pub fn add_deck_weight(&mut self, deck: Deck, weight: f64) {
         self.weights.insert(deck, weight);
     }
 }

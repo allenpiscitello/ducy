@@ -1,5 +1,3 @@
-use rust_decimal_macros::dec;
-
 use crate::games::dealt_hand::DealtHandGameState;
 use crate::games::{GameState, GameWinner, WinnerTracker};
 use crate::ranking::hand_rank::{StandardHandRanker, StandardHandRanks};
@@ -79,10 +77,10 @@ impl StudHiLoGameEvaluation {
             let mut high_results = high_tracker.into_results();
             let mut low_results = low_tracker.into_results();
             for w in &mut high_results {
-                w.pot_amount *= dec!(0.5);
+                w.pot_amount *= 0.5;
             }
             for w in &mut low_results {
-                w.pot_amount *= dec!(0.5);
+                w.pot_amount *= 0.5;
             }
             HiLoResult {
                 high_winners: high_results,
@@ -99,7 +97,6 @@ impl StudHiLoGameEvaluation {
 
 #[cfg(test)]
 mod test {
-    use rust_decimal_macros::dec;
 
     use super::*;
     use crate::deck::Deck;
@@ -118,7 +115,7 @@ mod test {
         let result = eval.evaluate_winners(&state);
         assert_eq!(result.high_winners.len(), 1);
         assert_eq!(result.high_winners[0].player_index(), 0);
-        assert_eq!(result.high_winners[0].pot_amount(), dec!(1));
+        assert_eq!(result.high_winners[0].pot_amount(), 1.0);
         assert!(result.low_winners.is_empty());
     }
 
@@ -138,10 +135,10 @@ mod test {
         let result = eval.evaluate_winners(&state);
         assert_eq!(result.high_winners.len(), 1);
         assert_eq!(result.high_winners[0].player_index(), 0);
-        assert_eq!(result.high_winners[0].pot_amount(), dec!(0.5));
+        assert_eq!(result.high_winners[0].pot_amount(), 0.5);
         assert_eq!(result.low_winners.len(), 1);
         assert_eq!(result.low_winners[0].player_index(), 1);
-        assert_eq!(result.low_winners[0].pot_amount(), dec!(0.5));
+        assert_eq!(result.low_winners[0].pot_amount(), 0.5);
     }
 
     #[test]

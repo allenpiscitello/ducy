@@ -143,6 +143,7 @@ impl Deal {
 
     /// The deal for a provably fair seed agreed by the players and the host
     /// ([`crate::fair_deal`]): anyone with the seed gets the same cards.
+    #[cfg(feature = "fair-deal")]
     pub fn from_seed(variant: Variant, players: usize, seed: &[u8; 32]) -> Result<Self, PlayError> {
         if players * variant.hole_cards() + 5 > 52 {
             return Err(PlayError::NotEnoughCards);
