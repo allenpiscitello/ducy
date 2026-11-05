@@ -303,6 +303,7 @@ mod tests {
                     .with_plo_buckets(cards.clone())
             })
             .collect();
+        let mut raises = 0;
         for d in 0..60u64 {
             let deal = Deal::random(rules.variant, SEATS, Some(d)).expect("deal");
             let mut hand = Hand::new(rules, &[200; SEATS], d as usize % SEATS, deal).expect("hand");
@@ -312,7 +313,17 @@ mod tests {
                 .collect();
             let out = play_hand(&mut hand, &mut seated).expect("a legal hand");
             assert_eq!(out.result.net.iter().sum::<i64>(), 0);
+            // An illegal action would be played as a fold (a pot-size raise
+            // sent as all-in at 100 BB once was, so the bot never raised).
+            assert!(out.fallbacks.iter().all(|&f| f == 0), "{:?}", out.fallbacks);
+            raises += hand
+                .events()
+                .iter()
+                .take_while(|e| !matches!(e, ducy_play::Event::Board { .. }))
+                .filter(|e| matches!(e, ducy_play::Event::Raise { .. }))
+                .count();
         }
+        assert!(raises > 10, "{raises} preflop raises in 60 hands");
         let solved: u64 = bots.iter().map(|b| b.solved).sum();
         let off: u64 = bots.iter().map(|b| b.off_tree).sum();
         assert!(
