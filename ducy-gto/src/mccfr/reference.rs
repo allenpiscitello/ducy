@@ -194,6 +194,7 @@ where
                         if prune
                             && let Some(id) = id
                             && (self.table.regret[self.table.range(id)][a] as f64) < threshold
+                            && self.game.prunable(s, a)
                         {
                             explored[a] = false;
                             continue;

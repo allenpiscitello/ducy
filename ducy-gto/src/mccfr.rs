@@ -112,9 +112,16 @@ impl Discount {
     };
 }
 
-/// Regret-based pruning: once `after` iterations have run, actions whose
-/// regret is below `threshold` are skipped, except on every `full_every`-th
-/// iteration, which explores everything.
+/// Regret-based pruning, as in Pluribus: once `after` iterations have run,
+/// the traverser skips actions whose regret is below `threshold`, except on
+/// every `full_every`-th iteration, which explores everything (20 prunes 95%
+/// of iterations, Pluribus's rate). Actions the game says aren't
+/// [prunable](Game::prunable) are always explored: ones that end the game,
+/// and in poker every river action.
+///
+/// With DCFR's recommended β = 0, negative regrets are halved after every
+/// batch, so they settle near twice what one batch adds: `threshold` has to
+/// be on that scale (it grows with the batch size and the stakes).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Prune {
     pub after: u64,
@@ -587,6 +594,7 @@ where
                         if prune
                             && let Some(id) = id
                             && (self.table.regret_at(id, a) as f64) < threshold
+                            && self.game.prunable(s, a)
                         {
                             skipped[a / 64] |= 1 << (a % 64);
                             continue;
@@ -899,5 +907,18 @@ mod tests {
             Some(&cards),
         );
         matches_reference(&game, config(Discount::DCFR, 64), &[256, 512]);
+        let prune = Some(Prune {
+            after: 128,
+            threshold: -1.0,
+            full_every: 20,
+        });
+        matches_reference(
+            &game,
+            Config {
+                prune,
+                ..config(Discount::DCFR, 64)
+            },
+            &[256, 512],
+        );
     }
 }

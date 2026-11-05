@@ -7,12 +7,14 @@
 //!
 //! Options: `--plo-cards FILE` (PLO with that abstraction; Hold'em with a
 //! quick 8-bucket abstraction without it), `--menu NAME`, `--bb N`,
-//! `--warm N`, `--iters N`, `--batch N`, `--seed N`.
+//! `--warm N`, `--iters N`, `--batch N`, `--seed N`, and pruning with
+//! `--prune-threshold X` (from the end of the warm-up, every 20th iteration
+//! full).
 
 use std::{path::PathBuf, time::Instant};
 
 use ducy_gto::{
-    Config, Discount, Mccfr,
+    Config, Discount, Mccfr, Prune,
     holdem::{abstraction::CardAbstraction, hunl::Buckets},
     omaha::abstraction::PloAbstraction,
     sixmax::multiway::{MultiwayConfig, MultiwayGame},
@@ -26,6 +28,7 @@ struct Args {
     iters: u64,
     batch: u64,
     seed: u64,
+    prune_threshold: Option<f64>,
 }
 
 fn args() -> Args {
@@ -37,6 +40,7 @@ fn args() -> Args {
         iters: 100_000,
         batch: 4096,
         seed: 1,
+        prune_threshold: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -50,6 +54,9 @@ fn args() -> Args {
             "--iters" => a.iters = num(value()),
             "--batch" => a.batch = num(value()),
             "--seed" => a.seed = num(value()),
+            "--prune-threshold" => {
+                a.prune_threshold = Some(value().parse().expect("--prune-threshold"))
+            }
             f => panic!("unknown option {f}"),
         }
     }
@@ -100,7 +107,11 @@ fn bench<A: Buckets + Sync, const H: usize>(a: &Args, cards: &A, game_name: &str
             seed: a.seed,
             batch: a.batch,
             discount: Discount::DCFR,
-            prune: None,
+            prune: a.prune_threshold.map(|threshold| Prune {
+                after: a.warm,
+                threshold,
+                full_every: 20,
+            }),
         },
     );
     let t = Instant::now();

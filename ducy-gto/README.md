@@ -34,7 +34,8 @@ crate finds equilibria and measures exploitability exactly.
   chance and the opponent. On top of that:
   - **Discounting:** `Discount::Linear` (Linear CFR) and `Discount::DCFR`
     (DCFR, α = 1.5, β = 0, γ = 2).
-  - **Regret-based pruning** (`Prune`), with periodic full passes.
+  - **Regret-based pruning** (`Prune`), as in Pluribus: periodic full
+    passes, never an action that ends the hand or a river action.
   - **Parallel batches with rayon:** reproducible for a seed and batch size,
     whatever the thread count.
   - **Compact storage:** `f32` regrets and strategy sums in flat arrays.
@@ -92,8 +93,8 @@ of 256, exploitability in milli-chips per hand:
 |---|---|---|---|---|
 | 10,000 | 456.4 | 387.5 | 277.6 | 277.6 |
 | 100,000 | 81.2 | 73.4 | 51.7 | 51.6 |
-| 1,000,000 | 21.8 | 25.6 | 18.7 | 17.0 |
-| 4,000,000 (≈17 s) | 10.8 | 11.2 | 10.4 | 8.8 |
+| 1,000,000 | 21.8 | 25.6 | 18.7 | 16.9 |
+| 4,000,000 (≈17 s) | 10.8 | 11.2 | 10.4 | 9.6 |
 
 On a game as small as Leduc, full-tree CFR+ is far better (0.26 in 2 s): a
 full walk costs barely more than a sample. Sampling pays off in big games,
