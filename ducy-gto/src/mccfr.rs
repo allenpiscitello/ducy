@@ -28,7 +28,10 @@
 //! - **Checkpoints:** [`Mccfr::save`] and [`Mccfr::load`]. A resumed run
 //!   matches one that never stopped.
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    hash::{BuildHasherDefault, Hasher},
+};
 
 use crate::{
     game::{Game, Turn},
@@ -36,6 +39,53 @@ use crate::{
     profile::Profile,
     rng::Rng,
 };
+
+/// A fast hasher for the solver's maps. Keys come from the game, not from
+/// an adversary, so SipHash's protection against crafted collisions isn't
+/// needed; a folded multiply mixes every key bit into the low bits (the
+/// bucket) and the high bits (the tag) alike.
+#[derive(Clone, Copy, Default)]
+struct FastHasher(u64);
+
+impl FastHasher {
+    #[inline]
+    fn add(&mut self, x: u64) {
+        let m = ((self.0 ^ x) as u128).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        self.0 = m as u64 ^ (m >> 64) as u64;
+    }
+}
+
+impl Hasher for FastHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut chunks = bytes.chunks_exact(8);
+        for c in &mut chunks {
+            self.add(u64::from_le_bytes(c.try_into().expect("8 bytes")));
+        }
+        let rest = chunks.remainder();
+        if !rest.is_empty() {
+            let mut b = [0u8; 8];
+            b[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(b));
+        }
+    }
+    fn write_u8(&mut self, x: u8) {
+        self.add(x as u64);
+    }
+    fn write_u32(&mut self, x: u32) {
+        self.add(x as u64);
+    }
+    fn write_u64(&mut self, x: u64) {
+        self.add(x);
+    }
+    fn write_usize(&mut self, x: usize) {
+        self.add(x as u64);
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FastHasher>>;
 
 /// How earlier iterations are discounted. With `t` the number of batches so
 /// far, after each batch:
@@ -136,7 +186,7 @@ fn discount_sum(mut x: f32, pending: &[Factors]) -> f32 {
 /// scaling everything after each batch, so the results are identical, but
 /// a batch only costs the information sets it visits.
 struct Table<I> {
-    index: HashMap<I, u32>,
+    index: FastMap<I, u32>,
     slots: Vec<Slot>,
     regret: Vec<f32>,
     sum: Vec<f32>,
@@ -152,7 +202,7 @@ struct Table<I> {
 impl<I: Key> Table<I> {
     fn new(base: u64) -> Self {
         Self {
-            index: HashMap::new(),
+            index: FastMap::default(),
             slots: Vec::new(),
             regret: Vec::new(),
             sum: Vec::new(),
@@ -222,21 +272,68 @@ impl<I: Key> Table<I> {
         }
     }
 
-    /// Brings `id`'s values up to date (all factors applied).
-    fn settle(&mut self, id: u32) {
-        let through = self.base + self.factors.len() as u64;
-        let pending = pending(&self.factors, self.base, self.discounted[id as usize]);
-        if pending.is_empty() {
+    /// Adds every chunk's changes to the first `count` information sets
+    /// (the ones known before the batch), in parallel over ranges of them.
+    fn merge_known(&mut self, deltas: &[Delta<I>], count: u32) {
+        if count == 0 {
             return;
         }
-        let r = self.range(id);
-        for x in &mut self.regret[r.clone()] {
-            *x = discount_regret(*x, pending);
+        #[cfg(feature = "parallel")]
+        let parts = 4 * rayon::current_num_threads() as u32;
+        #[cfg(not(feature = "parallel"))]
+        let parts = 1;
+        let parts = parts.clamp(1, count);
+        let Self {
+            slots,
+            regret,
+            sum,
+            discounted,
+            factors,
+            base,
+            ..
+        } = self;
+        let start = |id: u32| {
+            slots
+                .get(id as usize)
+                .map_or(regret.len(), |s| s.start as usize)
+        };
+        let bounds: Vec<(u32, usize)> = (0..=parts)
+            .map(|j| {
+                let id = (count as u64 * j as u64 / parts as u64) as u32;
+                (id, start(id))
+            })
+            .collect();
+        let (mut regret, mut sum, mut discounted) =
+            (&mut regret[..], &mut sum[..], &mut discounted[..]);
+        let mut shards = Vec::with_capacity(parts as usize);
+        for w in bounds.windows(2) {
+            let ((first, offset), (end, stop)) = (w[0], w[1]);
+            let (r, rest) = std::mem::take(&mut regret).split_at_mut(stop - offset);
+            regret = rest;
+            let (s, rest) = std::mem::take(&mut sum).split_at_mut(stop - offset);
+            sum = rest;
+            let (d, rest) = std::mem::take(&mut discounted).split_at_mut((end - first) as usize);
+            discounted = rest;
+            shards.push(Shard {
+                first,
+                offset,
+                regret: r,
+                sum: s,
+                discounted: d,
+            });
         }
-        for x in &mut self.sum[r] {
-            *x = discount_sum(*x, pending);
+        let (slots, factors, base) = (&slots[..], &factors[..], *base);
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            shards
+                .par_iter_mut()
+                .for_each(|s| s.merge(deltas, slots, factors, base));
         }
-        self.discounted[id as usize] = through as u32;
+        #[cfg(not(feature = "parallel"))]
+        for s in &mut shards {
+            s.merge(deltas, slots, factors, base);
+        }
     }
 }
 
@@ -247,43 +344,112 @@ fn pending(factors: &[Factors], base: u64, discounted: u32) -> &[Factors] {
         .unwrap_or(&[])
 }
 
-/// Changes found by one chunk of iterations, applied after the batch.
+/// Changes found by one chunk of iterations, applied after the batch. Each
+/// information set's changes are `n` regrets then `n` strategy sums, in one
+/// flat buffer.
 struct Delta<I> {
-    known: HashMap<u32, (Vec<f64>, Vec<f64>)>,
-    new_index: HashMap<I, usize>,
-    /// Information sets not yet in the table, in the order first seen.
-    new: Vec<(I, Vec<f64>, Vec<f64>)>,
+    /// Offsets into `values` of information sets already in the table.
+    known: FastMap<u32, u32>,
+    /// `known` sorted by slot, once the chunk is done.
+    sorted: Vec<(u32, u32)>,
+    new_index: FastMap<I, u32>,
+    /// Information sets not yet in the table, in the order first seen,
+    /// with their offsets and action counts.
+    new: Vec<(I, u32, u8)>,
+    values: Vec<f64>,
 }
 
 impl<I: Key> Delta<I> {
     fn new() -> Self {
         Self {
-            known: HashMap::new(),
-            new_index: HashMap::new(),
+            known: FastMap::default(),
+            sorted: Vec::new(),
+            new_index: FastMap::default(),
             new: Vec::new(),
+            values: Vec::new(),
         }
     }
 
-    fn entry(&mut self, id: Option<u32>, info: &I, n: usize) -> (&mut Vec<f64>, &mut Vec<f64>) {
-        match id {
-            Some(id) => {
-                let e = self
-                    .known
-                    .entry(id)
-                    .or_insert_with(|| (vec![0.0; n], vec![0.0; n]));
-                (&mut e.0, &mut e.1)
-            }
-            None => {
-                let i = match self.new_index.get(info) {
-                    Some(&i) => i,
-                    None => {
-                        self.new.push((info.clone(), vec![0.0; n], vec![0.0; n]));
-                        self.new_index.insert(info.clone(), self.new.len() - 1);
-                        self.new.len() - 1
+    /// Room for `n` regrets and `n` sums, zeroed.
+    fn grow(values: &mut Vec<f64>, n: usize) -> u32 {
+        let off = values.len();
+        values.resize(off + 2 * n, 0.0);
+        off as u32
+    }
+
+    fn entry(&mut self, id: Option<u32>, info: &I, n: usize) -> (&mut [f64], &mut [f64]) {
+        let Self {
+            known,
+            new_index,
+            new,
+            values,
+            ..
+        } = self;
+        let off = match id {
+            Some(id) => *known.entry(id).or_insert_with(|| Self::grow(values, n)),
+            None => match new_index.get(info) {
+                Some(&i) => new[i as usize].1,
+                None => {
+                    let off = Self::grow(values, n);
+                    new.push((info.clone(), off, n as u8));
+                    new_index.insert(info.clone(), new.len() as u32 - 1);
+                    off
+                }
+            },
+        } as usize;
+        values[off..off + 2 * n].split_at_mut(n)
+    }
+
+    /// Done adding: sorts the known information sets for the merge and
+    /// frees the maps.
+    fn finish(&mut self) {
+        self.sorted = self.known.drain().collect();
+        self.sorted.sort_unstable();
+        self.known = FastMap::default();
+        self.new_index = FastMap::default();
+    }
+}
+
+/// The part of the table one thread updates in the merge: the slots
+/// `first..first + discounted.len()`, whose values start at `offset`.
+struct Shard<'t> {
+    first: u32,
+    offset: usize,
+    regret: &'t mut [f32],
+    sum: &'t mut [f32],
+    discounted: &'t mut [u32],
+}
+
+impl Shard<'_> {
+    /// Adds every chunk's changes to this shard's information sets, in
+    /// chunk order, each first brought up to date with the discounts.
+    fn merge<I>(&mut self, deltas: &[Delta<I>], slots: &[Slot], factors: &[Factors], base: u64) {
+        let end = self.first + self.discounted.len() as u32;
+        let through = (base + factors.len() as u64) as u32;
+        for d in deltas {
+            let from = d.sorted.partition_point(|e| e.0 < self.first);
+            for &(id, off) in d.sorted[from..].iter().take_while(|e| e.0 < end) {
+                let slot = &slots[id as usize];
+                let n = slot.n as usize;
+                let at = slot.start as usize - self.offset;
+                let regret = &mut self.regret[at..at + n];
+                let sum = &mut self.sum[at..at + n];
+                let discounted = &mut self.discounted[(id - self.first) as usize];
+                let pending = pending(factors, base, *discounted);
+                if !pending.is_empty() {
+                    for x in regret.iter_mut() {
+                        *x = discount_regret(*x, pending);
                     }
-                };
-                let e = &mut self.new[i];
-                (&mut e.1, &mut e.2)
+                    for x in sum.iter_mut() {
+                        *x = discount_sum(*x, pending);
+                    }
+                    *discounted = through;
+                }
+                let v = &d.values[off as usize..off as usize + 2 * n];
+                for k in 0..n {
+                    regret[k] += v[k] as f32;
+                    sum[k] += v[n + k] as f32;
+                }
             }
         }
     }
@@ -343,9 +509,7 @@ where
             .map(|s| (s, (s + CHUNK).min(last)))
             .collect();
         let deltas = self.map_chunks(&chunks);
-        for d in deltas {
-            self.apply(d);
-        }
+        self.apply(deltas);
         self.iterations = last;
         self.batches += 1;
         assert!(self.batches < u32::MAX as u64, "too many batches");
@@ -365,6 +529,7 @@ where
 
     fn chunk(&self, first: u64, last: u64) -> Delta<G::Info> {
         let mut delta = Delta::new();
+        let mut buf = Vec::with_capacity(256);
         let root = self.game.root();
         for i in first..last {
             let mut rng = Rng::for_iteration(self.config.seed, i);
@@ -380,13 +545,16 @@ where
                 &root
             };
             for player in 0..self.game.num_players() {
-                self.traverse(start, player, prune, &mut rng, &mut delta);
+                self.traverse(start, player, prune, &mut rng, &mut delta, &mut buf);
             }
         }
+        delta.finish();
         delta
     }
 
-    /// The traverser's sampled value of `s`.
+    /// The traverser's sampled value of `s`. `buf` is scratch space: each
+    /// node keeps its strategy and action values on top and pops them
+    /// before returning.
     fn traverse(
         &self,
         s: &G::State,
@@ -394,77 +562,84 @@ where
         prune: bool,
         rng: &mut Rng,
         delta: &mut Delta<G::Info>,
+        buf: &mut Vec<f64>,
     ) -> f64 {
         match self.game.turn(s) {
             Turn::Terminal => self.game.utility_for(s, player),
             Turn::Chance => {
                 let next = self.game.sample_chance(s, rng);
-                self.traverse(&next, player, prune, rng, delta)
+                self.traverse(&next, player, prune, rng, delta, buf)
             }
             Turn::Player(p) => {
                 let n = self.game.num_actions(s);
                 let info = self.game.info(s);
                 let id = self.table.index.get(&info).copied();
-                let mut sigma = vec![0.0; n];
-                self.table.strategy(id, n, &mut sigma);
+                // The strategy at `base..base + n`, then the action values.
+                let base = buf.len();
+                buf.resize(base + n, 0.0);
+                self.table.strategy(id, n, &mut buf[base..]);
                 if p == player {
                     let threshold = self.config.prune.map_or(f64::NEG_INFINITY, |p| p.threshold);
-                    let mut values = vec![0.0; n];
-                    let mut explored = vec![true; n];
+                    buf.resize(base + 2 * n, 0.0);
+                    let mut skipped = [0u64; 4];
                     let mut v = 0.0;
                     for a in 0..n {
                         if prune
                             && let Some(id) = id
                             && (self.table.regret_at(id, a) as f64) < threshold
                         {
-                            explored[a] = false;
+                            skipped[a / 64] |= 1 << (a % 64);
                             continue;
                         }
-                        values[a] =
-                            self.traverse(&self.game.apply(s, a), player, prune, rng, delta);
-                        v += sigma[a] * values[a];
+                        let value =
+                            self.traverse(&self.game.apply(s, a), player, prune, rng, delta, buf);
+                        buf[base + n + a] = value;
+                        v += buf[base + a] * value;
                     }
                     let (regret, _) = delta.entry(id, &info, n);
-                    for a in 0..n {
-                        if explored[a] {
-                            regret[a] += values[a] - v;
+                    for (a, r) in regret.iter_mut().enumerate() {
+                        if skipped[a / 64] & 1 << (a % 64) == 0 {
+                            *r += buf[base + n + a] - v;
                         }
                     }
+                    buf.truncate(base);
                     v
                 } else {
                     let (_, sum) = delta.entry(id, &info, n);
-                    for a in 0..n {
-                        sum[a] += sigma[a];
+                    for (x, &p) in sum.iter_mut().zip(&buf[base..]) {
+                        *x += p;
                     }
-                    let a = rng.sample(&sigma);
-                    self.traverse(&self.game.apply(s, a), player, prune, rng, delta)
+                    let a = rng.sample(&buf[base..]);
+                    buf.truncate(base);
+                    self.traverse(&self.game.apply(s, a), player, prune, rng, delta, buf)
                 }
             }
         }
     }
 
-    /// Adds one chunk's changes, before this batch's discount.
-    fn apply(&mut self, d: Delta<G::Info>) {
-        for (id, (regret, sum)) in d.known {
-            self.table.settle(id);
-            let r = self.table.range(id);
-            for (k, i) in r.enumerate() {
-                self.table.regret[i] += regret[k] as f32;
-                self.table.sum[i] += sum[k] as f32;
+    /// Adds the chunks' changes, in chunk order, before this batch's
+    /// discount.
+    fn apply(&mut self, mut deltas: Vec<Delta<G::Info>>) {
+        let known = self.table.slots.len() as u32;
+        // New information sets first, one at a time: the order they're
+        // added in is the order of the checkpoint.
+        for d in &mut deltas {
+            for (info, off, n) in std::mem::take(&mut d.new) {
+                // Seen by an earlier chunk of this batch: already added.
+                let id = match self.table.index.get(&info) {
+                    Some(&id) => id,
+                    None => self.table.insert(info, n as usize, self.batches),
+                };
+                let r = self.table.range(id);
+                let n = n as usize;
+                let v = &d.values[off as usize..off as usize + 2 * n];
+                for (k, i) in r.enumerate() {
+                    self.table.regret[i] += v[k] as f32;
+                    self.table.sum[i] += v[n + k] as f32;
+                }
             }
         }
-        for (info, regret, sum) in d.new {
-            // Seen by an earlier chunk of this batch: now a known slot.
-            let id = match self.table.index.get(&info) {
-                Some(&id) => id,
-                None => self.table.insert(info, regret.len(), self.batches),
-            };
-            let r = self.table.range(id);
-            for (k, i) in r.enumerate() {
-                self.table.regret[i] += regret[k] as f32;
-                self.table.sum[i] += sum[k] as f32;
-            }
-        }
+        self.table.merge_known(&deltas, known);
     }
 
     fn discount(&mut self) {
