@@ -729,6 +729,11 @@ impl<A: Buckets, const H: usize> Game for Hunl<'_, A, H> {
         let bucket = s.buckets[b.to_act][b.street];
         (s.node as u64) << 16 | bucket as u64
     }
+
+    /// Not on the river, nor an action that ends the hand.
+    fn prunable(&self, s: &HunlState<H>, action: usize) -> bool {
+        self.betting(s).street < 3 && self.turn(&self.apply(s, action)) != Turn::Terminal
+    }
 }
 
 /// Counts of the betting tree, ignoring cards: decision points (betting

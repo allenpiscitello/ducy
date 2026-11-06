@@ -713,6 +713,11 @@ impl<A: Buckets, const H: usize> Game for MultiwayGame<'_, A, H> {
         let bucket = s.buckets[b.to_act as usize][b.street as usize];
         (s.node as u64) << 16 | bucket as u64
     }
+
+    /// Not on the river, nor an action that ends the hand.
+    fn prunable(&self, s: &MultiwayState<H>, action: usize) -> bool {
+        s.betting.street < 3 && self.turn(&self.apply(s, action)) != Turn::Terminal
+    }
 }
 
 const BLUEPRINT_MAGIC: &[u8; 8] = b"DUCY6MW\x01";

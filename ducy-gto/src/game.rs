@@ -74,4 +74,10 @@ pub trait Game {
     fn apply(&self, state: &Self::State, action: usize) -> Self::State;
     /// The information set of the player to act.
     fn info(&self, state: &Self::State) -> Self::Info;
+    /// Whether [`Mccfr`](crate::Mccfr)'s regret pruning may skip `action`
+    /// here. As in Pluribus, never an action that ends the game; poker games
+    /// also keep every river action.
+    fn prunable(&self, state: &Self::State, action: usize) -> bool {
+        self.turn(&self.apply(state, action)) != Turn::Terminal
+    }
 }

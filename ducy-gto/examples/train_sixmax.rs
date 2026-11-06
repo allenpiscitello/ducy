@@ -25,6 +25,11 @@
 //! - `--max-gb N`: stop (after a checkpoint and the blueprint) once the
 //!   solver's tables pass about N GB (default 20)
 //! - `--seed N`, `--batch N`
+//! - `--prune-threshold X`: turn on regret pruning (`Prune`): skip
+//!   actions with regret below X (off by default)
+//! - `--prune-after N`, `--prune-full-every N`: pruning starts after N
+//!   iterations (default 1,000,000), every N-th iteration explores
+//!   everything (default 20)
 //!
 //! Each report prints the speed, information sets, the tables' memory, and
 //! how often UTG, the button (folded to) and the small blind (folded to)
@@ -37,7 +42,7 @@ use std::{
 };
 
 use ducy_gto::{
-    Config, Discount, Mccfr, Rng,
+    Config, Discount, Mccfr, Prune, Rng,
     holdem::{
         abstraction::CardAbstraction,
         cards::{Card, NUM_CARDS, bit},
@@ -62,6 +67,9 @@ struct Args {
     max_gb: f64,
     seed: u64,
     batch: u64,
+    prune_threshold: Option<f64>,
+    prune_after: u64,
+    prune_full_every: u64,
 }
 
 fn args() -> Args {
@@ -77,6 +85,9 @@ fn args() -> Args {
         max_gb: 20.0,
         seed: 1,
         batch: 4096,
+        prune_threshold: None,
+        prune_after: 1_000_000,
+        prune_full_every: 20,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -94,6 +105,11 @@ fn args() -> Args {
             "--max-gb" => a.max_gb = value().parse().expect("--max-gb"),
             "--seed" => a.seed = num(value()),
             "--batch" => a.batch = num(value()),
+            "--prune-threshold" => {
+                a.prune_threshold = Some(value().parse().expect("--prune-threshold"))
+            }
+            "--prune-after" => a.prune_after = num(value()),
+            "--prune-full-every" => a.prune_full_every = num(value()),
             f => panic!("unknown option {f}"),
         }
     }
@@ -199,7 +215,11 @@ fn train<A: Buckets + Sync, const H: usize>(a: &Args, cards: &A, game_name: &str
         seed: a.seed,
         batch: a.batch,
         discount: Discount::DCFR,
-        prune: None,
+        prune: a.prune_threshold.map(|threshold| Prune {
+            after: a.prune_after,
+            threshold,
+            full_every: a.prune_full_every,
+        }),
     };
     let mut solver = match &a.checkpoint {
         Some(p) if p.exists() => {

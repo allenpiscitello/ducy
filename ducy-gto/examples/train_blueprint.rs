@@ -13,6 +13,11 @@
 //! - `--every N`: report and checkpoint interval (default 1,000,000)
 //! - `--seed N`, `--batch N`: sampling seed and parallel batch size
 //! - `--bb N`: stacks in big blinds (default 100); Slumbot plays 200
+//! - `--prune-threshold X`: turn on regret pruning (`Prune`): skip
+//!   actions with regret below X (off by default)
+//! - `--prune-after N`, `--prune-full-every N`: pruning starts after N
+//!   iterations (default 1,000,000), every N-th iteration explores
+//!   everything (default 20)
 //!
 //! Each report prints iterations per second and the button's and big blind's
 //! preflop frequencies, which settle as the strategy converges.
@@ -20,7 +25,7 @@
 use std::{path::PathBuf, time::Instant};
 
 use ducy_gto::{
-    Config, Discount, Mccfr,
+    Config, Discount, Mccfr, Prune,
     holdem::{
         abstraction::CardAbstraction,
         blueprint::Blueprint,
@@ -38,6 +43,9 @@ struct Args {
     seed: u64,
     batch: u64,
     bb: u64,
+    prune_threshold: Option<f64>,
+    prune_after: u64,
+    prune_full_every: u64,
 }
 
 fn args() -> Args {
@@ -50,6 +58,9 @@ fn args() -> Args {
         seed: 1,
         batch: 4096,
         bb: 100,
+        prune_threshold: None,
+        prune_after: 1_000_000,
+        prune_full_every: 20,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -63,6 +74,15 @@ fn args() -> Args {
             "--seed" => a.seed = value().parse().expect("--seed"),
             "--batch" => a.batch = value().parse().expect("--batch"),
             "--bb" => a.bb = value().parse().expect("--bb"),
+            "--prune-threshold" => {
+                a.prune_threshold = Some(value().parse().expect("--prune-threshold"))
+            }
+            "--prune-after" => {
+                a.prune_after = value().replace('_', "").parse().expect("--prune-after")
+            }
+            "--prune-full-every" => {
+                a.prune_full_every = value().parse().expect("--prune-full-every")
+            }
             f => panic!("unknown option {f}"),
         }
     }
@@ -99,9 +119,13 @@ fn main() {
         seed: a.seed,
         batch: a.batch,
         discount: Discount::DCFR,
-        // DCFR halves negative regrets every batch (beta = 0), so they never
-        // get deep enough for pruning to pay off.
-        prune: None,
+        // Off unless asked for: DCFR halves negative regrets every batch
+        // (beta = 0), so the threshold must suit the batch size.
+        prune: a.prune_threshold.map(|threshold| Prune {
+            after: a.prune_after,
+            threshold,
+            full_every: a.prune_full_every,
+        }),
     };
     let mut solver = match &a.checkpoint {
         Some(p) if p.exists() => {
