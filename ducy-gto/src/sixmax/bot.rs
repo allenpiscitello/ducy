@@ -479,19 +479,49 @@ pub fn heads_up_view(obs: &Observation) -> Option<Observation> {
     let &[a, b] = live.as_slice() else {
         return None;
     };
-    let n = obs.seats.len();
+    let ([ip, oop], history) = heads_up_history(
+        &obs.history,
+        obs.seats.len(),
+        obs.button,
+        obs.rules.small_blind,
+        obs.rules.big_blind,
+        [a, b],
+    )?;
+    let mut view = obs.clone();
+    view.seat = if obs.seat == ip { 0 } else { 1 };
+    view.button = 0;
+    view.seats = vec![obs.seats[ip], obs.seats[oop]];
+    view.history = history;
+    Some(view)
+}
+
+/// [`heads_up_view`]'s line for a hand's events (`history`, at a table of
+/// `n` seats with the button at `button`) between seats `pair`: the seats in
+/// position and out of position, and the heads-up history, in which they are
+/// seats 0 and 1. Also for finished hands, e.g. to review a multiway hand
+/// whose flop two players saw (`crate::judge`). None when the line doesn't
+/// fit, as for [`heads_up_view`].
+pub fn heads_up_history(
+    history: &[Event],
+    n: usize,
+    button: usize,
+    sb: u64,
+    bb: u64,
+    [a, b]: [usize; 2],
+) -> Option<([usize; 2], Vec<Event>)> {
+    if n == 0 {
+        return None;
+    }
     // After the flop, action starts left of the button: the last of the two
     // in that order is in position.
-    let order = |s: usize| (s + n - obs.button - 1) % n;
+    let order = |s: usize| (s + n - button % n - 1) % n;
     let (ip, oop) = if order(a) > order(b) { (a, b) } else { (b, a) };
     let hu = |s: usize| if s == ip { 0 } else { 1 };
-    let bb = obs.rules.big_blind;
-    let sb = obs.rules.small_blind;
 
     // The two players' preflop actions, in order.
     let mut acts = Vec::new();
-    let mut flop_at = obs.history.len();
-    for (i, e) in obs.history.iter().enumerate() {
+    let mut flop_at = history.len();
+    for (i, e) in history.iter().enumerate() {
         match *e {
             Event::Board { .. } => {
                 flop_at = i;
@@ -526,7 +556,7 @@ pub fn heads_up_view(obs: &Observation) -> Option<Observation> {
         return None;
     }
 
-    let mut history = vec![
+    let mut out = vec![
         Event::SmallBlind {
             seat: 0,
             amount: sb,
@@ -542,13 +572,13 @@ pub fn heads_up_view(obs: &Observation) -> Option<Observation> {
         match raise {
             Some((to, all_in)) => {
                 let to = to.max(bet);
-                history.push(Event::Raise { seat, to, all_in });
+                out.push(Event::Raise { seat, to, all_in });
                 put[seat] = to;
                 bet = to;
             }
-            None if put[seat] == bet => history.push(Event::Check { seat }),
+            None if put[seat] == bet => out.push(Event::Check { seat }),
             None => {
-                history.push(Event::Call {
+                out.push(Event::Call {
                     seat,
                     amount: bet - put[seat],
                     all_in: false,
@@ -562,7 +592,7 @@ pub fn heads_up_view(obs: &Observation) -> Option<Observation> {
         return None;
     }
     // After the flop: the real events, seats mapped.
-    for e in &obs.history[flop_at..] {
+    for e in &history[flop_at..] {
         let mapped = match *e {
             Event::Board { .. } => e.clone(),
             Event::Fold { seat } => Event::Fold { seat: hu(seat) },
@@ -588,15 +618,9 @@ pub fn heads_up_view(obs: &Observation) -> Option<Observation> {
             },
             _ => continue,
         };
-        history.push(mapped);
+        out.push(mapped);
     }
-
-    let mut view = obs.clone();
-    view.seat = hu(obs.seat);
-    view.button = 0;
-    view.seats = vec![obs.seats[ip], obs.seats[oop]];
-    view.history = history;
-    Some(view)
+    Some(([ip, oop], out))
 }
 
 #[cfg(test)]

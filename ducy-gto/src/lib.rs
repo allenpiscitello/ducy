@@ -35,6 +35,7 @@ mod cfr;
 mod game;
 pub mod games;
 pub mod holdem;
+pub mod judge;
 mod key;
 mod mccfr;
 pub mod omaha;
