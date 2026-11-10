@@ -179,6 +179,8 @@ impl Follower {
                 self.real.current_bet = to;
             }
             Event::Award { .. }
+            | Event::Rake { .. }
+            | Event::Time { .. }
             | Event::Reveal { .. }
             | Event::Forfeit { .. }
             | Event::Runs { .. }

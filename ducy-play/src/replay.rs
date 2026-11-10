@@ -2,7 +2,8 @@
 //! every seat's stack and bet after each event, from the hand's event list
 //! and each seat's stack when it started. The chip accounting follows
 //! [`Hand`](crate::Hand)'s, so a replay can't drift from it: every frame's
-//! stacks, bets and pot add up to the starting stacks.
+//! stacks, bets and pot add up to the starting stacks, less what the house
+//! has taken ([`Event::Rake`], [`Event::Time`]).
 //!
 //! ```
 //! use ducy_play::{Event, replay::replay_frames};
@@ -211,6 +212,21 @@ pub fn replay_frames(events: &[Event], stacks: &[u64], names: &[String]) -> Vec<
                 }
                 let side = if which > 0 { " (side pot)" } else { "" };
                 format!("{} wins {amount}{side}", name(seat))
+            }
+            Event::Rake { pot: which, amount } => {
+                if !awarding {
+                    collect(&mut seats, &mut pot);
+                    awarding = true;
+                }
+                pot = pot.saturating_sub(amount);
+                let side = if which > 0 { " from the side pot" } else { "" };
+                format!("Rake {amount}{side}")
+            }
+            Event::Time { seat, amount } => {
+                if let Some(s) = seats.get_mut(seat) {
+                    s.stack = s.stack.saturating_sub(amount);
+                }
+                format!("{} pays {amount} time", name(seat))
             }
         };
         frames.push(Frame {

@@ -10,8 +10,9 @@
 use ducy::deck::{Card, Deck};
 
 use crate::{
-    Action, Awaiting, BettingStructure, Bot, Deal, Event, Hand, HiddenDeal, LegalActions,
-    Observation, PlayError, Post, Pot, SeatView, Street, TableRules, Variant, fallback_action,
+    Action, Awaiting, BettingStructure, Bot, Deal, Event, Hand, HandResult, HiddenDeal,
+    LegalActions, Observation, PlayError, Post, Pot, SeatView, Street, TableRules, Variant,
+    fallback_action,
     snapshot::{SeatSnapshot, TableSnapshot},
 };
 
@@ -152,6 +153,10 @@ pub struct TableView {
     /// ante is in the hand's events, while `ante` is the table's.
     #[cfg_attr(feature = "serde", serde(default))]
     pub bomb_pot: bool,
+    /// What the house took from the hand, once it's over: the pots' rake
+    /// and everyone's time (see [`crate::Rake`]).
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "is_zero"))]
+    pub rake: u64,
 }
 
 /// Bomb pots every few hands at a table (see [`Table::set_bomb_pots`]).
@@ -199,6 +204,15 @@ pub struct SeatState {
     pub won: u64,
     /// Net result this hand, once it's over.
     pub net: i64,
+    /// What it paid the house this hand, once it's over: its share of the
+    /// rake and its time (see [`crate::Rake`]).
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "is_zero"))]
+    pub rake: u64,
+}
+
+#[cfg(feature = "serde")]
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// Hand after hand at one table. Everyone starts with `buy_in` chips, and a
@@ -895,6 +909,7 @@ impl Table {
                 runs: 0,
                 second_board: Vec::new(),
                 bomb_pot: false,
+                rake: 0,
             };
         };
         let result = hand.result();
@@ -920,7 +935,7 @@ impl Table {
                     );
                 };
                 let shown = s == seat || (showdown && !hand.has_folded(i));
-                self.seat_state(
+                let mut state = self.seat_state(
                     s,
                     result.map_or(hand.stack(i), |r| r.final_stacks[i]),
                     if result.is_some() {
@@ -934,7 +949,9 @@ impl Table {
                     result.map_or(0, |r| r.payouts[i]),
                     result.map_or(0, |r| r.net[i]),
                     false,
-                )
+                );
+                state.rake = result.and_then(|r| r.rake.get(i).copied()).unwrap_or(0);
+                state
             })
             .collect();
         let me = self.hand_index(seat);
@@ -972,6 +989,7 @@ impl Table {
             runs: hand.runs(),
             second_board: hand.second_board().iter().map(Card::to_string).collect(),
             bomb_pot: hand.rules().bomb_pot,
+            rake: result.map_or(0, HandResult::house),
         }
     }
 
@@ -1003,6 +1021,7 @@ impl Table {
             cards,
             won,
             net,
+            rake: 0,
         }
     }
 }
@@ -1153,8 +1172,12 @@ fn rotate_event(e: &Event, rot: impl Fn(usize) -> usize) -> Event {
         | Event::Raise { seat, .. }
         | Event::Reveal { seat, .. }
         | Event::Forfeit { seat }
-        | Event::Award { seat, .. } => *seat = rot(*seat),
-        Event::Board { .. } | Event::Runs { .. } | Event::SecondBoard { .. } => {}
+        | Event::Award { seat, .. }
+        | Event::Time { seat, .. } => *seat = rot(*seat),
+        Event::Board { .. }
+        | Event::Runs { .. }
+        | Event::SecondBoard { .. }
+        | Event::Rake { .. } => {}
     }
     e
 }
