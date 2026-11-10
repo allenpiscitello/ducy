@@ -56,6 +56,8 @@ crate finds equilibria and measures exploitability exactly.
   real time (see [below](#solving-the-river-in-real-time)).
 - `holdem::review`: grading a player's decisions in a hand against the
   blueprint, in big blinds lost (see [below](#reviewing-hands-against-the-blueprint)).
+- `judge`: scoring players' decisions after the flop at real tables, for
+  fair play checks (see [below](#scoring-real-tables-for-fair-play-judge)).
 - `holdem::turn`: a depth-limited turn solver whose leaves play out every
   river with the blueprint (see [below](#solving-the-turn-depth-limited)).
 - `games::kuhn` and `games::leduc`: Kuhn poker and Leduc hold'em, small games
@@ -426,6 +428,16 @@ What it shows:
   - a bot can play badly in ways GtoBot doesn't fully exploit.
 - **Luck stays out of it.** What the opponents actually won over these 200 hands ranged from −257 to +141 bb/100, unrelated to their play. That's why the review charges decisions, not results.
 - **Speed:** on one core, a flop decision takes about 0.7 s to review, a turn decision about 0.09 s and a river decision under a millisecond.
+
+### Scoring real tables for fair play: `judge`
+
+`judge` uses the heads-up models to score decisions after the flop at real tables of any size, for ducy.cards' check for real-time assistance (ducy-web #615). Cards go in; only numbers come out.
+
+- **Which hands:** pots that two players took to the flop. `judge::heads_up` turns a multiway hand into the heads-up hand between those two, with `sixmax::bot::heads_up_history` (the line `heads_up_view` gives a heads-up bot). Chips put in by players who then folded stay in the pot as antes.
+- **Hold'em:** `judge::holdem` reviews both players' decisions from the flop on with `Reviewer`. Each decision gets how often the blueprint makes the player's play, its top play's frequency, and the big blinds given up against the best play, with a standard error.
+- **Omaha:** `judge::plo` follows the hand on a heads-up PLO blueprint's tree. It gives only the blueprint's frequencies, since PLO has no action valuation yet.
+
+`examples/judge_calibration.rs` writes the data for calibrating a check, one JSON line per decision. The players are the personalities and EquityBot playing against GtoBot, plus two solver users: the blueprint itself, and GtoBot solving the river in real time.
 
 ## Solving the turn, depth-limited
 
