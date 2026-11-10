@@ -78,6 +78,7 @@ impl HandConfig {
             bomb_pot: false,
             double_board: false,
             chip: self.chip.unwrap_or(1),
+            rake: Default::default(),
         })
     }
 
@@ -212,6 +213,14 @@ enum EventJs {
         pot: usize,
         amount: u64,
     },
+    Rake {
+        pot: usize,
+        amount: u64,
+    },
+    Time {
+        seat: usize,
+        amount: u64,
+    },
 }
 
 impl From<&Event> for EventJs {
@@ -271,6 +280,14 @@ impl From<&Event> for EventJs {
             Event::Award { seat, pot, amount } => Self::Award {
                 seat: *seat,
                 pot: *pot,
+                amount: *amount,
+            },
+            Event::Rake { pot, amount } => Self::Rake {
+                pot: *pot,
+                amount: *amount,
+            },
+            Event::Time { seat, amount } => Self::Time {
+                seat: *seat,
                 amount: *amount,
             },
         }

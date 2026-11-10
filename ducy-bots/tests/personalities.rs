@@ -228,6 +228,7 @@ fn summary_with_net(seat: usize, net: i64) -> ducy_play::HandSummary {
             } else {
                 vec![-net, net]
             },
+            rake: Vec::new(),
         },
         shown: vec![None, None],
         board: Vec::new(),

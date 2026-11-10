@@ -35,6 +35,15 @@ pub struct Pot {
     pub awards: Vec<Award>,
     /// The winning hand, e.g. "Flush, Ace high", when the pot went to showdown.
     pub winning_hand: Option<String>,
+    /// The rake taken from it before it was paid (see [`crate::Rake`]): the
+    /// awards add up to `amount` less this.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "is_zero"))]
+    pub rake: u64,
+}
+
+#[cfg(feature = "serde")]
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// Splits everyone's total contribution into a main pot and side pots.

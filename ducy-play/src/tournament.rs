@@ -329,6 +329,9 @@ impl Tournament {
             double_board: false,
             // Tournament chips bet in any amount (no chip-ups yet).
             chip: 1,
+            // A tournament's hands aren't raked: the club takes its fee
+            // with the buy-in.
+            rake: crate::Rake::default(),
         }
     }
 

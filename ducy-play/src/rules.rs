@@ -36,6 +36,36 @@ pub enum BettingStructure {
     PotLimit,
 }
 
+/// What the house takes from each hand (see [`TableRules::rake`]): a share of
+/// the pot, a fixed charge from each player dealt in ("time"), or both. The
+/// default takes nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct Rake {
+    /// The share of each pot, in hundredths of a percent (500 is 5%), taken
+    /// in whole chips (rounded down) before the pot is paid. Chips that go
+    /// back uncalled aren't raked. 0: no rake.
+    pub percent: u32,
+    /// The most rake one hand pays; 0: no cap.
+    pub cap: u64,
+    /// No rake on a hand that ends before the flop ("no flop, no drop").
+    pub no_flop: bool,
+    /// Time: what each player dealt in pays the house once the hand is
+    /// over, from their stack (less if they have less). 0: none.
+    pub time: u64,
+}
+
+impl Rake {
+    /// The most `percent` can be: all of the pot.
+    pub const ALL: u32 = 10_000;
+
+    /// Whether it takes anything.
+    pub fn is_none(&self) -> bool {
+        self.percent == 0 && self.time == 0
+    }
+}
+
 /// The rules for a hand: game, betting structure and forced bets. Amounts are
 /// whole chips.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +100,12 @@ pub struct TableRules {
     /// and antes can be any amount. 1 when every amount is allowed.
     #[cfg_attr(feature = "serde", serde(default = "one_chip"))]
     pub chip: u64,
+    /// What the house takes from each hand; none by default.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Rake::is_none")
+    )]
+    pub rake: Rake,
 }
 
 #[cfg(feature = "serde")]
@@ -89,6 +125,7 @@ impl TableRules {
             bomb_pot: false,
             double_board: false,
             chip: 1,
+            rake: Rake::default(),
         }
     }
 
@@ -103,7 +140,15 @@ impl TableRules {
             bomb_pot: false,
             double_board: false,
             chip: 1,
+            rake: Rake::default(),
         }
+    }
+
+    /// The same rules where the house takes `rake` from each hand (see
+    /// [`Rake`]).
+    pub fn with_rake(mut self, rake: Rake) -> Self {
+        self.rake = rake;
+        self
     }
 
     /// The same rules where every bet is a whole number of `chip` (see
@@ -158,7 +203,7 @@ impl TableRules {
         {
             return Err(PlayError::InvalidBlinds);
         }
-        if self.bomb_pot && self.ante == 0 {
+        if (self.bomb_pot && self.ante == 0) || self.rake.percent > Rake::ALL {
             return Err(PlayError::InvalidSetup);
         }
         if let Variant::Omaha { hole_cards } = self.variant {

@@ -3,7 +3,7 @@ use ducy::deck::{Card, Deck};
 use crate::{
     deal::{Deal, Dealer, HiddenDeal},
     error::PlayError,
-    rules::{BettingStructure, TableRules},
+    rules::{BettingStructure, Rake, TableRules},
     showdown::{Pot, best_hands, build_pots, split},
     snapshot::HandSnapshot,
 };
@@ -213,6 +213,22 @@ pub enum Event {
         /// Chips won.
         amount: u64,
     },
+    /// The house took `amount` from pot `pot` before paying it out (see
+    /// [`crate::Rake`]). It comes just before that pot's awards.
+    Rake {
+        /// Which pot: 0 is the main pot, then the side pots in order.
+        pot: usize,
+        /// Chips taken.
+        amount: u64,
+    },
+    /// Once the pots are paid, a seat paid the house for its time at the
+    /// table (see [`crate::Rake::time`]).
+    Time {
+        /// The seat, as an index into the hand's stacks.
+        seat: usize,
+        /// Chips paid.
+        amount: u64,
+    },
 }
 
 /// The outcome of a finished hand.
@@ -229,6 +245,22 @@ pub struct HandResult {
     pub final_stacks: Vec<u64>,
     /// Each seat's profit or loss.
     pub net: Vec<i64>,
+    /// What each seat paid the house (see [`crate::Rake`]): its share of the
+    /// rake, by what it put in the pots (uncalled chips aside), whether it
+    /// won or not, and its time. Adds up to every pot's rake and every
+    /// [`Event::Time`]. Empty when the house took nothing.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Vec::is_empty")
+    )]
+    pub rake: Vec<u64>,
+}
+
+impl HandResult {
+    /// What the house took from the hand in all.
+    pub fn house(&self) -> u64 {
+        self.rake.iter().sum()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -303,6 +335,8 @@ pub struct Post {
 /// - Side pots are built from each player's total contribution; uncalled
 ///   chips go back to their owner. Split pots give leftover chips to the
 ///   winners closest to the left of the button.
+/// - A [`Rake`] comes out of the pots, each by its size, before they're paid;
+///   time comes out of each stack once they are.
 #[derive(Clone, Debug)]
 pub struct Hand {
     rules: TableRules,
@@ -995,7 +1029,17 @@ impl Hand {
             .map(|h| h.unwrap_or_else(Deck::empty))
             .collect();
 
-        for (index, (amount, eligible)) in build_pots(&contributed, &out).into_iter().enumerate() {
+        let built = build_pots(&contributed, &out);
+        let (pot_rake, mut paid) = self.rake_pots(&contributed, &built);
+        for (index, ((amount, eligible), rake)) in built.into_iter().zip(pot_rake).enumerate() {
+            if rake > 0 {
+                self.events.push(Event::Rake {
+                    pot: index,
+                    amount: rake,
+                });
+            }
+            // What the winners share: the pot less its rake.
+            let left = amount - rake;
             let shown = eligible.iter().all(|&s| self.hole[s].is_some());
             let contested = eligible.len() > 1 && shown && self.board.len() == 5;
             let (winners, winning_hand) = if contested {
@@ -1012,12 +1056,12 @@ impl Hand {
                 // odd chip to the first.
                 let second: [Card; 5] = self.second_board.clone().try_into().expect("five cards");
                 let (winners2, _) = best_hands(self.rules.variant, &hole, &second, &eligible)?;
-                let half = self.rules.chip_down(amount / 2);
-                let mut awards = split(amount - half, &winners, self.button, n, self.rules.chip);
+                let half = self.rules.chip_down(left / 2);
+                let mut awards = split(left - half, &winners, self.button, n, self.rules.chip);
                 awards.extend(split(half, &winners2, self.button, n, self.rules.chip));
                 awards
             } else {
-                split(amount, &winners, self.button, n, self.rules.chip)
+                split(left, &winners, self.button, n, self.rules.chip)
             };
             for award in &awards {
                 payouts[award.seat] += award.amount;
@@ -1032,15 +1076,31 @@ impl Hand {
                 eligible,
                 awards,
                 winning_hand,
+                rake,
             });
         }
 
-        let final_stacks: Vec<u64> = self
+        let mut final_stacks: Vec<u64> = self
             .seats
             .iter()
             .zip(&payouts)
             .map(|(s, p)| s.stack + p)
             .collect();
+        // Time: each seat pays from what it ends with.
+        let time = self.rules.rake.time;
+        if time > 0 {
+            for (seat, stack) in final_stacks.iter_mut().enumerate() {
+                let amount = time.min(*stack);
+                if amount > 0 {
+                    *stack -= amount;
+                    paid[seat] += amount;
+                    self.events.push(Event::Time { seat, amount });
+                }
+            }
+        }
+        if paid.iter().all(|&p| p == 0) {
+            paid.clear();
+        }
         let net = self
             .seats
             .iter()
@@ -1054,8 +1114,53 @@ impl Hand {
             payouts,
             final_stacks,
             net,
+            rake: paid,
         });
         Ok(())
+    }
+
+    /// The rake (see [`crate::Rake`]) for pots `pots` (as built from
+    /// `contributed`): what's taken from each pot, by its size, and each
+    /// seat's share of it, by what it put in less any uncalled chips.
+    fn rake_pots(&self, contributed: &[u64], pots: &[(u64, Vec<usize>)]) -> (Vec<u64>, Vec<u64>) {
+        let n = contributed.len();
+        let none = (vec![0; pots.len()], vec![0; n]);
+        let r = self.rules.rake;
+        if r.percent == 0 || (r.no_flop && self.street == Street::Preflop) {
+            return none;
+        }
+        // Chips no one called go back to their bettor: they aren't raked.
+        let mut raked = contributed.to_vec();
+        if let Some(top) = (0..n).max_by_key(|&s| (contributed[s], std::cmp::Reverse(s))) {
+            let next = (0..n)
+                .filter(|&s| s != top)
+                .map(|s| contributed[s])
+                .max()
+                .unwrap_or(0);
+            if !self.seats[top].folded {
+                raked[top] = next.min(contributed[top]);
+            }
+        }
+        let base: u64 = raked.iter().sum();
+        let mut total = self
+            .rules
+            .chip_down((u128::from(base) * u128::from(r.percent) / u128::from(Rake::ALL)) as u64);
+        if r.cap > 0 {
+            total = total.min(r.cap);
+        }
+        if total == 0 {
+            return none;
+        }
+        // The uncalled chips are the top of the last pots.
+        let mut uncalled: u64 = contributed.iter().sum::<u64>() - base;
+        let mut room: Vec<u64> = pots.iter().map(|p| p.0).collect();
+        for p in room.iter_mut().rev() {
+            let off = uncalled.min(*p);
+            *p -= off;
+            uncalled -= off;
+        }
+        // Each pot gives by its size, and each seat pays by what it put in.
+        (shares(total, &room), shares(total, &raked))
     }
 
     /// The outcome once the hand is complete.
@@ -1264,6 +1369,29 @@ impl Hand {
         }
         Ok(hand)
     }
+}
+
+/// `total` split in proportion to `parts` (which add up to at least
+/// `total`), in whole units: each part's share rounded down, then the units
+/// left over one each to the largest remainders (the first part on a tie).
+fn shares(total: u64, parts: &[u64]) -> Vec<u64> {
+    let sum: u128 = parts.iter().map(|&p| u128::from(p)).sum();
+    if sum == 0 {
+        return vec![0; parts.len()];
+    }
+    let exact = |i: usize| u128::from(total) * u128::from(parts[i]);
+    let mut out: Vec<u64> = (0..parts.len()).map(|i| (exact(i) / sum) as u64).collect();
+    let mut odd = total - out.iter().sum::<u64>();
+    let mut order: Vec<usize> = (0..parts.len()).filter(|&i| parts[i] > 0).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(exact(i) % sum));
+    for i in order {
+        if odd == 0 {
+            break;
+        }
+        out[i] += 1;
+        odd -= 1;
+    }
+    out
 }
 
 /// The extra blinds a saved hand started with.

@@ -503,6 +503,7 @@ fn table_rules_change_between_hands_only() {
         bomb_pot: false,
         double_board: false,
         chip: 1,
+        rake: Default::default(),
     };
     assert_eq!(
         table.set_rules(plo),

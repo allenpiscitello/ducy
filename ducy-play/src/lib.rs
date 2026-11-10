@@ -26,7 +26,8 @@
 //!   history and each player's [`LegalActions`].
 //! - [`Table`]: seats over many hands: the button moves, people sit out and
 //!   come back (posting missed blinds or waiting for the big blind), and bots
-//!   play their seats ([`Table::advance`]).
+//!   play their seats ([`Table::advance`]). A cash table may take a
+//!   [`Rake`] from each hand: a share of the pot, or time from each player.
 //! - Hosting a table for remote players (commands in, private views out,
 //!   turn clocks, chip requests) is the `ducy-host` crate's. A table or
 //!   tournament can be saved mid-hand and restored ([`snapshot`]).
@@ -74,7 +75,7 @@ pub use error::PlayError;
 pub use hand::{
     Action, Awaiting, Event, Hand, HandResult, LegalActions, MAX_PLAYERS, Post, RaiseRange, Street,
 };
-pub use rules::{BettingStructure, TableRules, Variant};
+pub use rules::{BettingStructure, Rake, TableRules, Variant};
 pub use showdown::{Award, Pot, best_hands};
 pub use snapshot::{
     HandSnapshot, SNAPSHOT_VERSION, SeatSnapshot, TOURNAMENT_SNAPSHOT_VERSION, TableSnapshot,

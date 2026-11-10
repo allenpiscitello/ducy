@@ -345,6 +345,14 @@ pub struct RecordSeat {
     pub folded: bool,
     /// Dealt in.
     pub in_hand: bool,
+    /// What it paid the house: its share of the rake, and its time.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub rake: u64,
+}
+
+#[cfg(feature = "serde")]
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// What's kept of a finished hand, as its viewer saw it: a host's view of
@@ -389,6 +397,9 @@ pub struct HandRecord {
     pub showdown: bool,
     /// Chips in the pots.
     pub pot: u64,
+    /// What the house took: the pots' rake and everyone's time.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub rake: u64,
     /// Every seat.
     pub seats: Vec<RecordSeat>,
     /// What happened, in order.
@@ -412,6 +423,7 @@ impl HandRecord {
                 won: s.won,
                 folded: s.folded,
                 in_hand: !s.empty && !s.sitting_out,
+                rake: s.rake,
             })
             .collect();
         let pot = match view.pots.iter().map(|p| p.amount).sum() {
@@ -435,6 +447,7 @@ impl HandRecord {
             board2: view.second_board.clone(),
             showdown: view.showdown,
             pot,
+            rake: view.rake,
             seats,
             events: view.events.clone(),
         }
@@ -672,6 +685,7 @@ mod test {
                     cards: None,
                     won: 0,
                     net: 0,
+                    rake: 0,
                 })
                 .collect(),
             events,
@@ -682,6 +696,7 @@ mod test {
             runs: 0,
             second_board: vec![],
             bomb_pot: false,
+            rake: 0,
         }
     }
 
