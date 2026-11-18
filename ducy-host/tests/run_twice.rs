@@ -303,7 +303,11 @@ fn the_short_stack_says_no_and_the_big_stacks_run_their_side_pot_twice() {
     let mut h = three_way(10_000);
     let out = h.handle("a", Command::RunTwice { yes: false }, 3);
     assert!(h.table().in_hand(), "the side pot can still run twice");
-    assert_eq!(my_answer(&out, "a"), Some(false), "Ann waits for the others");
+    assert_eq!(
+        my_answer(&out, "a"),
+        Some(false),
+        "Ann waits for the others"
+    );
     h.handle("b", Command::RunTwice { yes: true }, 3);
     assert!(h.table().in_hand(), "waiting for Cy");
     h.handle("c", Command::RunTwice { yes: true }, 3);

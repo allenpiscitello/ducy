@@ -13,7 +13,9 @@ const BOARD: &str = "2c 7d 9h Jc 3s";
 const REST: &str = "Qd 4c 5d 8s Tc";
 
 fn cards(s: &str) -> Vec<Card> {
-    s.split_whitespace().map(|c| Card::parse(c).unwrap()).collect()
+    s.split_whitespace()
+        .map(|c| Card::parse(c).unwrap())
+        .collect()
 }
 
 fn deal(holes: &[&str]) -> Deal {
@@ -78,7 +80,10 @@ fn the_side_pot_runs_twice_and_the_main_pot_once() {
         count: 2,
         pots: vec![1, 2]
     }));
-    assert!(hand.events().contains(&Event::SecondBoard { cards: cards(REST) }));
+    assert!(
+        hand.events()
+            .contains(&Event::SecondBoard { cards: cards(REST) })
+    );
 }
 
 #[test]
@@ -126,10 +131,7 @@ fn a_pot_one_player_can_win_runs_once() {
     hand.act(Action::AllIn).unwrap();
     hand.act(Action::Call).unwrap();
     hand.act(Action::Call).unwrap();
-    assert_eq!(
-        hand.run_pots(),
-        vec![vec![0, 1, 2], vec![0, 2], vec![0]]
-    );
+    assert_eq!(hand.run_pots(), vec![vec![0, 1, 2], vec![0, 2], vec![0]]);
     hand.choose_runs(2).unwrap();
     assert_eq!(hand.pot_runs(), &[2, 2, 1]);
     let r = hand.result().unwrap();
