@@ -103,8 +103,7 @@ fn run<const H: usize>(cards: PloAbstraction) {
         found += 1;
         let board = s.board;
         let root = game.tree.nodes[bp_root as usize].betting.clone();
-        for bot in 0..2 {
-            let hole = s.hole[bot];
+        for (bot, &hole) in s.hole.iter().enumerate() {
             let mut sample = |player: usize, blocked: u64, first: Option<&[Card]>, n: usize| {
                 sample_range(
                     &cards, &blueprint, &game.tree, &steps, player, &board, blocked, n, first,

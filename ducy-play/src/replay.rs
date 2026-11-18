@@ -170,13 +170,7 @@ pub fn replay_frames(events: &[Event], stacks: &[u64], names: &[String]) -> Vec<
                 format!("{} shows {}", name(seat), cards.join(" "))
             }
             Event::Forfeit { seat } => format!("{} doesn't show, and can't win", name(seat)),
-            Event::Runs { count } => {
-                if count == 2 {
-                    "They run it twice".to_string()
-                } else {
-                    "They run it once".to_string()
-                }
-            }
+            Event::Runs { count, ref pots } => runs_line(count, pots),
             Event::SecondBoard { ref cards } => {
                 let cards: Vec<String> = cards.iter().map(|c| c.to_string()).collect();
                 format!("Second run: {}", cards.join(" "))
@@ -239,4 +233,28 @@ pub fn replay_frames(events: &[Event], stacks: &[u64], names: &[String]) -> Vec<
         });
     }
     frames
+}
+
+/// What was chosen about running it twice: once, twice, or (pot by pot)
+/// which pots run twice.
+fn runs_line(count: u8, pots: &[u8]) -> String {
+    let twice: Vec<usize> = (0..pots.len()).filter(|&i| pots[i] == 2).collect();
+    if count != 2 || twice.is_empty() {
+        return "They run it once".to_string();
+    }
+    // Everyone in the main pot is in every side pot: if it runs twice, so
+    // does every pot more than one player can win.
+    if pots[0] == 2 {
+        return "They run it twice".to_string();
+    }
+    if pots.len() == 2 {
+        return "The side pot runs twice, the main pot once".to_string();
+    }
+    let names: Vec<String> = twice.iter().map(|i| i.to_string()).collect();
+    let (noun, verb) = if names.len() == 1 {
+        ("Side pot", "runs")
+    } else {
+        ("Side pots", "run")
+    };
+    format!("{noun} {} {verb} twice, the rest once", names.join(" and "))
 }

@@ -39,6 +39,9 @@ pub struct Pot {
     /// awards add up to `amount` less this.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "is_zero"))]
     pub rake: u64,
+    /// How many boards it was won on: 2 when it ran twice (or on a double
+    /// board), half on each, the odd chip on the first; otherwise 1.
+    pub runs: u8,
 }
 
 #[cfg(feature = "serde")]

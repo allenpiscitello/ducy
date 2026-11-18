@@ -542,7 +542,7 @@ impl TableHost {
         if !self.has_host {
             view.legal = None;
             let s = &mut view.seats[0];
-            if !(view.showdown && !s.folded) {
+            if !view.showdown || s.folded {
                 s.cards = None;
             }
         }
@@ -1005,39 +1005,75 @@ impl TableHost {
         true
     }
 
-    /// Settles running it twice once it can be: twice if every person still
-    /// in said yes (bots go along with them), once if anyone said no or is
-    /// away, or if only bots are left. Otherwise it keeps waiting.
+    /// Settles running it twice once every pot is settled: see
+    /// [`Self::pot_runs`]. Otherwise it keeps waiting.
     fn decide_runs(&mut self) {
         if self.is_paused() {
             return;
         }
-        let Some(Awaiting::RunChoice(seats)) = self.table.awaiting() else {
+        if !matches!(self.table.awaiting(), Some(Awaiting::RunChoice(_))) {
             self.run_answers.clear();
             return;
+        }
+        if let Some(runs) = self.pot_runs(false) {
+            let _ = self.table.choose_pot_runs(&runs);
+            self.run_answers.clear();
+        }
+    }
+
+    /// How many times each pot runs, decided pot by pot: twice when every
+    /// person who can win it said yes, once as soon as one of them said no
+    /// or is away. Bots go along with the people: a pot only bots can win
+    /// runs twice only if every person still in said yes, and with no people
+    /// left at all the board runs once. `None` while a pot still waits for
+    /// an answer; with `timed_out`, an answer not given counts as no.
+    fn pot_runs(&self, timed_out: bool) -> Option<Vec<u8>> {
+        let Some(Awaiting::RunChoice(seats)) = self.table.awaiting() else {
+            return None;
         };
-        let people: Vec<usize> = seats
-            .into_iter()
-            .filter(|&s| self.table.seat(s).human)
-            .collect();
+        // Each person's answer: yes, no (away counts as no), or not yet.
         let answer = |s: usize| {
-            self.run_answers
+            if self.table.seat(s).away {
+                return Some(false);
+            }
+            let a = self
+                .run_answers
                 .iter()
                 .find(|&&(a, _)| a == s)
-                .map(|&(_, y)| y)
+                .map(|&(_, y)| y);
+            if timed_out { Some(a == Some(true)) } else { a }
         };
-        let no = people
+        let person = |s: &usize| self.table.seat(*s).human;
+        // Every person in the hand, as for a pot only bots can win.
+        let everyone: Vec<usize> = seats.into_iter().filter(person).collect();
+        let decide = |people: &[usize]| -> Option<u8> {
+            if people.is_empty() {
+                return Some(1);
+            }
+            let answers: Vec<Option<bool>> = people.iter().map(|&s| answer(s)).collect();
+            if answers.contains(&Some(false)) {
+                Some(1)
+            } else if answers.iter().all(|&a| a == Some(true)) {
+                Some(2)
+            } else {
+                None
+            }
+        };
+        self.table
+            .run_pots()
             .iter()
-            .any(|&s| self.table.seat(s).away || answer(s) == Some(false));
-        let runs = if people.is_empty() || no {
-            1
-        } else if people.iter().all(|&s| answer(s) == Some(true)) {
-            2
-        } else {
-            return;
-        };
-        let _ = self.table.choose_runs(runs);
-        self.run_answers.clear();
+            .map(|eligible| {
+                if eligible.len() < 2 {
+                    return Some(1);
+                }
+                let people: Vec<usize> = eligible.iter().copied().filter(person).collect();
+                decide(if people.is_empty() {
+                    &everyone
+                } else {
+                    &people
+                })
+            })
+            .collect()
     }
 
     /// The host's own action (seat 0).
@@ -1245,9 +1281,9 @@ impl TableHost {
         if now < deadline {
             return out;
         }
-        // Out of time to choose: run it once.
-        if let Some(Awaiting::RunChoice(_)) = self.table.awaiting() {
-            let _ = self.table.choose_runs(1);
+        // Out of time to choose: whoever hasn't answered says no.
+        if let Some(runs) = self.pot_runs(true) {
+            let _ = self.table.choose_pot_runs(&runs);
             self.run_answers.clear();
             out.extend(self.changed(now));
             return out;

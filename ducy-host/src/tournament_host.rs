@@ -377,7 +377,7 @@ impl TournamentHost {
         let mut view = self.t.table(id)?.view(0);
         view.legal = None;
         let s = &mut view.seats[0];
-        if !(view.showdown && !s.folded) {
+        if !view.showdown || s.folded {
             s.cards = None;
         }
         Some(view)

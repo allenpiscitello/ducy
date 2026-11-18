@@ -21,7 +21,7 @@ use ducy::deck::Card;
 use crate::{Event, TableRules};
 
 /// The snapshot format: a snapshot with any other version is refused.
-pub const SNAPSHOT_VERSION: u32 = 1;
+pub const SNAPSHOT_VERSION: u32 = 2;
 
 /// A hand: how it started and everything that has happened since.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -193,13 +193,18 @@ pub enum Event {
         seat: usize,
     },
     /// The players all-in chose how many times to run the rest of the
-    /// board (see [`Hand::choose_runs`]): 1, or 2 to run it twice.
+    /// board, pot by pot (see [`Hand::choose_pot_runs`]).
     Runs {
-        /// 1 or 2.
+        /// 2 if any pot runs twice (and a second board is dealt), else 1.
         count: u8,
+        /// How many times each pot runs, 1 or 2: the main pot first, then
+        /// the side pots, as in [`Event::Award`]. A pot only one player can
+        /// win runs once.
+        pots: Vec<u8>,
     },
     /// Running it twice: the second run's new cards, dealt after the first
-    /// run's board. Each pot is split between the two boards.
+    /// run's board. Each pot that runs twice is split between the two
+    /// boards; the others are won on the first.
     SecondBoard {
         /// The cards the second board doesn't share with the first.
         cards: Vec<Card>,
@@ -355,8 +360,12 @@ pub struct Hand {
     awaiting: Option<Awaiting>,
     /// Running it twice may be offered when everyone left is all-in.
     run_offer: bool,
-    /// How many times the board is run: 0 until chosen.
+    /// How many times the board is run: 0 until chosen, 2 if any pot runs
+    /// twice.
     runs: u8,
+    /// How many times each pot runs, once chosen (empty for a double board,
+    /// where every pot runs on both).
+    pot_runs: Vec<u8>,
     /// Board cards both runs share (those dealt before the choice).
     run_from: usize,
     /// The second run's whole board, when running it twice.
@@ -488,6 +497,7 @@ impl Hand {
             awaiting: None,
             run_offer: false,
             runs: 0,
+            pot_runs: Vec::new(),
             run_from: 0,
             second_board: Vec::new(),
             button,
@@ -875,16 +885,53 @@ impl Hand {
         if shown { &self.second_board } else { &[] }
     }
 
-    /// The players' choice ([`Awaiting::RunChoice`]): run the rest of the
-    /// board once, or twice (`runs` 2), splitting each pot between the two
-    /// boards. The second board shares the cards already dealt and takes the
-    /// rest from the deck after the first.
+    /// How many times each pot runs (1 or 2), once chosen: the main pot
+    /// first, then the side pots. Empty before the choice, and for a double
+    /// board, where every contested pot is split between the boards.
+    pub fn pot_runs(&self) -> &[u8] {
+        &self.pot_runs
+    }
+
+    /// While the players choose ([`Awaiting::RunChoice`]): the pots the
+    /// choice is for, main pot first, as the seats that can win each. A pot
+    /// runs twice only when they all agree (see [`Hand::choose_pot_runs`]).
+    pub fn run_pots(&self) -> Vec<Vec<usize>> {
+        let contributed: Vec<u64> = self.seats.iter().map(|s| s.contributed).collect();
+        let folded: Vec<bool> = self.seats.iter().map(|s| s.folded).collect();
+        build_pots(&contributed, &folded)
+            .into_iter()
+            .map(|(_, eligible)| eligible)
+            .collect()
+    }
+
+    /// The players' choice ([`Awaiting::RunChoice`]) for every pot alike:
+    /// run the rest of the board once, or twice (`runs` 2), splitting each
+    /// pot between the two boards. See [`Hand::choose_pot_runs`].
     pub fn choose_runs(&mut self, runs: u8) -> Result<(), PlayError> {
-        if !matches!(self.awaiting, Some(Awaiting::RunChoice(_))) || !(1..=2).contains(&runs) {
+        let pots = vec![runs; self.run_pots().len()];
+        self.choose_pot_runs(&pots)
+    }
+
+    /// The players' choice ([`Awaiting::RunChoice`]), pot by pot as
+    /// [`Hand::run_pots`] lists them: 1 to run it once, 2 to run it twice.
+    /// A pot only one player can win runs once whatever is asked. If any pot
+    /// runs twice, a second board is dealt: it shares the cards already
+    /// dealt and takes the rest from the deck after the first. Each pot that
+    /// runs twice is split between the boards; the rest are won on the first.
+    pub fn choose_pot_runs(&mut self, runs: &[u8]) -> Result<(), PlayError> {
+        let pots = self.run_pots();
+        if !matches!(self.awaiting, Some(Awaiting::RunChoice(_)))
+            || runs.len() != pots.len()
+            || runs.iter().any(|r| !(1..=2).contains(r))
+        {
             return Err(PlayError::IllegalAction);
         }
-        self.awaiting = None;
-        self.runs = runs;
+        let pot_runs: Vec<u8> = runs
+            .iter()
+            .zip(&pots)
+            .map(|(&r, eligible)| if eligible.len() > 1 { r } else { 1 })
+            .collect();
+        let runs = if pot_runs.contains(&2) { 2 } else { 1 };
         self.run_from = self.street.board_cards();
         if runs == 2 {
             let deal = self.deal.as_ref().ok_or(PlayError::IllegalAction)?;
@@ -895,7 +942,13 @@ impl Hand {
             self.second_board = self.board[..self.run_from].to_vec();
             self.second_board.extend_from_slice(&deal.rest()[..need]);
         }
-        self.events.push(Event::Runs { count: runs });
+        self.awaiting = None;
+        self.runs = runs;
+        self.pot_runs = pot_runs.clone();
+        self.events.push(Event::Runs {
+            count: runs,
+            pots: pot_runs,
+        });
         self.finish_street()
     }
 
@@ -1049,11 +1102,17 @@ impl Hand {
             } else {
                 (eligible.clone(), None)
             };
+            // Run twice (or a double board): this pot on both boards. A pot
+            // run once is won on the first.
+            let twice = contested
+                && showdown
+                && self.runs == 2
+                && self.pot_runs.get(index).is_none_or(|&r| r == 2);
             let awards = if winners.is_empty() {
                 Vec::new()
-            } else if contested && showdown && self.runs == 2 {
-                // Run twice: half the pot on each board in whole chips, the
-                // odd chip to the first.
+            } else if twice {
+                // Half the pot on each board in whole chips, the odd chip to
+                // the first.
                 let second: [Card; 5] = self.second_board.clone().try_into().expect("five cards");
                 let (winners2, _) = best_hands(self.rules.variant, &hole, &second, &eligible)?;
                 let half = self.rules.chip_down(left / 2);
@@ -1077,6 +1136,7 @@ impl Hand {
                 awards,
                 winning_hand,
                 rake,
+                runs: if twice { 2 } else { 1 },
             });
         }
 
@@ -1314,8 +1374,8 @@ impl Hand {
         let mut hand = Self::with_posts(s.rules, &s.stacks, s.button, deal, &posts).map_err(bad)?;
         hand.offer_run_twice(s.run_offer);
         for e in &s.events {
-            if let Event::Runs { count } = *e {
-                hand.choose_runs(count).map_err(bad)?;
+            if let Event::Runs { pots, .. } = e {
+                hand.choose_pot_runs(pots).map_err(bad)?;
                 continue;
             }
             let action = match *e {
