@@ -204,6 +204,7 @@ enum EventJs {
     },
     Runs {
         count: u8,
+        pots: Vec<u8>,
     },
     SecondBoard {
         cards: Vec<String>,
@@ -273,7 +274,10 @@ impl From<&Event> for EventJs {
                 cards: cards.iter().map(|c| c.to_string()).collect(),
             },
             Event::Forfeit { seat } => Self::Forfeit { seat: *seat },
-            Event::Runs { count } => Self::Runs { count: *count },
+            Event::Runs { count, pots } => Self::Runs {
+                count: *count,
+                pots: pots.clone(),
+            },
             Event::SecondBoard { cards } => Self::SecondBoard {
                 cards: cards.iter().map(|c| c.to_string()).collect(),
             },
@@ -306,6 +310,7 @@ struct PotJs {
     eligible: Vec<usize>,
     awards: Vec<AwardJs>,
     winning_hand: Option<String>,
+    runs: u8,
 }
 
 #[derive(Serialize)]
@@ -485,6 +490,7 @@ impl PokerHand {
                     })
                     .collect(),
                 winning_hand: p.winning_hand.clone(),
+                runs: p.runs,
             })
             .collect();
         to_js(&ResultJs {

@@ -757,10 +757,10 @@ impl SpotBot {
             match *e {
                 ducy_play::Event::SmallBlind { seat, amount }
                 | ducy_play::Event::BigBlind { seat, amount }
-                | ducy_play::Event::Call { seat, amount, .. } => {
-                    if !obs.seats[seat].folded {
-                        pre[side_of(seat)] += amount;
-                    }
+                | ducy_play::Event::Call { seat, amount, .. }
+                    if !obs.seats[seat].folded =>
+                {
+                    pre[side_of(seat)] += amount;
                 }
                 ducy_play::Event::Raise { seat, to, .. }
                 | ducy_play::Event::Bet { seat, to, .. } => {

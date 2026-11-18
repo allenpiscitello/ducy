@@ -1,7 +1,7 @@
 //! Running it twice: when everyone left is all-in with board cards to come,
 //! the players may run the rest of the board twice, each pot split between
-//! the two boards. At a hosted table every person still in must agree; bots
-//! go along with them.
+//! the two boards. At a hosted table it's settled pot by pot: a pot runs
+//! twice when every person who can win it agrees; bots go along with them.
 
 use ducy::deck::{Card, Deck};
 use ducy_host::{Command, Outgoing, TableHost, Update};
@@ -51,7 +51,10 @@ fn all_in_preflop_waits_for_the_choice_then_splits_each_pot_between_the_boards()
     assert_eq!(r.payouts, vec![100, 100], "a board each");
     assert_eq!(hand.second_board(), cards("Kd 4c 5d 8s Tc"));
     let events = hand.events();
-    assert!(events.contains(&Event::Runs { count: 2 }));
+    assert!(events.contains(&Event::Runs {
+        count: 2,
+        pots: vec![2]
+    }));
     assert!(events.contains(&Event::SecondBoard {
         cards: cards("Kd 4c 5d 8s Tc")
     }));
@@ -243,6 +246,138 @@ fn no_answer_in_time_or_someone_away_runs_it_once() {
     h.handle("a", Command::RunTwice { yes: true }, 3);
     h.disconnected("b", 4);
     assert_eq!(runs_of(&h), 1, "Bo left: once");
+}
+
+// ---- three-way: a short stack and two big stacks ----
+
+/// Ann (50), Bo and Cy (100 each) at a club table, all-in preflop: a main
+/// pot for all three and a side pot for Bo and Cy.
+fn three_way(turn_ms: u64) -> TableHost {
+    let ids = ["a", "b", "c"];
+    let seats = (0..3).map(|_| TableSeat::empty()).collect();
+    let mut table = Table::new(TableRules::no_limit_holdem(1, 2), seats, 40, 7).unwrap();
+    table.set_run_it_twice(true);
+    let mut h = TableHost::without_host(table, turn_ms, 40, 200).unwrap();
+    for (seat, (c, chips)) in ids.iter().zip([50, 100, 100]).enumerate() {
+        h.handle(
+            c,
+            Command::Join {
+                name: c.to_string(),
+            },
+            0,
+        );
+        h.handle(c, Command::RequestChips { amount: chips }, 0);
+        h.approve_chips(seat, 0);
+    }
+    h.new_hand(1).unwrap();
+    while h.awaiting().is_none() {
+        let seat = h.table().to_act().unwrap();
+        let legal = h.table().view(seat).legal.unwrap();
+        let kind = if legal.raise.is_some() || legal.bet.is_some() {
+            "allin"
+        } else {
+            "call"
+        };
+        let seq = h.seq();
+        h.handle(
+            ids[seat],
+            Command::Act {
+                seq,
+                kind: kind.to_string(),
+                amount: 0,
+            },
+            2,
+        );
+    }
+    assert!(matches!(h.awaiting(), Some(Awaiting::RunChoice(_))));
+    assert_eq!(h.table().run_pots(), vec![vec![0, 1, 2], vec![1, 2]]);
+    h
+}
+
+fn pot_runs_of(h: &TableHost) -> Vec<u8> {
+    h.table().hand().unwrap().pot_runs().to_vec()
+}
+
+#[test]
+fn the_short_stack_says_no_and_the_big_stacks_run_their_side_pot_twice() {
+    let mut h = three_way(10_000);
+    let out = h.handle("a", Command::RunTwice { yes: false }, 3);
+    assert!(h.table().in_hand(), "the side pot can still run twice");
+    assert_eq!(my_answer(&out, "a"), Some(false), "Ann waits for the others");
+    h.handle("b", Command::RunTwice { yes: true }, 3);
+    assert!(h.table().in_hand(), "waiting for Cy");
+    h.handle("c", Command::RunTwice { yes: true }, 3);
+    assert!(!h.table().in_hand());
+    assert_eq!(pot_runs_of(&h), vec![1, 2]);
+    assert_eq!(runs_of(&h), 2);
+    let view = h.table().view(0);
+    assert_eq!(view.pot_runs, vec![1, 2]);
+    assert_eq!(view.second_board.len(), 5);
+    let runs: Vec<u8> = view.pots.iter().map(|p| p.runs).collect();
+    assert_eq!(runs, vec![1, 2]);
+    // The main pot is won whole, on the first board.
+    let main = &view.pots[0];
+    assert_eq!(
+        main.awards.iter().map(|a| a.amount).sum::<u64>(),
+        main.amount
+    );
+}
+
+#[test]
+fn a_no_in_every_pot_settles_at_once() {
+    // Bo is in both pots: his no runs everything once, without waiting.
+    let mut h = three_way(10_000);
+    h.handle("b", Command::RunTwice { yes: false }, 3);
+    assert!(!h.table().in_hand());
+    assert_eq!(pot_runs_of(&h), vec![1, 1]);
+    assert_eq!(runs_of(&h), 1);
+    assert!(h.table().view(0).second_board.is_empty());
+
+    // Ann's no and then Cy's: the main pot and the side pot each have one.
+    let mut h = three_way(10_000);
+    h.handle("a", Command::RunTwice { yes: false }, 3);
+    assert!(h.table().in_hand());
+    h.handle("c", Command::RunTwice { yes: false }, 3);
+    assert!(!h.table().in_hand(), "no need to wait for Bo");
+    assert_eq!(pot_runs_of(&h), vec![1, 1]);
+}
+
+#[test]
+fn everyone_yes_runs_every_pot_twice() {
+    let mut h = three_way(10_000);
+    for c in ["a", "b", "c"] {
+        h.handle(c, Command::RunTwice { yes: true }, 3);
+    }
+    assert_eq!(pot_runs_of(&h), vec![2, 2]);
+}
+
+#[test]
+fn out_of_time_a_missing_answer_is_a_no_for_that_players_pots() {
+    // Bo and Cy say yes, Ann never answers: her main pot runs once.
+    let mut h = three_way(10_000);
+    h.handle("b", Command::RunTwice { yes: true }, 3);
+    h.handle("c", Command::RunTwice { yes: true }, 3);
+    assert!(h.table().in_hand(), "waiting for Ann");
+    h.tick(3 + 10_000);
+    assert!(!h.table().in_hand());
+    assert_eq!(pot_runs_of(&h), vec![1, 2]);
+
+    // Only Ann answers: Bo and Cy's silence runs everything once.
+    let mut h = three_way(10_000);
+    h.handle("a", Command::RunTwice { yes: true }, 3);
+    h.tick(3 + 10_000);
+    assert_eq!(pot_runs_of(&h), vec![1, 1]);
+    assert_eq!(runs_of(&h), 1);
+}
+
+#[test]
+fn someone_away_is_a_no_for_their_pots() {
+    let mut h = three_way(0);
+    h.handle("b", Command::RunTwice { yes: true }, 3);
+    h.handle("c", Command::RunTwice { yes: true }, 3);
+    h.disconnected("a", 4);
+    assert!(!h.table().in_hand());
+    assert_eq!(pot_runs_of(&h), vec![1, 2], "Ann left: her pot runs once");
 }
 
 #[test]

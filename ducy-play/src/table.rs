@@ -142,9 +142,14 @@ pub struct TableView {
     /// to run it twice ([`Table::choose_runs`]).
     #[cfg_attr(feature = "serde", serde(default))]
     pub run_choice: bool,
-    /// How many times the board is run (1 or 2), once chosen; 0 before.
+    /// How many times the board is run (1 or 2), once chosen; 0 before. 2
+    /// when any pot runs twice: see `pot_runs`.
     #[cfg_attr(feature = "serde", serde(default))]
     pub runs: u8,
+    /// How many times each pot runs (1 or 2), main pot first, once chosen;
+    /// empty before. A pot run once is won on the first board alone.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub pot_runs: Vec<u8>,
     /// Running it twice: the second board, once it's dealt.
     #[cfg_attr(feature = "serde", serde(default))]
     pub second_board: Vec<String>,
@@ -614,6 +619,33 @@ impl Table {
         Ok(())
     }
 
+    /// While the players choose ([`Awaiting::RunChoice`]): the pots the
+    /// choice is for, main pot first, as the table seats that can win each
+    /// (see [`Hand::run_pots`]). Empty otherwise.
+    pub fn run_pots(&self) -> Vec<Vec<usize>> {
+        let Some(hand) = &self.hand else {
+            return Vec::new();
+        };
+        if !matches!(hand.awaiting(), Some(Awaiting::RunChoice(_))) {
+            return Vec::new();
+        }
+        hand.run_pots()
+            .into_iter()
+            .map(|p| p.into_iter().map(|i| self.dealt[i]).collect())
+            .collect()
+    }
+
+    /// The players' choice pot by pot, as [`Table::run_pots`] lists them:
+    /// 1 to run it once, 2 to run it twice (see [`Hand::choose_pot_runs`]).
+    pub fn choose_pot_runs(&mut self, runs: &[u8]) -> Result<(), PlayError> {
+        self.hand
+            .as_mut()
+            .ok_or(PlayError::IllegalAction)?
+            .choose_pot_runs(runs)?;
+        self.finish_if_over();
+        Ok(())
+    }
+
     /// The board cards the hand is waiting for (see [`Hand::deal_board`]).
     pub fn deal_board(&mut self, cards: &[Card]) -> Result<(), PlayError> {
         self.hand
@@ -827,7 +859,7 @@ impl Table {
             (Some(bot), false) => bot.act(&obs),
             _ => None,
         };
-        if !action.is_some_and(|a| hand.act(a).is_ok()) {
+        if action.is_none_or(|a| hand.act(a).is_err()) {
             hand.act(fallback_action(&obs.legal))?;
         }
         self.finish_if_over();
@@ -907,6 +939,7 @@ impl Table {
                 pots: Vec::new(),
                 run_choice: false,
                 runs: 0,
+                pot_runs: Vec::new(),
                 second_board: Vec::new(),
                 bomb_pot: false,
                 rake: 0,
@@ -987,6 +1020,7 @@ impl Table {
             }),
             run_choice: matches!(hand.awaiting(), Some(Awaiting::RunChoice(_))),
             runs: hand.runs(),
+            pot_runs: hand.pot_runs().to_vec(),
             second_board: hand.second_board().iter().map(Card::to_string).collect(),
             bomb_pot: hand.rules().bomb_pot,
             rake: result.map_or(0, HandResult::house),

@@ -694,6 +694,7 @@ mod test {
             pots: vec![],
             run_choice: false,
             runs: 0,
+            pot_runs: vec![],
             second_board: vec![],
             bomb_pot: false,
             rake: 0,
