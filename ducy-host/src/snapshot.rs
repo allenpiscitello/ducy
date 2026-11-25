@@ -84,6 +84,15 @@ pub struct HostSnapshot {
     pub(crate) bot_ids: Vec<String>,
     /// Buy-in limits, with a bank.
     pub(crate) bank: Option<(u64, u64)>,
+    /// Match the stack, with a bank.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub(crate) match_stack: Option<crate::MatchStack>,
+    /// The biggest stack between hands, for match the stack.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) biggest: u64,
     pub(crate) host_approved: u64,
     pub(crate) has_host: bool,
     pub(crate) departed: Vec<crate::Departure>,

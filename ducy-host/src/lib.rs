@@ -29,8 +29,8 @@ mod tournament_host;
 pub mod tourney_runner;
 
 pub use host::{
-    ChipRequest, ChipsView, Command, DROP_AFTER_HANDS, Departure, MAX_NAME, Outgoing, Refund,
-    SeatStatus, SeatedPlayer, TIME_BANK_MS, TIME_BANK_REFILL_MS, TableHost, Update,
+    ChipRequest, ChipsView, Command, DROP_AFTER_HANDS, Departure, MAX_NAME, MatchStack, Outgoing,
+    Refund, SeatStatus, SeatedPlayer, TIME_BANK_MS, TIME_BANK_REFILL_MS, TableHost, Update,
 };
 pub use snapshot::{HostSnapshot, PlayerSnapshot, TournamentHostSnapshot};
 pub use tournament_host::{TournamentEvents, TournamentHost};

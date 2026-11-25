@@ -5,7 +5,7 @@ Host poker tables and tournaments for remote players, on top of
 
 - **Tables:** `TableHost` takes each player's `Command`s and answers with `Update`s showing only what that player may see (no one sees another's cards before showdown)
 - **Clocks:** turn clocks, time banks, and sit-out limits
-- **Chips:** at a table with a bank, players request chips and the host approves them; stacks stay within the buy-in range
+- **Chips:** at a table with a bank, players request chips and the host approves them; stacks stay within the buy-in range, whose top can match a share of the biggest stack at the table up to a cap
 - **Tournaments:** `TournamentHost` runs a `ducy_play::Tournament` for remote players
 - **Runners:** `runner` and `tourney_runner` are a host's loop: when to deal, absent players' moves at a human pace, provably fair or hidden deals, and what to send and save. A host who plays a seat (a friends table) runs on `runner` too, dealing each hand or letting it deal on its own. A runner can rotate games (so many hands of each, then the next)
 - **Chat:** `chat` cleans a table chat message, names its sender and limits how fast one person can send

@@ -1,5 +1,5 @@
 use ducy_bots::Personality;
-use ducy_host::{Command, Outgoing, Refund, TableHost, Update};
+use ducy_host::{Command, MatchStack, Outgoing, Refund, TableHost, Update};
 use ducy_play::{Action, Event, Table, TableRules, TableSeat, TableView};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -1213,6 +1213,125 @@ fn a_capped_top_up_survives_a_snapshot() {
     let snap = h.snapshot(6);
     let mut back = TableHost::restore(&snap, 6, |_| None).unwrap();
     assert_eq!(back.take_refunds(), h.take_refunds());
+}
+
+/// A friends table whose host sits with 1000 chips, buy-ins 40 to 200, and
+/// match the stack at `percent` up to `cap`.
+fn matching(percent: u32, cap: u64) -> TableHost {
+    let mut seats = vec![TableSeat::human("Host", "you")];
+    seats.extend((0..3).map(|_| TableSeat::empty()));
+    let table = Table::new(TableRules::no_limit_holdem(1, 2), seats, 1000, 7).unwrap();
+    let mut h = TableHost::new(table, vec![false, true, true, true], 0)
+        .unwrap()
+        .with_bank(40, 200)
+        .unwrap();
+    h.set_match_stack(Some(MatchStack { percent, cap }))
+        .unwrap();
+    h
+}
+
+#[test]
+fn match_the_stack_reaches_the_biggest_stack_up_to_the_cap() {
+    // 100%: the biggest stack is the host's 1000, but the cap is 800.
+    let mut h = matching(100, 800);
+    assert_eq!(h.buy_in_max(), Some(800));
+    let out = h.handle("a", join("Ann"), 0);
+    assert_eq!(last_chips(&out, "a").unwrap().max, 800, "players are told");
+    assert!(rejected(&h.handle("a", request(801), 1), "a"));
+    assert!(!rejected(&h.handle("a", request(800), 1), "a"));
+    h.approve_chips(1, 1);
+    assert_eq!(h.table().stack(1), 800);
+    // Under a high cap, the whole of the biggest stack.
+    let mut h = matching(100, 5000);
+    assert_eq!(h.buy_in_max(), Some(1000));
+    h.handle("a", join("Ann"), 0);
+    assert!(rejected(&h.handle("a", request(1001), 1), "a"));
+    assert!(!rejected(&h.handle("a", request(1000), 1), "a"));
+    // 80%: 800 of the host's 1000.
+    let mut h = matching(80, 5000);
+    assert_eq!(h.buy_in_max(), Some(800));
+    h.handle("a", join("Ann"), 0);
+    assert!(rejected(&h.handle("a", request(801), 1), "a"));
+    assert!(!rejected(&h.handle("a", request(800), 1), "a"));
+    // Without it, the table's maximum.
+    let mut h = friends(0);
+    assert_eq!(h.buy_in_max(), Some(200));
+    h.handle("a", join("Ann"), 0);
+    assert!(rejected(&h.handle("a", request(201), 1), "a"));
+}
+
+#[test]
+fn match_the_stack_with_small_stacks_is_the_tables_maximum() {
+    assert_eq!(
+        MatchStack {
+            percent: 80,
+            cap: 500
+        }
+        .most(200, 100),
+        200
+    );
+    assert_eq!(
+        MatchStack {
+            percent: 80,
+            cap: 500
+        }
+        .most(200, 300),
+        240
+    );
+    assert_eq!(
+        MatchStack {
+            percent: 100,
+            cap: 500
+        }
+        .most(200, 900),
+        500
+    );
+    // A club table where everyone has 200 or less.
+    let mut h = club(0);
+    h.set_match_stack(Some(MatchStack {
+        percent: 100,
+        cap: 1000,
+    }))
+    .unwrap();
+    for (c, n, seat) in [("a", "Ann", 0), ("b", "Bo", 1)] {
+        h.handle(c, join(n), 0);
+        h.handle(c, request(150), 0);
+        h.approve_chips(seat, 0);
+    }
+    assert_eq!(h.buy_in_max(), Some(200));
+    h.handle("c", join("Cy"), 1);
+    assert!(rejected(&h.handle("c", request(201), 1), "c"));
+    assert!(!rejected(&h.handle("c", request(200), 1), "c"));
+}
+
+#[test]
+fn match_the_stack_needs_a_bank_a_share_and_a_cap_over_the_maximum() {
+    let mut h = club(0);
+    let set =
+        |h: &mut TableHost, percent, cap| h.set_match_stack(Some(MatchStack { percent, cap }));
+    assert!(set(&mut h, 0, 500).is_err());
+    assert!(set(&mut h, 101, 500).is_err());
+    assert!(set(&mut h, 100, 199).is_err(), "under the maximum");
+    assert!(set(&mut h, 100, 200).is_ok());
+    assert!(h.set_match_stack(None).is_ok());
+    assert_eq!(h.match_stack(), None);
+    assert!(set(&mut host(0), 100, 500).is_err(), "no bank");
+}
+
+#[test]
+fn match_the_stack_is_saved_with_the_table() {
+    let mut h = matching(80, 5000);
+    h.handle("a", join("Ann"), 0);
+    let snap = h.snapshot(1);
+    let back = TableHost::restore(&snap, 1, |_| None).unwrap();
+    assert_eq!(
+        back.match_stack(),
+        Some(MatchStack {
+            percent: 80,
+            cap: 5000
+        })
+    );
+    assert_eq!(back.buy_in_max(), Some(800));
 }
 
 /// `e` with its seat (a hand index) moved by `rot`.
