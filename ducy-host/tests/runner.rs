@@ -4,7 +4,8 @@
 
 use ducy_host::runner::{
     ASK_MS, Action, Event, FAIR_STEP_MS, FAIR_WAIT_MS, HostCommand, IDLE_MS, PlayerCommand,
-    RESUME_GRACE_MS, RunnerConfig, RunnerUpdate, Step, TableResult, TableRunner,
+    RESUME_GRACE_MS, RotationGame, RunnerConfig, RunnerUpdate, Step, TableResult, TableRunner,
+    rotation_at,
 };
 use ducy_host::{Command, TableHost};
 use ducy_play::fair_deal::{Reveal, hand_seed};
@@ -648,6 +649,101 @@ fn the_host_plays_their_own_seat() {
             .any(|a| matches!(a, Action::Refused { .. })),
         to_act != 0
     );
+}
+
+fn rotation() -> Vec<RotationGame> {
+    vec![
+        RotationGame {
+            game: "nlhe".into(),
+            rules: TableRules::no_limit_holdem(1, 2),
+            hands: 2,
+        },
+        RotationGame {
+            game: "plo4".into(),
+            rules: TableRules::pot_limit_omaha(1, 2),
+            hands: 2,
+        },
+    ]
+}
+
+#[test]
+fn rotation_at_counts_hands_from_the_first() {
+    let r = rotation();
+    let at: Vec<_> = (1..=5).map(|n| rotation_at(&r, n)).collect();
+    assert_eq!(
+        at,
+        [
+            Some((0, 2)),
+            Some((0, 1)),
+            Some((1, 2)),
+            Some((1, 1)),
+            Some((0, 2))
+        ]
+    );
+    assert_eq!(rotation_at(&[], 1), None);
+}
+
+#[test]
+fn a_rotation_deals_two_of_each_game_in_turn_with_the_same_blinds() {
+    let mut r = runner(
+        0,
+        RunnerConfig {
+            rotation: rotation(),
+            next_hand_ms: 100,
+            ..RunnerConfig::default()
+        },
+    );
+    sit(&mut r, "a", 0, true, 0);
+    let mut step = sit(&mut r, "b", 1, true, 0);
+    let mut now = 0;
+    let mut seen = Vec::new();
+    let mut games = Vec::new();
+    for _ in 0..6 {
+        let (t, s) = run_until(&mut r, step.wake, now + 60_000, |s| {
+            results(s).iter().any(|res| res.seed.is_some())
+        })
+        .expect("dealt");
+        let view = &results(&s).last().unwrap().state;
+        seen.push((
+            view.hand_number,
+            view.hole_cards,
+            view.pot_limit,
+            view.small_blind,
+            view.big_blind,
+        ));
+        now = t + 1000;
+        step = play_out(&mut r, &["a", "b", "", ""], now);
+        // Each dealt player's fair-deal result names the hand's game.
+        games.extend(sends(&step).into_iter().filter_map(|(to, u)| match u {
+            RunnerUpdate::FairResult(f) if to == "a" => Some((f.hand, f.game.clone())),
+            _ => None,
+        }));
+    }
+    assert_eq!(
+        seen,
+        [
+            (1, 2, false, 1, 2),
+            (2, 2, false, 1, 2),
+            (3, 4, true, 1, 2),
+            (4, 4, true, 1, 2),
+            (5, 2, false, 1, 2),
+            (6, 2, false, 1, 2),
+        ]
+    );
+    assert_eq!(
+        games,
+        [
+            (1, "nlhe".to_string()),
+            (2, "nlhe".to_string()),
+            (3, "plo4".to_string()),
+            (4, "plo4".to_string()),
+            (5, "nlhe".to_string()),
+            (6, "nlhe".to_string()),
+        ]
+    );
+    // No chips made or lost along the way.
+    let chips: u64 = r.host().seated().iter().map(|p| p.chips).sum();
+    assert_eq!(chips, 200);
 }
 
 #[test]

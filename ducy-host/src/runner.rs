@@ -17,7 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ducy_play::fair_deal::{Bytes32, Reveal, hand_seed};
-use ducy_play::{PlayError, TableView};
+use ducy_play::{PlayError, TableRules, TableView};
 
 use crate::{ChipRequest, Command, Departure, Outgoing, Refund, SeatedPlayer, TableHost, Update};
 
@@ -318,6 +318,37 @@ pub struct Step {
     pub deal_at: Option<u64>,
 }
 
+/// One game of a rotation: the table plays `hands` hands of it, then the
+/// next game's, and after the last the first again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RotationGame {
+    /// Its name ("nlhe", "plo4", …), for fair-deal results.
+    pub game: String,
+    /// Its rules.
+    pub rules: TableRules,
+    /// How many hands of it in a row; 0 counts as 1.
+    pub hands: u64,
+}
+
+/// The game of `rotation` that hand `hand` (1 for the table's first) is
+/// dealt in, by its place in the list, and how many hands of it are left
+/// counting that one. `None` without a rotation.
+pub fn rotation_at(rotation: &[RotationGame], hand: u64) -> Option<(usize, u64)> {
+    let total: u64 = rotation.iter().map(|g| g.hands.max(1)).sum();
+    if total == 0 {
+        return None;
+    }
+    let mut at = hand.saturating_sub(1) % total;
+    for (i, g) in rotation.iter().enumerate() {
+        let n = g.hands.max(1);
+        if at < n {
+            return Some((i, n - at));
+        }
+        at -= n;
+    }
+    None
+}
+
 /// How a runner starts.
 #[derive(Clone, Debug)]
 pub struct RunnerConfig {
@@ -325,6 +356,10 @@ pub struct RunnerConfig {
     pub id: String,
     /// The game, for fair-deal results.
     pub game: String,
+    /// A game rotation: before each deal the table takes the rules of the
+    /// game the hand is in, by its hand number, so a restored table carries
+    /// on where it was. Empty: the table's own rules, always.
+    pub rotation: Vec<RotationGame>,
     /// The table deals new hands (false: closing).
     pub open: bool,
     /// The host can reach the relay.
@@ -348,6 +383,7 @@ impl Default for RunnerConfig {
         Self {
             id: String::new(),
             game: "nlhe".to_string(),
+            rotation: Vec::new(),
             open: true,
             link: true,
             paused: false,
@@ -398,6 +434,7 @@ pub struct TableRunner {
     host: TableHost,
     id: String,
     game: String,
+    rotation: Vec<RotationGame>,
     idle_ms: u64,
     ask_ms: u64,
     next_hand_ms: u64,
@@ -436,6 +473,7 @@ impl TableRunner {
             host,
             id: config.id,
             game: config.game,
+            rotation: config.rotation,
             idle_ms: config.idle_ms,
             ask_ms: config.ask_ms,
             next_hand_ms: config.next_hand_ms,
@@ -763,19 +801,26 @@ impl TableRunner {
             self.due.deal = Some(self.now + FAIR_RETRY_MS);
             return;
         }
+        let t = self.time();
+        let switched = self.rotate(t);
         let round = self.round.take();
         // A picked seed replaces the round's, and its hand gets no results.
         let picked = self.pick.as_mut().and_then(|p| p(&self.host));
         let round = if picked.is_some() { None } else { round };
         let seed = picked.or(round.as_ref().and_then(|f| f.seed));
-        let t = self.time();
         // If people left meanwhile the engine refuses; the next change
         // (someone sitting down, chips) tries again.
         let res: Result<Vec<Outgoing>, PlayError> = match &seed {
             Some(s) => self.host.new_hand_from_seed(t, s),
             None => self.host.new_hand(t),
         };
-        let Ok(out) = res else { return };
+        let Ok(out) = res else {
+            // Everyone still sees the game the next hand will be.
+            if !switched.is_empty() {
+                self.took(switched, None);
+            }
+            return;
+        };
         if let (Some(f), Some(seed)) = (round, seed) {
             // Who was dealt in: the players whose view came with their own
             // cards (someone sitting out isn't).
@@ -807,6 +852,29 @@ impl TableRunner {
         self.took(out, Some(seed));
         // The round for the hand after this one runs while this one is played.
         self.fair_start();
+    }
+
+    /// With a rotation, the table takes the rules of the next hand's game.
+    /// Returns everyone's new view if they changed.
+    fn rotate(&mut self, t: u64) -> Vec<Outgoing> {
+        let next = self.host.table().hand_number() + 1;
+        let Some((i, _)) = rotation_at(&self.rotation, next) else {
+            return Vec::new();
+        };
+        let g = &self.rotation[i];
+        let (game, rules) = (g.game.clone(), g.rules);
+        if *self.host.table().rules() == rules {
+            self.game = game;
+            return Vec::new();
+        }
+        match self.host.set_rules(rules, t) {
+            Ok(out) => {
+                self.game = game;
+                out
+            }
+            // Rules the table refuses: it keeps its own.
+            Err(_) => Vec::new(),
+        }
     }
 
     // ---- fair deals ----
