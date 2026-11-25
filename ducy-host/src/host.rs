@@ -286,6 +286,29 @@ struct Bank {
     max: u64,
 }
 
+/// "Match the stack" at a table with a bank ([`TableHost::set_match_stack`]):
+/// a stack after a request may reach a share of the biggest stack at the
+/// table when that's more than the table's maximum, never more than `cap`.
+/// The most is then `min(cap, max(maximum, percent% of the biggest stack))`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct MatchStack {
+    /// The share of the biggest stack, 1 to 100 percent.
+    pub percent: u32,
+    /// The most anyone may have after a request, however big the stacks get:
+    /// at least the table's maximum.
+    pub cap: u64,
+}
+
+impl MatchStack {
+    /// The most a stack may reach after a request at a table whose maximum is
+    /// `max`, with `biggest` the biggest stack there.
+    pub fn most(&self, max: u64, biggest: u64) -> u64 {
+        let share = (u128::from(biggest) * u128::from(self.percent) / 100) as u64;
+        self.cap.min(max.max(share))
+    }
+}
+
 /// Hands a disconnected person can miss before they're removed.
 pub const DROP_AFTER_HANDS: u32 = 3;
 
@@ -318,6 +341,11 @@ pub struct TableHost {
     /// Each seat's id when its bot plays it.
     bot_ids: Vec<String>,
     bank: Option<Bank>,
+    /// Match the stack, with a bank.
+    match_stack: Option<MatchStack>,
+    /// The biggest stack of the people seated, as of the last time no hand
+    /// was in play: what match the stack matches.
+    biggest: u64,
     /// The host's own chips approved during a hand they're in.
     host_approved: u64,
     /// Whether seat 0 is the host's (see [`Self::without_host`]).
@@ -381,6 +409,8 @@ impl TableHost {
             turn: None,
             bot_ids,
             bank: None,
+            match_stack: None,
+            biggest: 0,
             host_approved: 0,
             has_host,
             departed: Vec::new(),
@@ -415,6 +445,53 @@ impl TableHost {
     /// The buy-in limits, with a bank.
     pub fn buy_in_limits(&self) -> Option<(u64, u64)> {
         self.bank.map(|b| (b.min, b.max))
+    }
+
+    /// Match the stack (see [`MatchStack`]), or `None` for the table's own
+    /// maximum. Needs a bank, a share of 1 to 100 percent and a cap of at
+    /// least the maximum.
+    pub fn set_match_stack(&mut self, m: Option<MatchStack>) -> Result<(), PlayError> {
+        if let Some(m) = m {
+            let bank = self.bank.ok_or(PlayError::InvalidSetup)?;
+            if m.percent == 0 || m.percent > 100 || m.cap < bank.max {
+                return Err(PlayError::InvalidSetup);
+            }
+        }
+        self.match_stack = m;
+        self.note_biggest();
+        Ok(())
+    }
+
+    /// Match the stack, if the table has it.
+    pub fn match_stack(&self) -> Option<MatchStack> {
+        self.match_stack
+    }
+
+    /// The most a stack may reach after a request now, with a bank: the
+    /// maximum, or with match the stack, what the biggest stack allows.
+    pub fn buy_in_max(&self) -> Option<u64> {
+        let bank = self.bank?;
+        Some(
+            self.match_stack
+                .map_or(bank.max, |m| m.most(bank.max, self.biggest)),
+        )
+    }
+
+    /// Takes the biggest stack of the people seated (the host's seat too,
+    /// when there is one), between hands.
+    fn note_biggest(&mut self) {
+        if self.table.in_hand() {
+            return;
+        }
+        let host = self.has_host.then(|| self.table.stack(0));
+        self.biggest = self
+            .players
+            .iter()
+            .filter(|p| !p.pending)
+            .map(|p| self.table.stack(p.seat))
+            .chain(host)
+            .max()
+            .unwrap_or(0);
     }
 
     /// Requests for chips waiting for the host, oldest seat first.
@@ -494,8 +571,9 @@ impl TableHost {
     /// Whether a stack of `stack` may ask for `amount` more.
     fn check_request(&self, stack: u64, amount: u64) -> Result<(), PlayError> {
         let bank = self.bank.ok_or(PlayError::IllegalAction)?;
+        let most = self.buy_in_max().unwrap_or(bank.max);
         let after = stack + amount;
-        if amount == 0 || after < bank.min || after > bank.max {
+        if amount == 0 || after < bank.min || after > most {
             return Err(PlayError::IllegalAction);
         }
         Ok(())
@@ -654,6 +732,8 @@ impl TableHost {
             turn: self.turn,
             bot_ids: self.bot_ids.clone(),
             bank: self.bank.map(|b| (b.min, b.max)),
+            match_stack: self.match_stack,
+            biggest: self.biggest,
             host_approved: self.host_approved,
             has_host: self.has_host,
             departed: self.departed.clone(),
@@ -686,6 +766,11 @@ impl TableHost {
             Some((min, max)) if min == 0 || max < min => return Err(bad),
             b => b.map(|(min, max)| Bank { min, max }),
         };
+        let match_stack = match (s.match_stack, bank) {
+            (None, _) => None,
+            (Some(m), Some(b)) if (1..=100).contains(&m.percent) && m.cap >= b.max => Some(m),
+            _ => return Err(bad),
+        };
         let players = s
             .players
             .iter()
@@ -716,6 +801,8 @@ impl TableHost {
             turn: s.turn,
             bot_ids: s.bot_ids.clone(),
             bank,
+            match_stack,
+            biggest: s.biggest,
             host_approved: s.host_approved,
             has_host: s.has_host,
             departed: s.departed.clone(),
@@ -899,13 +986,14 @@ impl TableHost {
                 if amount > 0 {
                     let stack = self.table.stack(p.seat) + p.approved;
                     if self.check_request(stack, amount).is_err() {
-                        let reason = if stack >= bank.max {
-                            format!("you already have the most allowed ({} chips)", bank.max)
+                        let most = self.buy_in_max().unwrap_or(bank.max);
+                        let reason = if stack >= most {
+                            format!("you already have the most allowed ({most} chips)")
                         } else {
                             format!(
                                 "ask for {} to {} chips",
                                 bank.min.saturating_sub(stack).max(1),
-                                bank.max - stack
+                                most - stack
                             )
                         };
                         return reject(&reason);
@@ -1202,6 +1290,8 @@ impl TableHost {
         {
             self.release_seat(i);
         }
+        // The stacks the next hand starts with, before any top-ups.
+        self.note_biggest();
         // Chips approved during the last hand, up to the table maximum: a
         // player may have won chips since asking. What doesn't fit is handed
         // back (a Refund); the host's own chips come from nowhere, so theirs
@@ -1354,10 +1444,10 @@ impl TableHost {
     /// How much of `chips` fits on `seat`'s stack under the maximum (with a
     /// bank; all of it without), and how much is over.
     fn fit(&self, seat: usize, chips: u64) -> (u64, u64) {
-        let Some(bank) = self.bank else {
+        let Some(most) = self.buy_in_max() else {
             return (chips, 0);
         };
-        let fits = chips.min(bank.max.saturating_sub(self.table.stack(seat)));
+        let fits = chips.min(most.saturating_sub(self.table.stack(seat)));
         (fits, chips - fits)
     }
 
@@ -1436,6 +1526,7 @@ impl TableHost {
                 self.release_seat(i);
             }
         }
+        self.note_biggest();
         // A hidden hand at showdown doesn't wait for anyone who can't show,
         // and running it twice is settled once everyone has chosen.
         self.forfeit_absent();
@@ -1497,9 +1588,10 @@ impl TableHost {
                     view.seats[0].cards = None;
                     view.legal = None;
                 }
+                let most = self.buy_in_max();
                 let chips = self.bank.map(|b| ChipsView {
                     min: b.min,
-                    max: b.max,
+                    max: most.unwrap_or(b.max),
                     requested: p.requested,
                     approved: p.approved,
                 });
